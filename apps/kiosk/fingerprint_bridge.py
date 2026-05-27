@@ -47,7 +47,10 @@ def hardware_loop():
     baudrate = int(os.environ.get("FINGERPRINT_BAUDRATE", "57600"))
     poll_seconds = float(os.environ.get("FINGERPRINT_POLL_SECONDS", "0.1"))
     repeat_delay_seconds = float(os.environ.get("FINGERPRINT_REPEAT_DELAY_SECONDS", "2"))
+    debounce_seconds = float(os.environ.get("FINGERPRINT_DEBOUNCE_SECONDS", "8"))
     slot_map = load_slot_map()
+    last_match = None
+    last_match_at = 0.0
 
     uart = serial.Serial(port, baudrate=baudrate, timeout=2)
     finger = adafruit_fingerprint.Adafruit_Fingerprint(uart)
@@ -70,7 +73,11 @@ def hardware_loop():
         if finger.finger_search() == adafruit_fingerprint.OK:
             slot = int(finger.finger_id)
             student_id = slot_map.get(slot, str(slot))
-            emit(f"MATCH:{student_id},{slot}")
+            now = time.monotonic()
+            if last_match != slot or now - last_match_at >= debounce_seconds:
+                emit(f"MATCH:{student_id},{slot}")
+                last_match = slot
+                last_match_at = now
 
         time.sleep(repeat_delay_seconds)
 
