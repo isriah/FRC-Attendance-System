@@ -83,6 +83,8 @@ For local development only, if no Google client ID is configured, the dashboard 
 
 ## Pi User Services
 
+For a fresh Pi, prefer the full setup guide in `docs/PI-SETUP.md`.
+
 For bench testing without sudo, install user-level systemd services:
 
 ```bash
