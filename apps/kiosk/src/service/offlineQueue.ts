@@ -30,6 +30,10 @@ export class OfflineQueue {
         deleted_at TEXT,
         PRIMARY KEY (student_id, template_slot)
       );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS local_enrollments_active_slot_idx
+      ON local_enrollments(template_slot)
+      WHERE deleted_at IS NULL;
     `);
   }
 

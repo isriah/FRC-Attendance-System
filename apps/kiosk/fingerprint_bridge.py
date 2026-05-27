@@ -11,8 +11,8 @@ import time
 # MATCH:<student_id>,<template_slot>
 #
 # Fingerprint templates stay on the sensor. This bridge maps template slots to
-# student IDs using FINGERPRINT_SLOT_MAP, for example:
-# FINGERPRINT_SLOT_MAP='{"1":"100001","2":"100002"}'
+# student IDs from the local kiosk SQLite database. Environment mappings are
+# still supported as an override for quick bench tests.
 
 
 def emit(line: str):
@@ -21,10 +21,26 @@ def emit(line: str):
 
 def load_slot_map():
     import json
+    import sqlite3
 
     raw = os.environ.get("FINGERPRINT_SLOT_MAP", "{}")
     parsed = json.loads(raw)
     slot_map = {int(slot): str(student_id) for slot, student_id in parsed.items()}
+
+    db_path = os.environ.get("FINGERPRINT_ENROLLMENT_DB_PATH") or os.environ.get("KIOSK_DB_PATH")
+    if db_path:
+        try:
+            with sqlite3.connect(db_path) as db:
+                rows = db.execute(
+                    """
+                    SELECT template_slot, student_id
+                    FROM local_enrollments
+                    WHERE deleted_at IS NULL
+                    """
+                ).fetchall()
+            slot_map.update({int(slot): str(student_id) for slot, student_id in rows})
+        except Exception as exc:
+            print(f"Could not load enrollment DB mapping: {exc}", file=sys.stderr, flush=True)
 
     prefix = "FINGERPRINT_SLOT_"
     for key, value in os.environ.items():
@@ -55,7 +71,6 @@ def hardware_loop():
     poll_seconds = float(os.environ.get("FINGERPRINT_POLL_SECONDS", "0.1"))
     repeat_delay_seconds = float(os.environ.get("FINGERPRINT_REPEAT_DELAY_SECONDS", "2"))
     debounce_seconds = float(os.environ.get("FINGERPRINT_DEBOUNCE_SECONDS", "8"))
-    slot_map = load_slot_map()
     last_match = None
     last_match_at = 0.0
 
@@ -81,6 +96,7 @@ def hardware_loop():
 
                 if finger.finger_search() == adafruit_fingerprint.OK:
                     slot = int(finger.finger_id)
+                    slot_map = load_slot_map()
                     student_id = slot_map.get(slot, str(slot))
                     now = time.monotonic()
                     if last_match != slot or now - last_match_at >= debounce_seconds:

@@ -72,7 +72,6 @@ For local development only, if no Google client ID is configured, the dashboard 
    FINGERPRINT_SERIAL_PORT=/dev/serial0
    FINGERPRINT_BAUDRATE=57600
    FINGERPRINT_DEBOUNCE_SECONDS=8
-   FINGERPRINT_SLOT_MAP='{"1":"100001"}'
    ```
 
 4. Run the kiosk service:
@@ -123,10 +122,18 @@ STAT:OFFLINE
 MATCH:<student_id>,<template_slot>
 ```
 
-For bench testing, enroll a finger into slot `1`, map it to a fake student ID, and run:
+For bench testing, enroll or map a finger into slot `1`:
 
 ```bash
-FINGERPRINT_SLOT_MAP='{"1":"100001"}' \
+npm --workspace @frc-attendance/kiosk run fingerprint:map -- \
+  --student-id 100001 \
+  --slot 1 \
+  --db apps/kiosk/kiosk-cache.sqlite
+```
+
+Then run:
+
+```bash
 KIOSK_ID=bench-01 \
 KIOSK_TOKEN=dev-token \
 API_BASE_URL=http://localhost:8787 \

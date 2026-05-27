@@ -10,7 +10,6 @@ Environment=KIOSK_ID=bench-01
 Environment=KIOSK_TOKEN=dev-token
 Environment=API_BASE_URL=http://localhost:8787
 Environment=KIOSK_DB_PATH=%h/FRC-Attendance-System/apps/kiosk/kiosk-cache.sqlite
-Environment=FINGERPRINT_SLOT_1=100001
 Environment=FINGERPRINT_SERIAL_PORT=/dev/serial0
 Environment=FINGERPRINT_BAUDRATE=57600
 Environment=FINGERPRINT_DEBOUNCE_SECONDS=8

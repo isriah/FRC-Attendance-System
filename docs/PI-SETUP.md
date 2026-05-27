@@ -113,29 +113,50 @@ journalctl --user -u frc-kiosk-service -f
 
 ## 8. Bench Fingerprint Mapping
 
-For bench testing, the default service maps:
+Fingerprint templates stay on the sensor. The kiosk SQLite DB stores only the mapping from sensor template slot to Student ID.
+
+To enroll a new finger into slot `1` and map it to student `100001`:
+
+```bash
+cd ~/FRC-Attendance-System
+npm --workspace @frc-attendance/kiosk run fingerprint:enroll -- \
+  --student-id 100001 \
+  --slot 1 \
+  --finger-label right-index \
+  --db apps/kiosk/kiosk-cache.sqlite
+```
+
+To map an already-enrolled slot without touching the sensor:
+
+```bash
+npm --workspace @frc-attendance/kiosk run fingerprint:map -- \
+  --student-id 100001 \
+  --slot 1 \
+  --finger-label right-index \
+  --db apps/kiosk/kiosk-cache.sqlite
+```
+
+For the original bench test, slot `1` maps to:
 
 ```text
 template slot 1 -> student 100001
 ```
 
-The mapping is configured in:
+The mapping is stored in:
 
 ```text
-apps/kiosk/systemd/frc-kiosk-service.service
+apps/kiosk/kiosk-cache.sqlite
 ```
 
-Change or add slots with environment variables:
+The service reads this DB path from:
 
 ```ini
-Environment=FINGERPRINT_SLOT_1=100001
-Environment=FINGERPRINT_SLOT_2=100002
+Environment=KIOSK_DB_PATH=%h/FRC-Attendance-System/apps/kiosk/kiosk-cache.sqlite
 ```
 
-Then reload and restart:
+After changing enrollment mappings, restart the service:
 
 ```bash
-systemctl --user daemon-reload
 systemctl --user restart frc-kiosk-service
 ```
 
