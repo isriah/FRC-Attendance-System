@@ -1,0 +1,15 @@
+[Unit]
+Description=FRC Attendance kiosk UI dev server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/FRC-Attendance-System
+Environment=HOST=0.0.0.0
+ExecStart=/bin/bash -lc 'source %h/.nvm/nvm.sh; nvm use 22 >/dev/null; npm --workspace @frc-attendance/kiosk run dev -- --host 0.0.0.0'
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

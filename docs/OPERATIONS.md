@@ -81,6 +81,35 @@ For local development only, if no Google client ID is configured, the dashboard 
    npm --workspace @frc-attendance/kiosk run service
    ```
 
+## Pi User Services
+
+For bench testing without sudo, install user-level systemd services:
+
+```bash
+cd ~/FRC-Attendance-System
+bash apps/kiosk/scripts/install-user-services.sh
+```
+
+This installs and starts:
+
+- `frc-bench-api.service`: lightweight local API on `http://localhost:8787`.
+- `frc-kiosk-service.service`: fingerprint bridge and offline queue sync.
+- `frc-kiosk-ui.service`: kiosk UI dev server on `http://localhost:5173`.
+
+Useful commands:
+
+```bash
+systemctl --user status frc-bench-api frc-kiosk-service frc-kiosk-ui
+journalctl --user -u frc-kiosk-service -f
+systemctl --user restart frc-kiosk-service
+```
+
+To keep user services running after logout, run this once with sudo:
+
+```bash
+sudo loginctl enable-linger attkiosk
+```
+
 ## Fingerprint Reader Integration
 
 The central backend never stores biometric templates. The kiosk bridge now talks to the R503-compatible reader through the Adafruit fingerprint library and emits only:

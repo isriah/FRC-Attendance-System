@@ -1,0 +1,16 @@
+[Unit]
+Description=FRC Attendance lightweight bench API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/FRC-Attendance-System
+Environment=PORT=8787
+Environment=BENCH_DB_PATH=%h/FRC-Attendance-System/apps/api/bench-api.sqlite
+ExecStart=/bin/bash -lc 'source %h/.nvm/nvm.sh; nvm use 22 >/dev/null; npm --workspace @frc-attendance/api run dev:bench'
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
