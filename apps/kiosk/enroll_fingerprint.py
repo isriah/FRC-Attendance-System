@@ -2,6 +2,7 @@ import argparse
 import sqlite3
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 
 import serial
 import adafruit_fingerprint
@@ -36,7 +37,10 @@ def enroll_sensor_slot(finger, slot: int):
 
 def save_mapping(db_path: str, student_id: str, slot: int, finger_label: str | None):
     enrolled_at = datetime.now(timezone.utc).isoformat()
-    with sqlite3.connect(db_path) as db:
+    resolved_db_path = resolve_db_path(db_path)
+    resolved_db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with sqlite3.connect(resolved_db_path) as db:
         db.execute("PRAGMA journal_mode = WAL")
         db.execute(
             """
@@ -70,12 +74,28 @@ def save_mapping(db_path: str, student_id: str, slot: int, finger_label: str | N
         )
 
 
+def resolve_db_path(db_path: str) -> Path:
+    path = Path(db_path)
+    if path.is_absolute():
+        return path
+
+    cwd_path = Path.cwd() / path
+    if cwd_path.parent.exists():
+        return cwd_path
+
+    parts = path.parts
+    if len(parts) >= 2 and parts[0] == "apps" and parts[1] == "kiosk" and Path.cwd().name == "kiosk":
+        return Path.cwd() / Path(*parts[2:])
+
+    return cwd_path
+
+
 def main():
     parser = argparse.ArgumentParser(description="Enroll or map an R503 fingerprint slot to a student ID.")
     parser.add_argument("--student-id", required=True)
     parser.add_argument("--slot", required=True, type=int)
     parser.add_argument("--finger-label", default=None)
-    parser.add_argument("--db", default="./apps/kiosk/kiosk-cache.sqlite")
+    parser.add_argument("--db", default="./kiosk-cache.sqlite")
     parser.add_argument("--port", default="/dev/serial0")
     parser.add_argument("--baudrate", default=57600, type=int)
     parser.add_argument("--map-only", action="store_true", help="Only write the slot mapping; do not enroll on sensor.")

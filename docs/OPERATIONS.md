@@ -127,8 +127,7 @@ For bench testing, enroll or map a finger into slot `1`:
 ```bash
 npm --workspace @frc-attendance/kiosk run fingerprint:map -- \
   --student-id 100001 \
-  --slot 1 \
-  --db apps/kiosk/kiosk-cache.sqlite
+  --slot 1
 ```
 
 Then run:

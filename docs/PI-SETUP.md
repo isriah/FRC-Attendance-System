@@ -122,8 +122,7 @@ cd ~/FRC-Attendance-System
 npm --workspace @frc-attendance/kiosk run fingerprint:enroll -- \
   --student-id 100001 \
   --slot 1 \
-  --finger-label right-index \
-  --db apps/kiosk/kiosk-cache.sqlite
+  --finger-label right-index
 ```
 
 To map an already-enrolled slot without touching the sensor:
@@ -132,8 +131,7 @@ To map an already-enrolled slot without touching the sensor:
 npm --workspace @frc-attendance/kiosk run fingerprint:map -- \
   --student-id 100001 \
   --slot 1 \
-  --finger-label right-index \
-  --db apps/kiosk/kiosk-cache.sqlite
+  --finger-label right-index
 ```
 
 For the original bench test, slot `1` maps to:
