@@ -59,34 +59,44 @@ def hardware_loop():
     last_match = None
     last_match_at = 0.0
 
-    uart = serial.Serial(port, baudrate=baudrate, timeout=2)
-    finger = adafruit_fingerprint.Adafruit_Fingerprint(uart)
-
-    if finger.verify_password() != adafruit_fingerprint.OK:
-        emit("STAT:OFFLINE")
-        raise RuntimeError("Fingerprint sensor did not accept password")
-
-    emit("STAT:ONLINE")
-
     while True:
-        if finger.get_image() != adafruit_fingerprint.OK:
-            time.sleep(poll_seconds)
-            continue
+        try:
+            uart = serial.Serial(port, baudrate=baudrate, timeout=2)
+            finger = adafruit_fingerprint.Adafruit_Fingerprint(uart)
 
-        if finger.image_2_tz(1) != adafruit_fingerprint.OK:
-            time.sleep(poll_seconds)
-            continue
+            if finger.verify_password() != adafruit_fingerprint.OK:
+                emit("STAT:OFFLINE")
+                raise RuntimeError("Fingerprint sensor did not accept password")
 
-        if finger.finger_search() == adafruit_fingerprint.OK:
-            slot = int(finger.finger_id)
-            student_id = slot_map.get(slot, str(slot))
-            now = time.monotonic()
-            if last_match != slot or now - last_match_at >= debounce_seconds:
-                emit(f"MATCH:{student_id},{slot}")
-                last_match = slot
-                last_match_at = now
+            emit("STAT:ONLINE")
 
-        time.sleep(repeat_delay_seconds)
+            while True:
+                if finger.get_image() != adafruit_fingerprint.OK:
+                    time.sleep(poll_seconds)
+                    continue
+
+                if finger.image_2_tz(1) != adafruit_fingerprint.OK:
+                    time.sleep(poll_seconds)
+                    continue
+
+                if finger.finger_search() == adafruit_fingerprint.OK:
+                    slot = int(finger.finger_id)
+                    student_id = slot_map.get(slot, str(slot))
+                    now = time.monotonic()
+                    if last_match != slot or now - last_match_at >= debounce_seconds:
+                        emit(f"MATCH:{student_id},{slot}")
+                        last_match = slot
+                        last_match_at = now
+
+                time.sleep(repeat_delay_seconds)
+        except Exception as exc:
+            emit("STAT:OFFLINE")
+            print(f"Fingerprint reader error: {exc}", file=sys.stderr, flush=True)
+            try:
+                uart.close()
+            except Exception:
+                pass
+            time.sleep(2)
 
 
 if __name__ == "__main__":

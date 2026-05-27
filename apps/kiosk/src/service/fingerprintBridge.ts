@@ -22,6 +22,7 @@ export class FingerprintBridge extends EventEmitter {
 
     child.on("exit", (code) => {
       this.emit("bridge-event", { type: "error", message: `fingerprint bridge exited with code ${code}` } satisfies FingerprintBridgeEvent);
+      setTimeout(() => this.start(pythonPath, bridgePath), 2000);
     });
   }
 }
