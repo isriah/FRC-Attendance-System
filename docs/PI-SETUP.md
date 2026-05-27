@@ -111,7 +111,18 @@ View logs:
 journalctl --user -u frc-kiosk-service -f
 ```
 
-## 8. Bench Fingerprint Mapping
+## 8. Minimal Roster Import
+
+For v1, the roster only needs:
+
+```text
+memberId,firstName,lastName
+100001,Bench,Student
+```
+
+Open the dashboard roster tab and paste CSV with those three columns. The central API stores `memberId` as `student_id` for attendance-event compatibility.
+
+## 9. Bench Fingerprint Mapping
 
 Fingerprint templates stay on the sensor. The kiosk SQLite DB stores only the mapping from sensor template slot to Student ID.
 
@@ -158,7 +169,7 @@ After changing enrollment mappings, restart the service:
 systemctl --user restart frc-kiosk-service
 ```
 
-## 9. Update Existing Kiosk
+## 10. Update Existing Kiosk
 
 ```bash
 cd ~/FRC-Attendance-System

@@ -151,6 +151,6 @@ Set `FINGERPRINT_SIMULATE=true` to run without hardware. Repeated matches for th
 
 ## Roster Sync
 
-The member Google Sheet remains authoritative for active students and stable Student IDs. The API currently accepts normalized roster rows at `POST /admin/roster/sync`; the next implementation step is wiring this endpoint to a Google Sheets reader or an Apps Script push.
+The member Google Sheet remains authoritative for active members and stable Member IDs. The API currently accepts normalized roster rows at `POST /admin/roster/sync` with `memberId`, `firstName`, and `lastName`; the next implementation step is wiring this endpoint to a Google Sheets reader or an Apps Script push.
 
 Removed roster entries are deactivated in D1 rather than deleted.

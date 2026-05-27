@@ -11,7 +11,8 @@ body,
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -92,11 +93,29 @@ section,
 }
 
 input,
-select {
+select,
+textarea {
   border: 1px solid #b9c3ce;
   border-radius: 6px;
   padding: 10px 12px;
   background: #ffffff;
+}
+
+textarea {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  font-family: ui-monospace, "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  line-height: 1.45;
+}
+
+.stack {
+  display: grid;
+  gap: 12px;
+}
+
+.compact {
+  margin-bottom: 0;
 }
 
 table {

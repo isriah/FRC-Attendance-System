@@ -117,8 +117,31 @@ function Overview({ session }: { session: DashboardSession }) {
 }
 
 function Roster({ session }: { session: DashboardSession }) {
-  const { data, error } = useApi<{ students: Array<{ student_id: string; first_name: string; last_name: string; active: number }> }>("/admin/students", session);
-  return <Table title="Roster" error={error} rows={data?.students ?? []} columns={["student_id", "first_name", "last_name", "active"]} />;
+  const { data, error, reload } = useApi<{ students: Array<{ student_id: string; first_name: string; last_name: string; active: number }> }>("/admin/students", session);
+  const [importText, setImportText] = useState("memberId,firstName,lastName\n100001,Bench,Student");
+  const [importMessage, setImportMessage] = useState<string>();
+
+  return (
+    <>
+      <section>
+        <h2>Roster Import</h2>
+        <form className="stack" onSubmit={async (event) => {
+          event.preventDefault();
+          const members = parseRosterCsv(importText);
+          await apiPost("/admin/roster/sync", { members }, session);
+          setImportMessage(`Synced ${members.length} members`);
+          reload();
+        }}>
+          <textarea value={importText} onChange={(event) => setImportText(event.target.value)} rows={8} />
+          <div className="toolbar compact">
+            <button>Sync roster</button>
+            {importMessage ? <span>{importMessage}</span> : null}
+          </div>
+        </form>
+      </section>
+      <Table title="Roster" error={error} rows={data?.students ?? []} columns={["student_id", "first_name", "last_name", "active"]} />
+    </>
+  );
 }
 
 function Kiosks({ session }: { session: DashboardSession }) {
@@ -218,6 +241,60 @@ function useApi<T>(path: string, session: DashboardSession) {
     apiGet<T>(path, session).then(setData, (err) => setError(err instanceof Error ? err.message : String(err)));
   }, [path, session, nonce]);
   return { data, error, reload: () => setNonce((value) => value + 1) };
+}
+
+function parseRosterCsv(text: string) {
+  const rows = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map(parseCsvLine);
+  if (rows.length === 0) throw new Error("Roster import is empty");
+
+  const firstRow = rows[0];
+  if (!firstRow) throw new Error("Roster import is empty");
+
+  const header = firstRow.map((cell) => cell.trim().toLowerCase());
+  const hasHeader = ["memberid", "member id", "studentid", "student id", "id"].some((name) => header.includes(name));
+  const dataRows = hasHeader ? rows.slice(1) : rows;
+  const idIndex = hasHeader ? findHeaderIndex(header, ["memberid", "member id", "studentid", "student id", "id"]) : 0;
+  const firstIndex = hasHeader ? findHeaderIndex(header, ["firstname", "first name", "first"]) : 1;
+  const lastIndex = hasHeader ? findHeaderIndex(header, ["lastname", "last name", "last"]) : 2;
+
+  return dataRows.map((row, index) => {
+    const memberId = row[idIndex]?.trim();
+    const firstName = row[firstIndex]?.trim();
+    const lastName = row[lastIndex]?.trim();
+    if (!memberId || !firstName || !lastName) throw new Error(`Roster row ${index + 1} must include member ID, first name, and last name`);
+    return { memberId, firstName, lastName };
+  });
+}
+
+function findHeaderIndex(header: string[], names: string[]) {
+  const index = header.findIndex((cell) => names.includes(cell));
+  if (index === -1) throw new Error(`Missing roster column: ${names[0]}`);
+  return index;
+}
+
+function parseCsvLine(line: string) {
+  const cells: string[] = [];
+  let cell = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i += 1) {
+    const char = line[i];
+    const next = line[i + 1];
+    if (char === "\"" && next === "\"") {
+      cell += "\"";
+      i += 1;
+    } else if (char === "\"") {
+      inQuotes = !inQuotes;
+    } else if (char === "," && !inQuotes) {
+      cells.push(cell);
+      cell = "";
+    } else {
+      cell += char;
+    }
+  }
+
+  cells.push(cell);
+  return cells;
 }
 
 createRoot(document.getElementById("root")!).render(<App />);

@@ -4,7 +4,7 @@ import { addManualEvent, syncKioskEvents } from "./attendanceStore";
 import type { Env } from "./env";
 import { buildLegacySheetExport } from "./export";
 import { errorResponse, json, noContent, optionsResponse, readJson } from "./http";
-import { syncRoster, type RosterStudentInput } from "./roster";
+import { syncRoster, type RosterMemberInput } from "./roster";
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -25,8 +25,8 @@ export default {
 
       if (route === "POST /admin/roster/sync") {
         await requireAdmin(request, env);
-        const body = await readJson<{ students: RosterStudentInput[] }>(request);
-        return json(await syncRoster(env, body.students));
+        const body = await readJson<{ members: RosterMemberInput[] }>(request);
+        return json(await syncRoster(env, body.members));
       }
 
       if (route === "GET /admin/students") {

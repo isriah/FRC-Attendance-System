@@ -74,6 +74,19 @@ const server = createServer(async (request, response) => {
       return;
     }
 
+    if (request.method === "GET" && request.url === "/admin/students") {
+      const students = db.prepare("SELECT student_id, first_name, last_name, active FROM students ORDER BY last_name, first_name").all();
+      sendJson(response, 200, { students });
+      return;
+    }
+
+    if (request.method === "POST" && request.url === "/admin/roster/sync") {
+      const body = await readBody<{ members: Array<{ memberId: string; firstName: string; lastName: string }> }>(request);
+      const result = syncRoster(body.members);
+      sendJson(response, 200, result);
+      return;
+    }
+
     sendJson(response, 404, { error: "Not found" });
   } catch (error) {
     const status = typeof error === "object" && error !== null && "status" in error ? Number((error as { status: number }).status) : 500;
@@ -94,6 +107,32 @@ async function requireKiosk(authHeader: string | undefined): Promise<string> {
   if (!row) throw httpError(401, "Invalid kiosk token");
   db.prepare("UPDATE kiosks SET last_seen_at = ? WHERE kiosk_id = ?").run(new Date().toISOString(), row.kiosk_id);
   return row.kiosk_id;
+}
+
+function syncRoster(members: Array<{ memberId: string; firstName: string; lastName: string }>) {
+  const seen = new Set<string>();
+  const upsert = db.prepare(`
+    INSERT INTO students (student_id, first_name, last_name, active)
+    VALUES (?, ?, ?, 1)
+    ON CONFLICT(student_id) DO UPDATE SET
+      first_name = excluded.first_name,
+      last_name = excluded.last_name,
+      active = 1
+  `);
+
+  const transaction = db.transaction(() => {
+    for (const member of members) {
+      seen.add(member.memberId);
+      upsert.run(member.memberId, member.firstName, member.lastName);
+    }
+    if (members.length > 0) {
+      const deactivateMissing = db.prepare(`UPDATE students SET active = 0 WHERE student_id NOT IN (${members.map(() => "?").join(",")})`);
+      deactivateMissing.run(...members.map((member) => member.memberId));
+    }
+  });
+  transaction();
+
+  return { synced: seen.size, deactivatedMissingStudents: members.length > 0 };
 }
 
 function syncKioskEvents(kioskId: string, body: KioskSyncRequest) {
