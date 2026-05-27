@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Build outputs
+dist/
+build/
+coverage/
+
+# Local Cloudflare/Wrangler state and secrets
+.wrangler/
+.dev.vars
+
+# Local kiosk databases
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+
+# Logs and local env files
+*.log
+.env
+.env.*
+!.env.example
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
