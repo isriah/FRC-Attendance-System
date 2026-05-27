@@ -24,7 +24,14 @@ def load_slot_map():
 
     raw = os.environ.get("FINGERPRINT_SLOT_MAP", "{}")
     parsed = json.loads(raw)
-    return {int(slot): str(student_id) for slot, student_id in parsed.items()}
+    slot_map = {int(slot): str(student_id) for slot, student_id in parsed.items()}
+
+    prefix = "FINGERPRINT_SLOT_"
+    for key, value in os.environ.items():
+        if key.startswith(prefix) and key[len(prefix):].isdigit():
+            slot_map[int(key[len(prefix):])] = str(value)
+
+    return slot_map
 
 
 def simulate_loop():
