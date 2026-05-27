@@ -25,21 +25,27 @@
 
 ## Local API Bench Test
 
-To run the central API locally on the Pi or a laptop:
+Wrangler's local D1 emulator can be heavy on Raspberry Pi. For hardware bench testing, use the lightweight local API instead:
+
+```bash
+npm --workspace @frc-attendance/api run dev:bench
+```
+
+It listens on `http://localhost:8787` and seeds:
+
+- student `100001`
+- kiosk `bench-01`
+- kiosk token `dev-token`
+
+With that API running, the bench kiosk service command below should sync queued scans instead of reporting `fetch failed`.
+
+To run the real Cloudflare Worker locally on a laptop:
 
 ```bash
 npm --workspace @frc-attendance/api run db:migrate:local
 npx wrangler d1 execute frc-attendance --local --file apps/api/seed-local.sql
 npm --workspace @frc-attendance/api run dev
 ```
-
-The seed file creates:
-
-- student `100001`
-- kiosk `bench-01`
-- kiosk token `dev-token`
-
-With the API running at `http://localhost:8787`, the bench kiosk service command below should sync queued scans instead of reporting `fetch failed`.
 
 ## Dashboard
 
