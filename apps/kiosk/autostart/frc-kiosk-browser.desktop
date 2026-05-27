@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=FRC Attendance Kiosk Browser
+Comment=Open the attendance kiosk UI in Chromium kiosk mode
+Exec=/usr/bin/chromium --kiosk --noerrdialogs --disable-infobars --disable-session-crashed-bubble http://localhost:5173
+Terminal=false
+X-GNOME-Autostart-enabled=true

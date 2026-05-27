@@ -88,6 +88,7 @@ For bench testing without sudo, install user-level systemd services:
 ```bash
 cd ~/FRC-Attendance-System
 bash apps/kiosk/scripts/install-user-services.sh
+bash apps/kiosk/scripts/install-browser-autostart.sh
 ```
 
 This installs and starts:
