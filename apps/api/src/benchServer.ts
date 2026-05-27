@@ -55,6 +55,11 @@ await seedBenchData();
 
 const server = createServer(async (request, response) => {
   try {
+    if (request.method === "OPTIONS") {
+      sendNoContent(response);
+      return;
+    }
+
     if (request.method === "GET" && request.url === "/health") {
       sendJson(response, 200, { ok: true, service: "bench-api" });
       return;
@@ -216,8 +221,24 @@ function readBody<T>(request: typeof import("node:http").IncomingMessage.prototy
 }
 
 function sendJson(response: typeof import("node:http").ServerResponse.prototype, status: number, data: unknown) {
-  response.writeHead(status, { "content-type": "application/json; charset=utf-8" });
+  response.writeHead(status, {
+    "content-type": "application/json; charset=utf-8",
+    ...corsHeaders()
+  });
   response.end(JSON.stringify(data));
+}
+
+function sendNoContent(response: typeof import("node:http").ServerResponse.prototype) {
+  response.writeHead(204, corsHeaders());
+  response.end();
+}
+
+function corsHeaders() {
+  return {
+    "access-control-allow-origin": "*",
+    "access-control-allow-methods": "GET,POST,OPTIONS",
+    "access-control-allow-headers": "authorization,content-type,x-admin-email"
+  };
 }
 
 function httpError(status: number, message: string) {
