@@ -94,15 +94,17 @@ sudo loginctl enable-linger "$USER"
 ## 7. Verify Services
 
 ```bash
-systemctl --user status frc-bench-api frc-kiosk-service frc-kiosk-ui
+systemctl --user status frc-bench-api frc-kiosk-service frc-kiosk-ui frc-dashboard-ui
 curl http://localhost:8787/health
 curl -I http://localhost:5173
+curl -I http://localhost:5174
 ```
 
 Expected:
 
 - bench API active on `http://localhost:8787`
 - kiosk UI active on `http://localhost:5173`
+- admin dashboard active on `http://localhost:5174`
 - fingerprint service log says `Fingerprint reader online`
 
 View logs:
@@ -120,7 +122,7 @@ memberId,firstName,lastName
 100001,Bench,Student
 ```
 
-Open the dashboard roster tab and paste CSV with those three columns. The central API stores `memberId` as `student_id` for attendance-event compatibility.
+Open the dashboard at `http://<pi-hostname-or-ip>:5174`, go to the roster tab, and paste CSV with those three columns. The central API stores `memberId` as `student_id` for attendance-event compatibility.
 
 ## 9. Bench Fingerprint Mapping
 
@@ -180,5 +182,5 @@ npm install
 npm rebuild better-sqlite3
 bash apps/kiosk/scripts/install-user-services.sh
 bash apps/kiosk/scripts/install-browser-autostart.sh
-systemctl --user restart frc-bench-api frc-kiosk-service frc-kiosk-ui
+systemctl --user restart frc-bench-api frc-kiosk-service frc-kiosk-ui frc-dashboard-ui
 ```
