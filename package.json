@@ -1,0 +1,22 @@
+{
+  "name": "frc-attendance-system-v2",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Fingerprint-based multi-kiosk attendance system for FRC teams.",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "dev:api": "npm --workspace @frc-attendance/api run dev",
+    "dev:kiosk": "npm --workspace @frc-attendance/kiosk run dev",
+    "dev:dashboard": "npm --workspace @frc-attendance/dashboard run dev"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4",
+    "vitest": "^4.1.6"
+  }
+}

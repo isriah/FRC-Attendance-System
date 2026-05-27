@@ -1,0 +1,15 @@
+name = "frc-attendance-api"
+main = "src/index.ts"
+compatibility_date = "2026-05-20"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "frc-attendance"
+database_id = "replace-with-cloudflare-d1-database-id"
+
+[vars]
+TIME_ZONE = "America/New_York"
+GOOGLE_ALLOWED_EMAILS = ""
+GOOGLE_ALLOWED_DOMAIN = ""
+GOOGLE_CLIENT_ID = ""
+DUPLICATE_WINDOW_SECONDS = "90"
