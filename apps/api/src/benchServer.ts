@@ -1,11 +1,14 @@
 import Database from "better-sqlite3";
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { DEFAULT_DUPLICATE_WINDOW_MS, isDuplicateScan, type KioskSyncRequest, type ScanEvent } from "@frc-attendance/shared";
 import { sha256Hex } from "./auth";
 
 const port = Number(process.env.PORT ?? "8787");
 const dbPath = process.env.BENCH_DB_PATH ?? "./bench-api.sqlite";
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 let enrollmentInProgress = false;
 const db = new Database(dbPath);
 
@@ -165,13 +168,13 @@ async function enrollFingerprint(input: { memberId: string; slot: number; finger
   try {
     await runCommand("systemctl", ["--user", "stop", "frc-kiosk-service"]);
     const result = await runCommand("python3", [
-      "apps/kiosk/enroll_fingerprint.py",
+      resolve(repoRoot, "apps/kiosk/enroll_fingerprint.py"),
       "--student-id",
       memberId,
       "--slot",
       String(slot),
       "--db",
-      "apps/kiosk/kiosk-cache.sqlite",
+      resolve(repoRoot, "apps/kiosk/kiosk-cache.sqlite"),
       "--port",
       "/dev/serial0",
       "--baudrate",
@@ -190,7 +193,7 @@ async function enrollFingerprint(input: { memberId: string; slot: number; finger
 
 function runCommand(command: string, args: string[], timeoutMs = 30_000): Promise<{ output: string }> {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { cwd: process.cwd(), stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(command, args, { cwd: repoRoot, stdio: ["ignore", "pipe", "pipe"] });
     let output = "";
     const timer = setTimeout(() => {
       child.kill("SIGTERM");
