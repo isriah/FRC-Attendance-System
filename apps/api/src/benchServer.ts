@@ -104,6 +104,12 @@ const server = createServer(async (request, response) => {
       return;
     }
 
+    if (request.method === "POST" && request.url === "/admin/kiosk-ui/restart") {
+      await runCommand("systemctl", ["--user", "restart", "frc-kiosk-ui"]);
+      sendJson(response, 200, { message: "Kiosk display service restarted. The kiosk screen should reconnect in a few seconds." });
+      return;
+    }
+
     sendJson(response, 404, { error: "Not found" });
   } catch (error) {
     const status = typeof error === "object" && error !== null && "status" in error ? Number((error as { status: number }).status) : 500;

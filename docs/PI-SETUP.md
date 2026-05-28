@@ -107,6 +107,8 @@ Expected:
 - admin dashboard active on `http://localhost:5174`
 - fingerprint service log says `Fingerprint reader online`
 
+The admin dashboard overview tab includes a `Reload kiosk display` button. It restarts the kiosk UI service when the kiosk screen needs a refresh.
+
 View logs:
 
 ```bash

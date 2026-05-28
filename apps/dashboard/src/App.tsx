@@ -107,12 +107,35 @@ function Login({ onLogin }: { onLogin: (email: string) => void }) {
 function Overview({ session }: { session: DashboardSession }) {
   const { data: kiosks } = useApi<{ kiosks: unknown[] }>("/admin/kiosks", session);
   const { data: events } = useApi<{ events: unknown[] }>("/admin/events", session);
+  const [reloadMessage, setReloadMessage] = useState<{ kind: "success" | "error"; text: string }>();
+  const [reloading, setReloading] = useState(false);
+
   return (
-    <div className="grid">
-      <Metric label="Kiosks" value={kiosks?.kiosks.length ?? 0} />
-      <Metric label="Recent Events" value={events?.events.length ?? 0} />
-      <Metric label="System" value="Online" />
-    </div>
+    <>
+      <div className="grid">
+        <Metric label="Kiosks" value={kiosks?.kiosks.length ?? 0} />
+        <Metric label="Recent Events" value={events?.events.length ?? 0} />
+        <Metric label="System" value="Online" />
+      </div>
+      <section>
+        <h2>Kiosk Display</h2>
+        <div className="toolbar compact">
+          <button disabled={reloading} onClick={async () => {
+            setReloading(true);
+            setReloadMessage(undefined);
+            try {
+              await apiPost("/admin/kiosk-ui/restart", {}, session);
+              setReloadMessage({ kind: "success", text: "Kiosk display restarted. The screen should reconnect in a few seconds." });
+            } catch (error) {
+              setReloadMessage({ kind: "error", text: friendlyDashboardError(error) });
+            } finally {
+              setReloading(false);
+            }
+          }}>{reloading ? "Reloading..." : "Reload kiosk display"}</button>
+        </div>
+        {reloadMessage ? <p className={`notice ${reloadMessage.kind}`}>{reloadMessage.text}</p> : null}
+      </section>
+    </>
   );
 }
 
@@ -326,6 +349,11 @@ function friendlyEnrollmentError(error: unknown) {
   if (message.includes("timed out")) return "Enrollment timed out. Try again, placing the finger on the reader soon after clicking the button.";
   if (message.includes("member is not active in roster")) return "That member is not active in the roster. Sync the roster first, then try again.";
   if (message.includes("already in progress")) return "Another enrollment is already running. Wait for it to finish, then try again.";
+  return message.replace(/^.*"error":"?/, "").replace(/"}$/, "");
+}
+
+function friendlyDashboardError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
   return message.replace(/^.*"error":"?/, "").replace(/"}$/, "");
 }
 
