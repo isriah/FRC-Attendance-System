@@ -14,7 +14,7 @@ Current production dashboard:
 
 - Cloudflare Pages project: `frc-attendance-dashboard`
 - Pages URL: `https://frc-attendance-dashboard.pages.dev`
-- Latest verified deployment: `https://c1a584ae.frc-attendance-dashboard.pages.dev`
+- Latest verified deployment: `https://933d1d20.frc-attendance-dashboard.pages.dev`
 - API base URL baked into the uploaded Vite build: `https://frc-attendance-api.frc-attendance.workers.dev`
 - Google OAuth client ID baked into the uploaded Vite build: `180849199739-v04bktp7rfmimgjpvohmq7pinrrpr337.apps.googleusercontent.com`
 
@@ -134,6 +134,8 @@ Credentialed Google admin access was verified after signing in as the allowliste
 Deployment `https://9c9f9dd1.frc-attendance-dashboard.pages.dev` also hardens stale-session handling so the production dashboard only enters the app with a Google ID token and does not use the local `x-admin-email` fallback when `VITE_GOOGLE_CLIENT_ID` is configured.
 
 Deployment `https://c1a584ae.frc-attendance-dashboard.pages.dev` adds per-kiosk remote command buttons on the Kiosks tab. The associated Worker deployment applied D1 migration `0002_kiosk_commands.sql` and exposes admin command creation plus kiosk command polling/completion endpoints.
+
+Deployment `https://933d1d20.frc-attendance-dashboard.pages.dev` shows recent queued/running/completed/failed kiosk command results per kiosk. The associated Worker deployment exposes `GET /admin/kiosk-commands` for credentialed dashboard command-history reads.
 
 The dashboard login UI follows the same boundary: when `VITE_GOOGLE_CLIENT_ID` is configured, it shows Google sign-in and a production notice that email-only local login is disabled. The email-only form is rendered only for local development builds with no Google client ID.
 
