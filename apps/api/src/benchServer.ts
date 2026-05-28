@@ -1,10 +1,12 @@
 import Database from "better-sqlite3";
+import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { DEFAULT_DUPLICATE_WINDOW_MS, isDuplicateScan, type KioskSyncRequest, type ScanEvent } from "@frc-attendance/shared";
 import { sha256Hex } from "./auth";
 
 const port = Number(process.env.PORT ?? "8787");
 const dbPath = process.env.BENCH_DB_PATH ?? "./bench-api.sqlite";
+let enrollmentInProgress = false;
 const db = new Database(dbPath);
 
 db.pragma("journal_mode = WAL");
@@ -92,6 +94,13 @@ const server = createServer(async (request, response) => {
       return;
     }
 
+    if (request.method === "POST" && request.url === "/admin/fingerprint/enroll") {
+      const body = await readBody<{ memberId: string; slot: number; fingerLabel?: string }>(request);
+      const result = await enrollFingerprint(body);
+      sendJson(response, 200, result);
+      return;
+    }
+
     sendJson(response, 404, { error: "Not found" });
   } catch (error) {
     const status = typeof error === "object" && error !== null && "status" in error ? Number((error as { status: number }).status) : 500;
@@ -138,6 +147,72 @@ function syncRoster(members: Array<{ memberId: string; firstName: string; lastNa
   transaction();
 
   return { synced: seen.size, deactivatedMissingStudents: members.length > 0 };
+}
+
+async function enrollFingerprint(input: { memberId: string; slot: number; fingerLabel?: string }) {
+  if (enrollmentInProgress) throw httpError(409, "Fingerprint enrollment is already in progress");
+
+  const memberId = input.memberId?.trim();
+  const slot = Number(input.slot);
+  const fingerLabel = input.fingerLabel?.trim();
+  if (!memberId) throw httpError(400, "memberId is required");
+  if (!Number.isInteger(slot) || slot < 1 || slot > 200) throw httpError(400, "slot must be an integer from 1 to 200");
+
+  const student = db.prepare("SELECT active FROM students WHERE student_id = ?").get(memberId) as { active: number } | undefined;
+  if (!student?.active) throw httpError(400, "member is not active in roster");
+
+  enrollmentInProgress = true;
+  try {
+    await runCommand("systemctl", ["--user", "stop", "frc-kiosk-service"]);
+    const result = await runCommand("python3", [
+      "apps/kiosk/enroll_fingerprint.py",
+      "--student-id",
+      memberId,
+      "--slot",
+      String(slot),
+      "--db",
+      "apps/kiosk/kiosk-cache.sqlite",
+      "--port",
+      "/dev/serial0",
+      "--baudrate",
+      "57600",
+      ...(fingerLabel ? ["--finger-label", fingerLabel] : [])
+    ], 180_000);
+
+    return { memberId, slot, fingerLabel: fingerLabel || null, output: result.output.trim() };
+  } finally {
+    await runCommand("systemctl", ["--user", "start", "frc-kiosk-service"]).catch((error) => {
+      console.error(`Could not restart kiosk service after enrollment: ${error instanceof Error ? error.message : String(error)}`);
+    });
+    enrollmentInProgress = false;
+  }
+}
+
+function runCommand(command: string, args: string[], timeoutMs = 30_000): Promise<{ output: string }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { cwd: process.cwd(), stdio: ["ignore", "pipe", "pipe"] });
+    let output = "";
+    const timer = setTimeout(() => {
+      child.kill("SIGTERM");
+      reject(httpError(504, `${command} timed out. ${output.trim()}`));
+    }, timeoutMs);
+
+    child.stdout.on("data", (chunk) => {
+      output += chunk.toString();
+    });
+    child.stderr.on("data", (chunk) => {
+      output += chunk.toString();
+    });
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.on("exit", (code) => {
+      clearTimeout(timer);
+      if (code === 0) resolve({ output });
+      else reject(httpError(500, `${command} exited with code ${code}. ${output.trim()}`));
+    });
+  });
 }
 
 function syncKioskEvents(kioskId: string, body: KioskSyncRequest) {

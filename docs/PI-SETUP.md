@@ -128,6 +128,14 @@ Open the dashboard at `http://<pi-hostname-or-ip>:5174`, go to the roster tab, a
 
 Fingerprint templates stay on the sensor. The kiosk SQLite DB stores only the mapping from sensor template slot to Student ID.
 
+The normal path is the dashboard:
+
+1. Open `http://<pi-hostname-or-ip>:5174`.
+2. Go to the roster tab.
+3. Select an active member, choose an unused slot, and click `Enroll fingerprint`.
+
+The dashboard temporarily stops the kiosk scanning service, runs enrollment against the local reader, saves the slot mapping, and restarts scanning.
+
 To enroll a new finger into slot `1` and map it to student `100001`:
 
 ```bash

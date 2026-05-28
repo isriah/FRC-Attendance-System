@@ -120,6 +120,12 @@ function Roster({ session }: { session: DashboardSession }) {
   const { data, error, reload } = useApi<{ students: Array<{ student_id: string; first_name: string; last_name: string; active: number }> }>("/admin/students", session);
   const [importText, setImportText] = useState("memberId,firstName,lastName\n100001,Bench,Student");
   const [importMessage, setImportMessage] = useState<string>();
+  const [enrollMemberId, setEnrollMemberId] = useState("");
+  const [enrollSlot, setEnrollSlot] = useState("2");
+  const [enrollFingerLabel, setEnrollFingerLabel] = useState("right-index");
+  const [enrollMessage, setEnrollMessage] = useState<string>();
+  const [enrolling, setEnrolling] = useState(false);
+  const activeStudents = data?.students.filter((student) => student.active) ?? [];
 
   return (
     <>
@@ -138,6 +144,39 @@ function Roster({ session }: { session: DashboardSession }) {
             {importMessage ? <span>{importMessage}</span> : null}
           </div>
         </form>
+      </section>
+      <section>
+        <h2>Fingerprint Enrollment</h2>
+        <form className="toolbar wrap" onSubmit={async (event) => {
+          event.preventDefault();
+          setEnrolling(true);
+          setEnrollMessage("Enrollment started. Place the selected finger on the reader, lift it after a moment, then place it again.");
+          try {
+            const result = await apiPost<{ output?: string }>("/admin/fingerprint/enroll", {
+              memberId: enrollMemberId,
+              slot: Number(enrollSlot),
+              fingerLabel: enrollFingerLabel
+            }, session);
+            setEnrollMessage(result.output || `Linked slot ${enrollSlot} to ${enrollMemberId}`);
+          } catch (err) {
+            setEnrollMessage(err instanceof Error ? err.message : String(err));
+          } finally {
+            setEnrolling(false);
+          }
+        }}>
+          <select value={enrollMemberId} onChange={(event) => setEnrollMemberId(event.target.value)} required>
+            <option value="">Select member</option>
+            {activeStudents.map((student) => (
+              <option key={student.student_id} value={student.student_id}>
+                {student.student_id} - {student.first_name} {student.last_name}
+              </option>
+            ))}
+          </select>
+          <input value={enrollSlot} onChange={(event) => setEnrollSlot(event.target.value)} type="number" min="1" max="200" placeholder="Slot" required />
+          <input value={enrollFingerLabel} onChange={(event) => setEnrollFingerLabel(event.target.value)} placeholder="Finger label" />
+          <button disabled={enrolling}>{enrolling ? "Enrolling..." : "Enroll fingerprint"}</button>
+        </form>
+        {enrollMessage ? <p className={enrollMessage.includes("error") || enrollMessage.includes("exited") ? "error" : undefined}>{enrollMessage}</p> : null}
       </section>
       <Table title="Roster" error={error} rows={data?.students ?? []} columns={["student_id", "first_name", "last_name", "active"]} />
     </>
