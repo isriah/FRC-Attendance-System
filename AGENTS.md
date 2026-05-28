@@ -82,4 +82,6 @@ npm --workspace <package> run <script>
 - Run root `npm.cmd run typecheck` when TypeScript contracts or shared code change.
 - Run root `npm.cmd run build` when frontend, package, deployment, or build behavior changes.
 - When Raspberry Pi validation is needed, SSH directly into the Pi and run the checks there instead of asking the user to run commands manually.
-- Keep commits focused. Agents may commit after successful implementation and verification, but should not stage unrelated user changes.
+- Keep commits focused. Agents should create a Git commit after each completed, verified discrete unit unless the user explicitly asks not to commit.
+- Before committing, inspect `git status --short`, stage only files related to the completed unit, and do not stage unrelated user changes.
+- Use concise commit messages that describe the shipped behavior, not the process. Do not push unless the user explicitly asks.
