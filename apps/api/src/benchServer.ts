@@ -315,6 +315,7 @@ function buildAcknowledgement(
 ): KioskScanAcknowledgement {
   const student = db.prepare("SELECT first_name, last_name FROM students WHERE student_id = ?").get(input.studentId) as { first_name: string; last_name: string } | undefined;
   const displayName = student ? `${student.first_name} ${student.last_name}` : undefined;
+  const attendance = student ? buildBenchAttendanceSummary(input.studentId) : { rate: null };
 
   if (status === "duplicate") {
     return {
@@ -322,6 +323,8 @@ function buildAcknowledgement(
       studentId: input.studentId,
       status,
       displayName,
+      attendanceRate: attendance.rate,
+      attendanceSummary: attendance.summary,
       message: displayName ? `${displayName} was already recorded.` : "Scan was already recorded."
     };
   }
@@ -332,6 +335,8 @@ function buildAcknowledgement(
       studentId: input.studentId,
       status,
       displayName,
+      attendanceRate: attendance.rate,
+      attendanceSummary: attendance.summary,
       message: reason === "student is not active in roster" ? "Member is not active in the roster." : "Scan could not be accepted."
     };
   }
@@ -343,6 +348,8 @@ function buildAcknowledgement(
     status,
     displayName,
     action,
+    attendanceRate: attendance.rate,
+    attendanceSummary: attendance.summary,
     message: action === "check_in" ? `Welcome, ${displayName ?? input.studentId}` : `Goodbye, ${displayName ?? input.studentId}`
   };
 }
@@ -373,7 +380,16 @@ function displayStateForAcknowledgement(acknowledgement: KioskScanAcknowledgemen
   return {
     status: acknowledgement.action === "check_out" ? "goodbye" : "welcome",
     message: acknowledgement.action === "check_out" ? "Goodbye" : "Welcome",
-    detail: acknowledgement.displayName ?? `Member ${acknowledgement.studentId}`
+    detail: [acknowledgement.displayName ?? `Member ${acknowledgement.studentId}`, acknowledgement.attendanceSummary].filter(Boolean).join(" - ")
+  };
+}
+
+function buildBenchAttendanceSummary(studentId: string): { rate: number | null; summary?: string } {
+  const report = buildMemberAttendanceReport(studentId);
+  if (report.attendanceRate === null) return { rate: null };
+  return {
+    rate: report.attendanceRate,
+    summary: `Attendance ${Math.round(report.attendanceRate * 100)}% (${report.presentMeetings}/${report.totalMeetings})`
   };
 }
 

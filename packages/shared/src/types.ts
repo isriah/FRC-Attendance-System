@@ -47,6 +47,8 @@ export interface KioskScanAcknowledgement {
   status: ScanEventStatus;
   displayName?: string;
   action?: "check_in" | "check_out";
+  attendanceRate?: number | null;
+  attendanceSummary?: string;
   message: string;
 }
 
