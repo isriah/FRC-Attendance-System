@@ -1,3 +1,4 @@
+import { executeKioskCommand, commandLabel } from "./commandExecutor";
 import { loadConfig } from "./config";
 import { FingerprintBridge, type FingerprintBridgeEvent } from "./fingerprintBridge";
 import { OfflineQueue } from "./offlineQueue";
@@ -34,5 +35,30 @@ bridge.on("bridge-event", async (event: FingerprintBridgeEvent) => {
 setInterval(() => {
   sync.flushPending().catch((error) => console.log(`Periodic sync failed: ${error instanceof Error ? error.message : String(error)}`));
 }, 30_000);
+
+async function pollCommands() {
+  const commands = await sync.fetchCommands();
+  for (const command of commands) {
+    const label = commandLabel(command.action);
+    console.log(`Running kiosk command ${command.id}: ${label}`);
+    try {
+      const message = await executeKioskCommand(command, config);
+      await sync.completeCommand(command.id, "completed", message);
+      console.log(`Completed kiosk command ${command.id}: ${message}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await sync.completeCommand(command.id, "failed", message).catch((completionError) => {
+        console.log(`Could not report failed command ${command.id}: ${completionError instanceof Error ? completionError.message : String(completionError)}`);
+      });
+      console.log(`Kiosk command ${command.id} failed: ${message}`);
+    }
+  }
+}
+
+setInterval(() => {
+  pollCommands().catch((error) => console.log(`Command poll failed: ${error instanceof Error ? error.message : String(error)}`));
+}, config.commandPollSeconds * 1000);
+
+pollCommands().catch((error) => console.log(`Initial command poll failed: ${error instanceof Error ? error.message : String(error)}`));
 
 bridge.start(config.pythonPath, config.fingerprintBridgePath);

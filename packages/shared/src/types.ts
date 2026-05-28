@@ -89,3 +89,19 @@ export interface KioskSyncResult {
   rejected: Array<KioskSyncEventInput & { reason: string }>;
   acknowledgements?: KioskScanAcknowledgement[];
 }
+
+export type KioskCommandAction = "restart_display" | "restart_services" | "reboot_system";
+
+export type KioskCommandStatus = "pending" | "running" | "completed" | "failed";
+
+export interface KioskCommand {
+  id: string;
+  kioskId: string;
+  action: KioskCommandAction;
+  status: KioskCommandStatus;
+  requestedBy?: string;
+  requestedAt: string;
+  claimedAt?: string;
+  completedAt?: string;
+  message?: string;
+}

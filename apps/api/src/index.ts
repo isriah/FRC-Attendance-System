@@ -4,6 +4,7 @@ import { addManualEvent, syncKioskEvents } from "./attendanceStore";
 import type { Env } from "./env";
 import { buildLegacySheetExport } from "./export";
 import { errorResponse, json, noContent, optionsResponse, readJson } from "./http";
+import { claimPendingKioskCommands, completeKioskCommand, createKioskCommand, requireKioskCommandAction } from "./kioskCommands";
 import { buildMemberAttendanceReport, buildPresenceReport } from "./reports";
 import { syncRoster, type RosterMemberInput } from "./roster";
 
@@ -22,6 +23,22 @@ export default {
         const body = await readJson<KioskSyncRequest>(request);
         if (body.kioskId !== kioskId) throw Object.assign(new Error("Kiosk token does not match kioskId"), { status: 403 });
         return json(await syncKioskEvents(env, kioskId, body.events));
+      }
+
+      if (route === "GET /kiosk/commands") {
+        const kioskId = await requireKiosk(request, env);
+        const requestedKioskId = url.searchParams.get("kioskId");
+        if (requestedKioskId && requestedKioskId !== kioskId) throw Object.assign(new Error("Kiosk token does not match kioskId"), { status: 403 });
+        return json({ commands: await claimPendingKioskCommands(env, kioskId) });
+      }
+
+      const kioskCommandCompletion = url.pathname.match(/^\/kiosk\/commands\/([^/]+)\/complete$/);
+      if (request.method === "POST" && kioskCommandCompletion) {
+        const kioskId = await requireKiosk(request, env);
+        const body = await readJson<{ status: "completed" | "failed"; message?: string }>(request);
+        const commandId = kioskCommandCompletion[1];
+        if (!commandId) throw Object.assign(new Error("Kiosk command id is required"), { status: 400 });
+        return json(await completeKioskCommand(env, kioskId, commandId, body));
       }
 
       if (route === "POST /admin/roster/sync") {
@@ -50,6 +67,20 @@ export default {
         await requireAdmin(request, env);
         const rows = await env.DB.prepare("SELECT kiosk_id, name, location, active, last_seen_at FROM kiosks ORDER BY name").all();
         return json({ kiosks: rows.results });
+      }
+
+      const adminKioskCommand = url.pathname.match(/^\/admin\/kiosks\/([^/]+)\/commands$/);
+      if (request.method === "POST" && adminKioskCommand) {
+        const admin = await requireAdmin(request, env);
+        const body = await readJson<{ action: unknown }>(request);
+        const kioskIdParam = adminKioskCommand[1];
+        if (!kioskIdParam) throw Object.assign(new Error("Kiosk id is required"), { status: 400 });
+        const kioskId = decodeURIComponent(kioskIdParam);
+        return json(await createKioskCommand(env, {
+          kioskId,
+          action: requireKioskCommandAction(body.action),
+          requestedBy: admin.email
+        }));
       }
 
       if (route === "POST /admin/manual-events") {

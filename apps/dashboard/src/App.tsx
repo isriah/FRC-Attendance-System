@@ -4,6 +4,15 @@ import { apiGet, apiPost, type DashboardSession } from "./api";
 import "./styles.css";
 
 type Tab = "overview" | "roster" | "kiosks" | "events" | "reports" | "export";
+type KioskCommandAction = "restart_display" | "restart_services" | "reboot_system";
+
+interface KioskRow {
+  kiosk_id: string;
+  name: string;
+  location?: string;
+  active: number;
+  last_seen_at?: string;
+}
 
 const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
 const googleAuthEnabled = Boolean(googleClientId);
@@ -121,8 +130,6 @@ function Login({ onLocalLogin, onGoogleLogin }: { onLocalLogin: (email: string) 
 function Overview({ session }: { session: DashboardSession }) {
   const { data: kiosks } = useApi<{ kiosks: unknown[] }>("/admin/kiosks", session);
   const { data: events } = useApi<{ events: unknown[] }>("/admin/events", session);
-  const [reloadMessage, setReloadMessage] = useState<{ kind: "success" | "error"; text: string }>();
-  const [reloading, setReloading] = useState(false);
 
   return (
     <>
@@ -131,24 +138,6 @@ function Overview({ session }: { session: DashboardSession }) {
         <Metric label="Recent Events" value={events?.events.length ?? 0} />
         <Metric label="System" value="Online" />
       </div>
-      <section>
-        <h2>Kiosk Display</h2>
-        <div className="toolbar compact">
-          <button disabled={reloading} onClick={async () => {
-            setReloading(true);
-            setReloadMessage(undefined);
-            try {
-              await apiPost("/admin/kiosk-ui/restart", {}, session);
-              setReloadMessage({ kind: "success", text: "Kiosk display restarted. The screen should reconnect in a few seconds." });
-            } catch (error) {
-              setReloadMessage({ kind: "error", text: friendlyDashboardError(error) });
-            } finally {
-              setReloading(false);
-            }
-          }}>{reloading ? "Reloading..." : "Reload kiosk display"}</button>
-        </div>
-        {reloadMessage ? <p className={`notice ${reloadMessage.kind}`}>{reloadMessage.text}</p> : null}
-      </section>
     </>
   );
 }
@@ -229,7 +218,27 @@ function Roster({ session }: { session: DashboardSession }) {
 }
 
 function Kiosks({ session }: { session: DashboardSession }) {
-  const { data, error, reload } = useApi<{ kiosks: Array<Record<string, unknown>> }>("/admin/kiosks", session);
+  const { data, error, reload } = useApi<{ kiosks: KioskRow[] }>("/admin/kiosks", session);
+  const [commandMessages, setCommandMessages] = useState<Record<string, { kind: "success" | "error"; text: string }>>({});
+  const [runningCommand, setRunningCommand] = useState<string>();
+
+  async function sendCommand(kiosk: KioskRow, action: KioskCommandAction) {
+    if (action === "reboot_system" && !window.confirm(`Reboot ${kiosk.kiosk_id}? The kiosk will go offline briefly.`)) return;
+
+    const commandKey = `${kiosk.kiosk_id}:${action}`;
+    setRunningCommand(commandKey);
+    setCommandMessages((messages) => ({ ...messages, [kiosk.kiosk_id]: { kind: "success", text: `Queued ${commandLabel(action)} for ${kiosk.kiosk_id}.` } }));
+    try {
+      await apiPost(`/admin/kiosks/${encodeURIComponent(kiosk.kiosk_id)}/commands`, { action }, session);
+      setCommandMessages((messages) => ({ ...messages, [kiosk.kiosk_id]: { kind: "success", text: `${commandLabel(action)} command queued. The kiosk should pick it up shortly.` } }));
+      reload();
+    } catch (error) {
+      setCommandMessages((messages) => ({ ...messages, [kiosk.kiosk_id]: { kind: "error", text: friendlyDashboardError(error) } }));
+    } finally {
+      setRunningCommand(undefined);
+    }
+  }
+
   return (
     <>
       <form className="toolbar" onSubmit={async (event) => {
@@ -246,7 +255,44 @@ function Kiosks({ session }: { session: DashboardSession }) {
         <input name="token" placeholder="Provisioning token" required />
         <button>Register kiosk</button>
       </form>
-      <Table title="Kiosks" error={error} rows={data?.kiosks ?? []} columns={["kiosk_id", "name", "location", "active", "last_seen_at"]} />
+      <section>
+        <h2>Kiosks</h2>
+        {error ? <p className="error">{error}</p> : null}
+        <table>
+          <thead>
+            <tr>
+              {["kiosk_id", "name", "location", "active", "last_seen_at", "actions"].map((column) => <th key={column}>{column}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {(data?.kiosks ?? []).map((kiosk) => (
+              <tr key={kiosk.kiosk_id}>
+                <td>{kiosk.kiosk_id}</td>
+                <td>{kiosk.name}</td>
+                <td>{kiosk.location ?? ""}</td>
+                <td>{String(kiosk.active)}</td>
+                <td>{kiosk.last_seen_at ?? ""}</td>
+                <td>
+                  <div className="kiosk-actions">
+                    {(["restart_display", "restart_services", "reboot_system"] as KioskCommandAction[]).map((action) => {
+                      const commandKey = `${kiosk.kiosk_id}:${action}`;
+                      return (
+                        <button key={action} disabled={runningCommand === commandKey || !kiosk.active} onClick={() => sendCommand(kiosk, action)}>
+                          {runningCommand === commandKey ? "Queuing..." : commandLabel(action)}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {(() => {
+                    const commandMessage = commandMessages[kiosk.kiosk_id];
+                    return commandMessage ? <p className={`notice ${commandMessage.kind}`}>{commandMessage.text}</p> : null;
+                  })()}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </section>
     </>
   );
 }
@@ -489,6 +535,12 @@ function friendlyEnrollmentError(error: unknown) {
 function friendlyDashboardError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
   return message.replace(/^.*"error":"?/, "").replace(/"}$/, "");
+}
+
+function commandLabel(action: KioskCommandAction) {
+  if (action === "restart_display") return "Restart display";
+  if (action === "restart_services") return "Restart services";
+  return "Reboot system";
 }
 
 function parseCsvLine(line: string) {

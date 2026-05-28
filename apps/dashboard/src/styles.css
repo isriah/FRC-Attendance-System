@@ -207,6 +207,18 @@ pre {
   color: var(--danger-color);
 }
 
+.kiosk-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.kiosk-actions button {
+  padding: 8px 10px;
+  white-space: nowrap;
+}
+
 .login {
   min-height: 100vh;
   display: grid;

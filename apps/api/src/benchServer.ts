@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { DEFAULT_DUPLICATE_WINDOW_MS, deriveAttendanceSessions, isDuplicateScan, meetingDateForTimestamp, type AttendanceSession, type KioskScanAcknowledgement, type KioskSyncRequest, type ScanEvent } from "@frc-attendance/shared";
+import { DEFAULT_DUPLICATE_WINDOW_MS, deriveAttendanceSessions, isDuplicateScan, meetingDateForTimestamp, type AttendanceSession, type KioskCommand, type KioskCommandAction, type KioskCommandStatus, type KioskScanAcknowledgement, type KioskSyncRequest, type ScanEvent } from "@frc-attendance/shared";
 import { sha256Hex } from "./auth";
 
 const port = Number(process.env.PORT ?? "8787");
@@ -46,6 +46,20 @@ db.exec(`
     rejection_reason TEXT,
     UNIQUE(kiosk_id, local_event_id)
   );
+
+  CREATE TABLE IF NOT EXISTS kiosk_commands (
+    id TEXT PRIMARY KEY,
+    kiosk_id TEXT NOT NULL,
+    action TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    requested_by TEXT,
+    requested_at TEXT NOT NULL,
+    claimed_at TEXT,
+    completed_at TEXT,
+    message TEXT
+  );
+
+  CREATE INDEX IF NOT EXISTS kiosk_commands_kiosk_status_idx ON kiosk_commands(kiosk_id, status, requested_at);
 `);
 
 async function seedBenchData() {
@@ -100,6 +114,25 @@ const server = createServer(async (request, response) => {
       return;
     }
 
+    if (request.method === "GET" && request.url?.startsWith("/kiosk/commands")) {
+      const kioskId = await requireKiosk(request.headers.authorization);
+      const url = new URL(request.url, `http://${request.headers.host ?? "localhost"}`);
+      const requestedKioskId = url.searchParams.get("kioskId");
+      if (requestedKioskId && requestedKioskId !== kioskId) throw httpError(403, "Kiosk token does not match kioskId");
+      sendJson(response, 200, { commands: claimPendingKioskCommands(kioskId) });
+      return;
+    }
+
+    const kioskCommandCompletion = request.url?.match(/^\/kiosk\/commands\/([^/]+)\/complete$/);
+    if (request.method === "POST" && kioskCommandCompletion) {
+      const kioskId = await requireKiosk(request.headers.authorization);
+      const body = await readBody<{ status: KioskCommandStatus; message?: string }>(request);
+      const commandId = kioskCommandCompletion[1];
+      if (!commandId) throw httpError(400, "Kiosk command id is required");
+      sendJson(response, 200, completeKioskCommand(kioskId, commandId, body));
+      return;
+    }
+
     if (request.method === "GET" && request.url === "/bench/events") {
       const events = db.prepare("SELECT * FROM scan_events ORDER BY occurred_at DESC LIMIT 50").all();
       sendJson(response, 200, { events });
@@ -129,6 +162,15 @@ const server = createServer(async (request, response) => {
     if (request.method === "POST" && request.url === "/admin/kiosk-ui/restart") {
       await runCommand("systemctl", ["--user", "restart", "frc-kiosk-ui"]);
       sendJson(response, 200, { message: "Kiosk display service restarted. The kiosk screen should reconnect in a few seconds." });
+      return;
+    }
+
+    const adminKioskCommand = request.url?.match(/^\/admin\/kiosks\/([^/]+)\/commands$/);
+    if (request.method === "POST" && adminKioskCommand) {
+      const body = await readBody<{ action: KioskCommandAction }>(request);
+      const kioskIdParam = adminKioskCommand[1];
+      if (!kioskIdParam) throw httpError(400, "Kiosk id is required");
+      sendJson(response, 200, createKioskCommand(decodeURIComponent(kioskIdParam), body.action));
       return;
     }
 
@@ -190,6 +232,43 @@ function syncRoster(members: Array<{ memberId: string; firstName: string; lastNa
   transaction();
 
   return { synced: seen.size, deactivatedMissingStudents: members.length > 0 };
+}
+
+function createKioskCommand(kioskId: string, action: KioskCommandAction): KioskCommand {
+  if (!["restart_display", "restart_services", "reboot_system"].includes(action)) throw httpError(400, "Unsupported kiosk command action");
+  const kiosk = db.prepare("SELECT kiosk_id FROM kiosks WHERE kiosk_id = ? AND active = 1").get(kioskId) as { kiosk_id: string } | undefined;
+  if (!kiosk) throw httpError(404, "Kiosk not found or inactive");
+
+  const command: KioskCommand = {
+    id: crypto.randomUUID(),
+    kioskId,
+    action,
+    status: "pending",
+    requestedAt: new Date().toISOString()
+  };
+  db.prepare(
+    "INSERT INTO kiosk_commands (id, kiosk_id, action, status, requested_at) VALUES (?, ?, ?, 'pending', ?)"
+  ).run(command.id, kioskId, action, command.requestedAt);
+  return command;
+}
+
+function claimPendingKioskCommands(kioskId: string): KioskCommand[] {
+  const now = new Date().toISOString();
+  const rows = db.prepare("SELECT * FROM kiosk_commands WHERE kiosk_id = ? AND status = 'pending' ORDER BY requested_at ASC LIMIT 5").all(kioskId) as KioskCommandRow[];
+  for (const row of rows) {
+    db.prepare("UPDATE kiosk_commands SET status = 'running', claimed_at = ? WHERE id = ? AND status = 'pending'").run(now, row.id);
+  }
+  return rows.map((row) => rowToCommand({ ...row, status: "running", claimed_at: now }));
+}
+
+function completeKioskCommand(kioskId: string, commandId: string, input: { status: KioskCommandStatus; message?: string }): KioskCommand {
+  if (!["completed", "failed"].includes(input.status)) throw httpError(400, "Command completion status must be completed or failed");
+  const now = new Date().toISOString();
+  db.prepare("UPDATE kiosk_commands SET status = ?, completed_at = ?, message = ? WHERE id = ? AND kiosk_id = ?")
+    .run(input.status, now, input.message ?? null, commandId, kioskId);
+  const row = db.prepare("SELECT * FROM kiosk_commands WHERE id = ? AND kiosk_id = ?").get(commandId, kioskId) as KioskCommandRow | undefined;
+  if (!row) throw httpError(404, "Kiosk command not found");
+  return rowToCommand(row);
 }
 
 async function enrollFingerprint(input: { memberId: string; slot: number; fingerLabel?: string }) {
@@ -501,6 +580,20 @@ function rowToScanEvent(row: DbScanEvent): ScanEvent {
   };
 }
 
+function rowToCommand(row: KioskCommandRow): KioskCommand {
+  return {
+    id: row.id,
+    kioskId: row.kiosk_id,
+    action: row.action as KioskCommandAction,
+    status: row.status as KioskCommandStatus,
+    requestedBy: row.requested_by ?? undefined,
+    requestedAt: row.requested_at,
+    claimedAt: row.claimed_at ?? undefined,
+    completedAt: row.completed_at ?? undefined,
+    message: row.message ?? undefined
+  };
+}
+
 function readBody<T>(request: typeof import("node:http").IncomingMessage.prototype): Promise<T> {
   return new Promise((resolve, reject) => {
     let body = "";
@@ -558,6 +651,18 @@ interface DbScanEvent {
   source: "fingerprint";
   status: "accepted" | "duplicate" | "rejected";
   rejection_reason: string | null;
+}
+
+interface KioskCommandRow {
+  id: string;
+  kiosk_id: string;
+  action: string;
+  status: string;
+  requested_by: string | null;
+  requested_at: string;
+  claimed_at: string | null;
+  completed_at: string | null;
+  message: string | null;
 }
 
 interface KioskDisplayState {

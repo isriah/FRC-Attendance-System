@@ -107,7 +107,13 @@ Expected:
 - admin dashboard active on `http://localhost:5174`
 - fingerprint service log says `Fingerprint reader online`
 
-The admin dashboard overview tab includes a `Reload kiosk display` button. It restarts the kiosk UI service when the kiosk screen needs a refresh.
+The admin dashboard Kiosks tab includes remote command buttons for each active kiosk:
+
+- `Restart display`: restarts `frc-kiosk-ui`.
+- `Restart services`: restarts `frc-bench-api`, `frc-kiosk-ui`, `frc-dashboard-ui`, then schedules `frc-kiosk-service` to restart itself.
+- `Reboot system`: schedules `sudo -n systemctl reboot`. This requires passwordless sudo permission for the kiosk user.
+
+The kiosk service polls the configured API for these commands every `KIOSK_COMMAND_POLL_SECONDS`, default `10`.
 
 View logs:
 

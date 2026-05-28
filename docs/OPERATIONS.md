@@ -14,7 +14,7 @@ Current production dashboard:
 
 - Cloudflare Pages project: `frc-attendance-dashboard`
 - Pages URL: `https://frc-attendance-dashboard.pages.dev`
-- Latest verified deployment: `https://9c9f9dd1.frc-attendance-dashboard.pages.dev`
+- Latest verified deployment: `https://c1a584ae.frc-attendance-dashboard.pages.dev`
 - API base URL baked into the uploaded Vite build: `https://frc-attendance-api.frc-attendance.workers.dev`
 - Google OAuth client ID baked into the uploaded Vite build: `180849199739-v04bktp7rfmimgjpvohmq7pinrrpr337.apps.googleusercontent.com`
 
@@ -133,6 +133,8 @@ Credentialed Google admin access was verified after signing in as the allowliste
 
 Deployment `https://9c9f9dd1.frc-attendance-dashboard.pages.dev` also hardens stale-session handling so the production dashboard only enters the app with a Google ID token and does not use the local `x-admin-email` fallback when `VITE_GOOGLE_CLIENT_ID` is configured.
 
+Deployment `https://c1a584ae.frc-attendance-dashboard.pages.dev` adds per-kiosk remote command buttons on the Kiosks tab. The associated Worker deployment applied D1 migration `0002_kiosk_commands.sql` and exposes admin command creation plus kiosk command polling/completion endpoints.
+
 The dashboard login UI follows the same boundary: when `VITE_GOOGLE_CLIENT_ID` is configured, it shows Google sign-in and a production notice that email-only local login is disabled. The email-only form is rendered only for local development builds with no Google client ID.
 
 For local development only, if no Google client ID is configured, the dashboard can send an `x-admin-email` header and the API will still enforce the configured allowlist.
@@ -148,6 +150,7 @@ For local development only, if no Google client ID is configured, the dashboard 
    KIOSK_TOKEN=<raw-token>
    API_BASE_URL=https://frc-attendance-api.example.workers.dev
    KIOSK_DB_PATH=/var/lib/frc-attendance/kiosk-cache.sqlite
+   KIOSK_COMMAND_POLL_SECONDS=10
    PYTHON_PATH=python3
    FINGERPRINT_BRIDGE_PATH=/opt/frc-attendance/fingerprint_bridge.py
    FINGERPRINT_SERIAL_PORT=/dev/serial0
@@ -176,6 +179,7 @@ Current bench Pi production API validation:
   ```
 
 - Offline queue replay was validated by stopping `frc-kiosk-service`, inserting one pending local fingerprint scan for student `100001`, restarting the service, and confirming the local event `remote-replay-1de1a877-fa2c-482f-b388-335758e663de` was marked synced locally and inserted into remote D1 as an accepted `scan_events` row.
+- The dashboard Kiosks tab can queue per-kiosk restart commands. Kiosk services poll `GET /kiosk/commands` with their kiosk token and execute only allowlisted local actions: restart display (`frc-kiosk-ui`), restart kiosk services (`frc-bench-api`, `frc-kiosk-ui`, `frc-dashboard-ui`, then `frc-kiosk-service`), or schedule a system reboot with `sudo -n systemctl reboot`.
 
 ## Pi User Services
 
@@ -194,6 +198,7 @@ This installs and starts:
 - `frc-bench-api.service`: lightweight local API on `http://localhost:8787`.
 - `frc-kiosk-service.service`: fingerprint bridge and offline queue sync.
 - `frc-kiosk-ui.service`: kiosk UI dev server on `http://localhost:5173`.
+- `frc-kiosk-service.service` also polls the configured API for remote kiosk commands every `KIOSK_COMMAND_POLL_SECONDS`, default `10`.
 
 Useful commands:
 
