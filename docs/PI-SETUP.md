@@ -115,6 +115,15 @@ The admin dashboard Kiosks tab includes remote command buttons for each active k
 
 The kiosk service polls the configured API for these commands every `KIOSK_COMMAND_POLL_SECONDS`, default `10`.
 
+To enable the reboot command, install the narrow sudoers rule once on the Pi:
+
+```bash
+cd ~/FRC-Attendance-System
+sudo bash apps/kiosk/scripts/install-reboot-sudoers.sh
+```
+
+This allows the kiosk user to run only `/usr/bin/systemctl reboot` without an interactive password. Without this rule, reboot commands are reported as failed instead of silently claiming success.
+
 View logs:
 
 ```bash

@@ -21,7 +21,8 @@ export async function executeKioskCommand(command: KioskCommand, config: KioskCo
   }
 
   if (command.action === "reboot_system") {
-    scheduleDetached("sudo", ["-n", "systemctl", "reboot"], config.systemRebootDelayMs);
+    await runCommand("sudo", ["-n", "-l", "/usr/bin/systemctl", "reboot"]);
+    scheduleDetached("sudo", ["-n", "/usr/bin/systemctl", "reboot"], config.systemRebootDelayMs);
     return "Scheduled system reboot";
   }
 

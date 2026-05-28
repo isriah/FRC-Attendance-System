@@ -48,6 +48,7 @@ npm --workspace <package> run <script>
 - Fingerprint templates remain local on the sensor. The kiosk SQLite DB stores slot-to-member mappings.
 - Kiosk scan acknowledgements cover known accepted scans, duplicates, unknown fingerprints, rejected/inactive members, and optional attendance summaries.
 - Dashboard kiosk controls can queue per-kiosk remote commands for active kiosks: restart display, restart kiosk services, or reboot system. Kiosk services poll the API for these commands with their kiosk token and execute only allowlisted local actions.
+- Remote kiosk reboot requires the Pi sudoers rule installed by `sudo bash apps/kiosk/scripts/install-reboot-sudoers.sh`, which permits only `/usr/bin/systemctl reboot` without an interactive password.
 - Dashboard reports currently include daily presence and per-member attendance.
 - Dashboard is deployed to Cloudflare Pages project `frc-attendance-dashboard` at `https://frc-attendance-dashboard.pages.dev`.
 - The deployed dashboard build is configured with `VITE_API_BASE_URL=https://frc-attendance-api.frc-attendance.workers.dev` and Google OAuth client `180849199739-v04bktp7rfmimgjpvohmq7pinrrpr337.apps.googleusercontent.com`.
