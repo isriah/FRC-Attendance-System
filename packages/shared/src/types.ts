@@ -41,6 +41,15 @@ export interface ScanEvent {
   status: ScanEventStatus;
 }
 
+export interface KioskScanAcknowledgement {
+  localEventId: string;
+  studentId: string;
+  status: ScanEventStatus;
+  displayName?: string;
+  action?: "check_in" | "check_out";
+  message: string;
+}
+
 export interface ManualEvent {
   id: string;
   studentId: string;
@@ -76,4 +85,5 @@ export interface KioskSyncResult {
   accepted: ScanEvent[];
   duplicates: ScanEvent[];
   rejected: Array<KioskSyncEventInput & { reason: string }>;
+  acknowledgements?: KioskScanAcknowledgement[];
 }

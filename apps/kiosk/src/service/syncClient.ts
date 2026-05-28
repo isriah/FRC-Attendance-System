@@ -35,4 +35,15 @@ export class SyncClient {
     ]);
     return result;
   }
+
+  async reportNoMatch(): Promise<void> {
+    await fetch(`${this.config.apiBaseUrl}/kiosk/display/no-match`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${this.config.kioskToken}`
+      },
+      body: JSON.stringify({ kioskId: this.config.kioskId })
+    });
+  }
 }

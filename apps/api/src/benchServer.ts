@@ -3,13 +3,19 @@ import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { DEFAULT_DUPLICATE_WINDOW_MS, isDuplicateScan, type KioskSyncRequest, type ScanEvent } from "@frc-attendance/shared";
+import { DEFAULT_DUPLICATE_WINDOW_MS, isDuplicateScan, meetingDateForTimestamp, type KioskScanAcknowledgement, type KioskSyncRequest, type ScanEvent } from "@frc-attendance/shared";
 import { sha256Hex } from "./auth";
 
 const port = Number(process.env.PORT ?? "8787");
 const dbPath = process.env.BENCH_DB_PATH ?? "./bench-api.sqlite";
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 let enrollmentInProgress = false;
+let latestDisplayState: KioskDisplayState = {
+  status: "ready",
+  message: "Place finger on reader",
+  detail: "Attendance kiosk ready",
+  updatedAt: new Date().toISOString()
+};
 const db = new Database(dbPath);
 
 db.pragma("journal_mode = WAL");
@@ -70,11 +76,27 @@ const server = createServer(async (request, response) => {
       return;
     }
 
+    if (request.method === "GET" && request.url === "/kiosk/display-state") {
+      sendJson(response, 200, currentDisplayState());
+      return;
+    }
+
     if (request.method === "POST" && request.url === "/kiosk/sync") {
       const kioskId = await requireKiosk(request.headers.authorization);
       const body = await readBody<KioskSyncRequest>(request);
       if (body.kioskId !== kioskId) throw httpError(403, "Kiosk token does not match kioskId");
       sendJson(response, 200, syncKioskEvents(kioskId, body));
+      return;
+    }
+
+    if (request.method === "POST" && request.url === "/kiosk/display/no-match") {
+      await requireKiosk(request.headers.authorization);
+      setDisplayState({
+        status: "unknown",
+        message: "Fingerprint not recognized",
+        detail: "Try again or ask a mentor for help."
+      });
+      sendJson(response, 200, latestDisplayState);
       return;
     }
 
@@ -234,6 +256,7 @@ function syncKioskEvents(kioskId: string, body: KioskSyncRequest) {
   const accepted: ScanEvent[] = [];
   const duplicates: ScanEvent[] = [];
   const rejected: Array<KioskSyncRequest["events"][number] & { reason: string }> = [];
+  const acknowledgements: KioskScanAcknowledgement[] = [];
   const now = new Date().toISOString();
 
   for (const input of body.events) {
@@ -243,6 +266,7 @@ function syncKioskEvents(kioskId: string, body: KioskSyncRequest) {
       if (event.status === "accepted") accepted.push(event);
       else if (event.status === "duplicate") duplicates.push(event);
       else rejected.push({ ...input, reason: existing.rejection_reason ?? "previously rejected" });
+      acknowledgements.push(buildAcknowledgement(input, event.status, existing.rejection_reason ?? undefined));
       continue;
     }
 
@@ -250,19 +274,112 @@ function syncKioskEvents(kioskId: string, body: KioskSyncRequest) {
     if (!student?.active) {
       rejected.push({ ...input, reason: "student is not active in roster" });
       insertScanEvent(kioskId, input, now, "rejected", "student is not active in roster");
+      acknowledgements.push(buildAcknowledgement(input, "rejected", "student is not active in roster"));
       continue;
     }
 
     const previous = db.prepare("SELECT * FROM scan_events WHERE student_id = ? AND status = 'accepted' ORDER BY occurred_at DESC LIMIT 1").get(input.studentId) as DbScanEvent | undefined;
     if (isDuplicateScan(previous ? rowToScanEvent(previous) : undefined, input, DEFAULT_DUPLICATE_WINDOW_MS)) {
-      duplicates.push(insertScanEvent(kioskId, input, now, "duplicate", "duplicate scan window"));
+      const event = insertScanEvent(kioskId, input, now, "duplicate", "duplicate scan window");
+      duplicates.push(event);
+      acknowledgements.push(buildAcknowledgement(input, "duplicate", "duplicate scan window"));
       continue;
     }
 
-    accepted.push(insertScanEvent(kioskId, input, now, "accepted"));
+    const event = insertScanEvent(kioskId, input, now, "accepted");
+    accepted.push(event);
+    acknowledgements.push(buildAcknowledgement(input, "accepted"));
   }
 
-  return { accepted, duplicates, rejected };
+  const latest = acknowledgements[acknowledgements.length - 1];
+  if (latest) setDisplayState(displayStateForAcknowledgement(latest));
+  return { accepted, duplicates, rejected, acknowledgements };
+}
+
+function buildAcknowledgement(
+  input: KioskSyncRequest["events"][number],
+  status: "accepted" | "duplicate" | "rejected",
+  reason?: string
+): KioskScanAcknowledgement {
+  const student = db.prepare("SELECT first_name, last_name FROM students WHERE student_id = ?").get(input.studentId) as { first_name: string; last_name: string } | undefined;
+  const displayName = student ? `${student.first_name} ${student.last_name}` : undefined;
+
+  if (status === "duplicate") {
+    return {
+      localEventId: input.localEventId,
+      studentId: input.studentId,
+      status,
+      displayName,
+      message: displayName ? `${displayName} was already recorded.` : "Scan was already recorded."
+    };
+  }
+
+  if (status === "rejected") {
+    return {
+      localEventId: input.localEventId,
+      studentId: input.studentId,
+      status,
+      displayName,
+      message: reason === "student is not active in roster" ? "Member is not active in the roster." : "Scan could not be accepted."
+    };
+  }
+
+  const action = nextAcceptedScanAction(input.studentId, input.occurredAt);
+  return {
+    localEventId: input.localEventId,
+    studentId: input.studentId,
+    status,
+    displayName,
+    action,
+    message: action === "check_in" ? `Welcome, ${displayName ?? input.studentId}` : `Goodbye, ${displayName ?? input.studentId}`
+  };
+}
+
+function nextAcceptedScanAction(studentId: string, occurredAt: string): "check_in" | "check_out" {
+  const meetingDate = meetingDateForTimestamp(occurredAt);
+  const count = db.prepare("SELECT COUNT(*) AS count FROM scan_events WHERE student_id = ? AND status = 'accepted' AND date(occurred_at) = ?").get(studentId, meetingDate) as { count: number };
+  return count.count % 2 === 1 ? "check_in" : "check_out";
+}
+
+function displayStateForAcknowledgement(acknowledgement: KioskScanAcknowledgement): Omit<KioskDisplayState, "updatedAt"> {
+  if (acknowledgement.status === "duplicate") {
+    return {
+      status: "duplicate",
+      message: "Already recorded",
+      detail: acknowledgement.displayName ?? `Member ${acknowledgement.studentId}`
+    };
+  }
+
+  if (acknowledgement.status === "rejected") {
+    return {
+      status: "rejected",
+      message: "Scan rejected",
+      detail: acknowledgement.message
+    };
+  }
+
+  return {
+    status: acknowledgement.action === "check_out" ? "goodbye" : "welcome",
+    message: acknowledgement.action === "check_out" ? "Goodbye" : "Welcome",
+    detail: acknowledgement.displayName ?? `Member ${acknowledgement.studentId}`
+  };
+}
+
+function setDisplayState(state: Omit<KioskDisplayState, "updatedAt">) {
+  latestDisplayState = { ...state, updatedAt: new Date().toISOString() };
+}
+
+function currentDisplayState(): KioskDisplayState {
+  if (latestDisplayState.status === "ready") return latestDisplayState;
+  const ageMs = Date.now() - new Date(latestDisplayState.updatedAt).getTime();
+  if (ageMs < 8_000) return latestDisplayState;
+  latestDisplayState = {
+    status: "ready",
+    message: "Place finger on reader",
+    detail: "Attendance kiosk ready",
+    updatedAt: new Date().toISOString()
+  };
+  return latestDisplayState;
 }
 
 function insertScanEvent(
@@ -345,4 +462,11 @@ interface DbScanEvent {
   source: "fingerprint";
   status: "accepted" | "duplicate" | "rejected";
   rejection_reason: string | null;
+}
+
+interface KioskDisplayState {
+  status: "ready" | "welcome" | "goodbye" | "duplicate" | "rejected" | "unknown";
+  message: string;
+  detail: string;
+  updatedAt: string;
 }

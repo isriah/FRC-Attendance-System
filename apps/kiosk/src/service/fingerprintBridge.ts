@@ -4,6 +4,7 @@ import { EventEmitter } from "node:events";
 export type FingerprintBridgeEvent =
   | { type: "status"; online: boolean }
   | { type: "match"; studentId: string; templateSlot: number }
+  | { type: "no-match" }
   | { type: "error"; message: string };
 
 export class FingerprintBridge extends EventEmitter {
@@ -36,5 +37,6 @@ export function parseBridgeLine(line: string): FingerprintBridgeEvent {
     if (!studentId || !slot) return { type: "error", message: `invalid match line: ${line}` };
     return { type: "match", studentId, templateSlot: Number(slot) };
   }
+  if (type === "NO_MATCH") return { type: "no-match" };
   return { type: "error", message: `unknown bridge line: ${line}` };
 }

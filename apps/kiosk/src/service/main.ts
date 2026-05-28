@@ -13,11 +13,18 @@ bridge.on("bridge-event", async (event: FingerprintBridgeEvent) => {
     const local = queue.addFingerprintScan(event.studentId);
     console.log(`Queued scan ${local.localEventId} for student ${event.studentId}`);
     try {
-      await sync.flushPending();
+      const result = await sync.flushPending();
+      const acknowledgement = result?.acknowledgements?.find((ack) => ack.localEventId === local.localEventId);
+      if (acknowledgement) console.log(`Scan acknowledged: ${acknowledgement.message}`);
       console.log("Synced pending scans");
     } catch (error) {
       console.log(`Offline or sync failed; scan remains cached: ${error instanceof Error ? error.message : String(error)}`);
     }
+  }
+
+  if (event.type === "no-match") {
+    console.log("Fingerprint was not recognized");
+    sync.reportNoMatch().catch((error) => console.log(`Could not report unknown fingerprint: ${error instanceof Error ? error.message : String(error)}`));
   }
 
   if (event.type === "status") console.log(`Fingerprint reader ${event.online ? "online" : "offline"}`);

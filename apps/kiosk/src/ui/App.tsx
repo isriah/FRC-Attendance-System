@@ -2,31 +2,70 @@ import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
 
-interface ScanState {
-  status: "ready" | "matched" | "offline";
-  studentId?: string;
+type DisplayStatus = "ready" | "welcome" | "goodbye" | "duplicate" | "rejected" | "unknown" | "offline";
+
+interface KioskDisplayState {
+  status: DisplayStatus;
   message: string;
+  detail: string;
+  updatedAt?: string;
 }
 
+const readyState: KioskDisplayState = {
+  status: "ready",
+  message: "Place finger on reader",
+  detail: "Attendance kiosk ready"
+};
+
 function KioskApp() {
-  const [state, setState] = useState<ScanState>({ status: "ready", message: "Place finger on reader" });
+  const [state, setState] = useState<KioskDisplayState>(readyState);
 
   useEffect(() => {
-    const timer = window.setInterval(() => {
-      setState((current) => current.status === "matched" ? { status: "ready", message: "Place finger on reader" } : current);
-    }, 2500);
-    return () => window.clearInterval(timer);
+    let lastSeenUpdate = "";
+    let isMounted = true;
+
+    async function pollDisplayState() {
+      try {
+        const response = await fetch(`${apiBaseUrl()}/kiosk/display-state`, { cache: "no-store" });
+        if (!response.ok) throw new Error(`Display state request failed: ${response.status}`);
+        const next = (await response.json()) as KioskDisplayState;
+        if (!isMounted) return;
+        if (next.updatedAt && next.updatedAt !== lastSeenUpdate) {
+          lastSeenUpdate = next.updatedAt;
+          setState(next);
+        }
+      } catch {
+        if (isMounted) setState({ status: "offline", message: "Connection offline", detail: "Scans will continue caching locally" });
+      }
+    }
+
+    pollDisplayState();
+    const timer = window.setInterval(pollDisplayState, 750);
+    return () => {
+      isMounted = false;
+      window.clearInterval(timer);
+    };
   }, []);
+
+  useEffect(() => {
+    if (state.status === "ready" || state.status === "offline") return;
+    const timer = window.setTimeout(() => setState(readyState), 5000);
+    return () => window.clearTimeout(timer);
+  }, [state.updatedAt, state.status]);
 
   return (
     <main className="kiosk-shell">
       <section className={`scan-panel scan-panel-${state.status}`}>
         <div className="reader-mark" aria-hidden="true" />
         <h1>{state.message}</h1>
-        {state.studentId ? <p>Student {state.studentId}</p> : <p>Attendance kiosk ready</p>}
+        <p>{state.detail}</p>
       </section>
     </main>
   );
+}
+
+function apiBaseUrl() {
+  return `${window.location.protocol}//${window.location.hostname}:8787`;
 }
 
 createRoot(document.getElementById("root")!).render(<KioskApp />);

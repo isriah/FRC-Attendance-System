@@ -9,6 +9,7 @@ import time
 # STAT:ONLINE
 # STAT:OFFLINE
 # MATCH:<student_id>,<template_slot>
+# NO_MATCH
 #
 # Fingerprint templates stay on the sensor. This bridge maps template slots to
 # student IDs from the local kiosk SQLite database. Environment mappings are
@@ -73,6 +74,7 @@ def hardware_loop():
     debounce_seconds = float(os.environ.get("FINGERPRINT_DEBOUNCE_SECONDS", "8"))
     last_match = None
     last_match_at = 0.0
+    last_no_match_at = 0.0
 
     while True:
         try:
@@ -103,6 +105,11 @@ def hardware_loop():
                         emit(f"MATCH:{student_id},{slot}")
                         last_match = slot
                         last_match_at = now
+                else:
+                    now = time.monotonic()
+                    if now - last_no_match_at >= debounce_seconds:
+                        emit("NO_MATCH")
+                        last_no_match_at = now
 
                 time.sleep(repeat_delay_seconds)
         except Exception as exc:
