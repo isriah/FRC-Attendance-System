@@ -6,6 +6,7 @@ export interface KioskConfig {
   pythonPath: string;
   fingerprintBridgePath: string;
   commandPollSeconds: number;
+  displayStatePort: number;
   selfRestartDelayMs: number;
   systemRebootDelayMs: number;
 }
@@ -19,6 +20,7 @@ export function loadConfig(env = process.env): KioskConfig {
     pythonPath: env.PYTHON_PATH ?? "python3",
     fingerprintBridgePath: env.FINGERPRINT_BRIDGE_PATH ?? "./fingerprint_bridge.py",
     commandPollSeconds: numberEnv(env.KIOSK_COMMAND_POLL_SECONDS, 10),
+    displayStatePort: numberEnv(env.KIOSK_DISPLAY_STATE_PORT, 8788),
     selfRestartDelayMs: numberEnv(env.KIOSK_SELF_RESTART_DELAY_MS, 1000),
     systemRebootDelayMs: numberEnv(env.KIOSK_SYSTEM_REBOOT_DELAY_MS, 1000)
   };

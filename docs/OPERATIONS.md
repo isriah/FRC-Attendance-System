@@ -198,9 +198,10 @@ bash apps/kiosk/scripts/install-browser-autostart.sh
 This installs and starts:
 
 - `frc-bench-api.service`: lightweight local API on `http://localhost:8787`.
-- `frc-kiosk-service.service`: fingerprint bridge and offline queue sync.
+- `frc-kiosk-service.service`: fingerprint bridge, offline queue sync, and local display state on `http://localhost:8788/kiosk/display-state`.
 - `frc-kiosk-ui.service`: kiosk UI dev server on `http://localhost:5173`.
 - `frc-kiosk-service.service` also polls the configured API for remote kiosk commands every `KIOSK_COMMAND_POLL_SECONDS`, default `10`.
+- The kiosk UI polls display state from the kiosk service on port `8788` first, then falls back to the local bench API on port `8787`.
 
 Useful commands:
 

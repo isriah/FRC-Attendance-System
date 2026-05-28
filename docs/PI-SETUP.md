@@ -106,6 +106,7 @@ Expected:
 - kiosk UI active on `http://localhost:5173`
 - admin dashboard active on `http://localhost:5174`
 - fingerprint service log says `Fingerprint reader online`
+- kiosk service display state active on `http://localhost:8788/kiosk/display-state`
 
 The admin dashboard Kiosks tab includes remote command buttons for each active kiosk:
 
@@ -114,6 +115,8 @@ The admin dashboard Kiosks tab includes remote command buttons for each active k
 - `Reboot system`: schedules `sudo -n systemctl reboot`. This requires passwordless sudo permission for the kiosk user.
 
 The kiosk service polls the configured API for these commands every `KIOSK_COMMAND_POLL_SECONDS`, default `10`.
+
+The kiosk display polls the kiosk service display-state endpoint on port `8788` first, with a fallback to the local bench API on port `8787`. This keeps the display responsive when the fingerprint service syncs scans to the remote Worker instead of the local bench API.
 
 To enable the reboot command, install the narrow sudoers rule once on the Pi:
 

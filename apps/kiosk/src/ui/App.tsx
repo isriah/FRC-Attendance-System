@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
 
-type DisplayStatus = "ready" | "welcome" | "goodbye" | "duplicate" | "rejected" | "unknown" | "offline";
+type DisplayStatus = "ready" | "syncing" | "welcome" | "goodbye" | "duplicate" | "rejected" | "unknown" | "offline";
 
 interface KioskDisplayState {
   status: DisplayStatus;
@@ -42,9 +42,7 @@ function KioskApp() {
 
     async function pollDisplayState() {
       try {
-        const response = await fetch(`${apiBaseUrl()}/kiosk/display-state`, { cache: "no-store" });
-        if (!response.ok) throw new Error(`Display state request failed: ${response.status}`);
-        const next = (await response.json()) as KioskDisplayState;
+        const next = await fetchDisplayState();
         if (!isMounted) return;
         setLastRefreshAt(Date.now());
         if (next.updatedAt && next.updatedAt !== lastSeenUpdate) {
@@ -94,8 +92,27 @@ function KioskApp() {
   );
 }
 
-function apiBaseUrl() {
-  return `${window.location.protocol}//${window.location.hostname}:8787`;
+async function fetchDisplayState() {
+  const errors: string[] = [];
+  for (const baseUrl of displayBaseUrls()) {
+    try {
+      const response = await fetch(`${baseUrl}/kiosk/display-state`, { cache: "no-store" });
+      if (!response.ok) throw new Error(`Display state request failed: ${response.status}`);
+      return (await response.json()) as KioskDisplayState;
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : String(error));
+    }
+  }
+  throw new Error(errors.join("; "));
+}
+
+function displayBaseUrls() {
+  const configured = import.meta.env.VITE_KIOSK_DISPLAY_BASE_URL;
+  if (configured) return [configured.replace(/\/$/, "")];
+  return [
+    `${window.location.protocol}//${window.location.hostname}:8788`,
+    `${window.location.protocol}//${window.location.hostname}:8787`
+  ];
 }
 
 function formatDuration(milliseconds: number) {
