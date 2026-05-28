@@ -51,6 +51,7 @@ npm --workspace <package> run <script>
 - Dashboard is deployed to Cloudflare Pages project `frc-attendance-dashboard` at `https://frc-attendance-dashboard.pages.dev`.
 - The deployed dashboard build is configured with `VITE_API_BASE_URL=https://frc-attendance-api.frc-attendance.workers.dev` and Google OAuth client `180849199739-v04bktp7rfmimgjpvohmq7pinrrpr337.apps.googleusercontent.com`.
 - Automated dashboard smoke checks on 2026-05-28 confirmed the Pages URL serves, Google sign-in renders, API CORS allows dashboard requests, unauthenticated admin API calls are rejected with `401 Missing admin identity`, and credentialed admin pages load after Google sign-in. Interactive Google sign-in works after adding `https://frc-attendance-dashboard.pages.dev` to the Google OAuth client's Authorized JavaScript origins. Dashboard deployment `https://9c9f9dd1.frc-attendance-dashboard.pages.dev` prevents the production app from using a stale email-only local session when Google OAuth is configured.
+- The bench Raspberry Pi kiosk `bench-01` is registered in remote D1 and the installed user service on `AttKiosk` points at `https://frc-attendance-api.frc-attendance.workers.dev` via a systemd user drop-in. Offline queue replay against remote D1 was verified on 2026-05-28 with local event `remote-replay-1de1a877-fa2c-482f-b388-335758e663de`, which synced as an accepted scan for student `100001`.
 - Missed-meeting reporting is incomplete until a real meeting calendar or other meeting source of truth exists. Current missed-meeting calculations can only reason from dates where at least one attendance session exists.
 
 ## Development Guardrails
@@ -67,7 +68,6 @@ npm --workspace <package> run <script>
 
 ## Future Work Priorities
 
-- Point kiosk clients at the deployed Worker API and validate offline queue replay against the remote D1 backend.
 - Harden production admin auth UX by hiding or clearly limiting local email-only login when `VITE_GOOGLE_CLIENT_ID` is configured.
 - Improve reporting around a meeting calendar/source of truth so scheduled meetings with no scans are counted correctly.
 - Polish fingerprint administration by showing current slot mappings, auto-suggesting the next available slot, supporting delete/remap, and confirming before overwriting occupied slots.

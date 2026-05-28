@@ -8,6 +8,7 @@ Current production API:
 - D1 database: `frc-attendance`
 - D1 database ID: `c02c0ca8-033b-435f-ae21-2d8f3b203b22`
 - Workers account subdomain: `frc-attendance.workers.dev`
+- Registered bench kiosk: `bench-01`
 
 Current production dashboard:
 
@@ -157,6 +158,22 @@ For local development only, if no Google client ID is configured, the dashboard 
    ```bash
    npm --workspace @frc-attendance/kiosk run service
    ```
+
+Current bench Pi production API validation:
+
+- Hostname: `AttKiosk`
+- Kiosk ID: `bench-01`
+- API base URL: `https://frc-attendance-api.frc-attendance.workers.dev`
+- The raw kiosk token remains only on the Pi. Remote D1 stores only its SHA-256 hash.
+- On 2026-05-28, `bench-01` was registered in remote D1 and the installed user service was pointed at the deployed Worker with this user-service drop-in:
+
+  ```ini
+  # ~/.config/systemd/user/frc-kiosk-service.service.d/remote-worker.conf
+  [Service]
+  Environment=API_BASE_URL=https://frc-attendance-api.frc-attendance.workers.dev
+  ```
+
+- Offline queue replay was validated by stopping `frc-kiosk-service`, inserting one pending local fingerprint scan for student `100001`, restarting the service, and confirming the local event `remote-replay-1de1a877-fa2c-482f-b388-335758e663de` was marked synced locally and inserted into remote D1 as an accepted `scan_events` row.
 
 ## Pi User Services
 
