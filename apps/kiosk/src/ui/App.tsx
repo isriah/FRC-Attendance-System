@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import type { CSSProperties } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
 
@@ -27,6 +26,12 @@ const kioskBrand = {
 
 function KioskApp() {
   const [state, setState] = useState<KioskDisplayState>(readyState);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    root.style.setProperty("--primary-color", kioskBrand.primaryColor);
+    root.style.setProperty("--accent-color", kioskBrand.accentColor);
+  }, []);
 
   useEffect(() => {
     let lastSeenUpdate = "";
@@ -62,7 +67,7 @@ function KioskApp() {
   }, [state.updatedAt, state.status]);
 
   return (
-    <main className="kiosk-shell" style={themeStyle()}>
+    <main className="kiosk-shell">
       <header className="kiosk-brand">
         <span>{kioskBrand.title}</span>
         <strong>{kioskBrand.subtitle}</strong>
@@ -74,13 +79,6 @@ function KioskApp() {
       </section>
     </main>
   );
-}
-
-function themeStyle() {
-  return {
-    "--primary-color": kioskBrand.primaryColor,
-    "--accent-color": kioskBrand.accentColor
-  } as CSSProperties;
 }
 
 function apiBaseUrl() {
