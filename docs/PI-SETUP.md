@@ -115,7 +115,27 @@ View logs:
 journalctl --user -u frc-kiosk-service -f
 ```
 
-## 8. Minimal Roster Import
+## 8. Basic Kiosk Styling
+
+The kiosk UI supports simple branding through the `frc-kiosk-ui.service` environment:
+
+```ini
+Environment="VITE_KIOSK_TITLE=FRC Attendance"
+Environment="VITE_KIOSK_SUBTITLE=RoboLancers 321"
+Environment="VITE_KIOSK_ACCENT_COLOR=#1d7a8c"
+Environment="VITE_KIOSK_SUCCESS_COLOR=#2f8a49"
+Environment="VITE_KIOSK_WARNING_COLOR=#9d7a18"
+Environment="VITE_KIOSK_DANGER_COLOR=#a6333f"
+```
+
+After editing the service file, reload and restart:
+
+```bash
+systemctl --user daemon-reload
+systemctl --user restart frc-kiosk-ui
+```
+
+## 9. Minimal Roster Import
 
 For v1, the roster only needs:
 
@@ -126,7 +146,7 @@ memberId,firstName,lastName
 
 Open the dashboard at `http://<pi-hostname-or-ip>:5174`, go to the roster tab, and paste CSV with those three columns. The central API stores `memberId` as `student_id` for attendance-event compatibility.
 
-## 9. Bench Fingerprint Mapping
+## 10. Bench Fingerprint Mapping
 
 Fingerprint templates stay on the sensor. The kiosk SQLite DB stores only the mapping from sensor template slot to Student ID.
 
@@ -181,7 +201,7 @@ After changing enrollment mappings, restart the service:
 systemctl --user restart frc-kiosk-service
 ```
 
-## 10. Update Existing Kiosk
+## 11. Update Existing Kiosk
 
 ```bash
 cd ~/FRC-Attendance-System

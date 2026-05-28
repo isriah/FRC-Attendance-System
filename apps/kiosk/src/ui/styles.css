@@ -1,20 +1,53 @@
 html,
 body,
 #root {
+  --page-bg: #f4f6f8;
+  --surface-bg: #ffffff;
+  --text-color: #17202a;
+  --muted-color: #52616f;
+  --border-color: #d8dee6;
+  --accent-color: #1d7a8c;
+  --accent-soft: #c7edf2;
+  --success-color: #2f8a49;
+  --success-soft: #c9efd2;
+  --success-bg: #f2fbf4;
+  --warning-color: #9d7a18;
+  --warning-soft: #f5e7af;
+  --warning-bg: #fff9e7;
+  --danger-color: #a6333f;
+  --danger-soft: #f1c3cb;
+  --danger-bg: #fff3f5;
   width: 100%;
   height: 100%;
   margin: 0;
   font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  background: #f4f6f8;
-  color: #17202a;
+  background: var(--page-bg);
+  color: var(--text-color);
 }
 
 .kiosk-shell {
   min-height: 100%;
   display: grid;
-  place-items: center;
+  grid-template-rows: auto 1fr;
+  align-items: center;
+  justify-items: center;
   padding: 32px;
   box-sizing: border-box;
+}
+
+.kiosk-brand {
+  width: min(720px, 100%);
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  color: var(--muted-color);
+  font-size: 20px;
+  margin-bottom: 20px;
+}
+
+.kiosk-brand strong {
+  color: var(--text-color);
+  font-size: 22px;
 }
 
 .scan-panel {
@@ -24,8 +57,8 @@ body,
   justify-items: center;
   align-content: center;
   gap: 24px;
-  background: #ffffff;
-  border: 1px solid #d8dee6;
+  background: var(--surface-bg);
+  border: 1px solid var(--border-color);
   border-radius: 8px;
   box-shadow: 0 18px 48px rgba(24, 39, 75, 0.12);
   text-align: center;
@@ -36,44 +69,44 @@ body,
   width: 132px;
   height: 132px;
   border-radius: 50%;
-  border: 14px solid #1d7a8c;
-  box-shadow: inset 0 0 0 18px #c7edf2;
+  border: 14px solid var(--accent-color);
+  box-shadow: inset 0 0 0 18px var(--accent-soft);
 }
 
 .scan-panel-welcome,
 .scan-panel-goodbye {
-  border-color: #8ac69a;
-  background: #f2fbf4;
+  border-color: var(--success-color);
+  background: var(--success-bg);
 }
 
 .scan-panel-welcome .reader-mark,
 .scan-panel-goodbye .reader-mark {
-  border-color: #2f8a49;
-  box-shadow: inset 0 0 0 18px #c9efd2;
+  border-color: var(--success-color);
+  box-shadow: inset 0 0 0 18px var(--success-soft);
 }
 
 .scan-panel-duplicate {
-  border-color: #dac276;
-  background: #fff9e7;
+  border-color: var(--warning-color);
+  background: var(--warning-bg);
 }
 
 .scan-panel-duplicate .reader-mark {
-  border-color: #9d7a18;
-  box-shadow: inset 0 0 0 18px #f5e7af;
+  border-color: var(--warning-color);
+  box-shadow: inset 0 0 0 18px var(--warning-soft);
 }
 
 .scan-panel-rejected,
 .scan-panel-unknown,
 .scan-panel-offline {
-  border-color: #d98f9b;
-  background: #fff3f5;
+  border-color: var(--danger-color);
+  background: var(--danger-bg);
 }
 
 .scan-panel-rejected .reader-mark,
 .scan-panel-unknown .reader-mark,
 .scan-panel-offline .reader-mark {
-  border-color: #a6333f;
-  box-shadow: inset 0 0 0 18px #f1c3cb;
+  border-color: var(--danger-color);
+  box-shadow: inset 0 0 0 18px var(--danger-soft);
 }
 
 h1 {
@@ -85,5 +118,5 @@ h1 {
 p {
   margin: 0;
   font-size: 24px;
-  color: #52616f;
+  color: var(--muted-color);
 }

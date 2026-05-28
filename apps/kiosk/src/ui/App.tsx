@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import type { CSSProperties } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
 
@@ -15,6 +16,15 @@ const readyState: KioskDisplayState = {
   status: "ready",
   message: "Place finger on reader",
   detail: "Attendance kiosk ready"
+};
+
+const kioskBrand = {
+  title: import.meta.env.VITE_KIOSK_TITLE ?? "FRC Attendance",
+  subtitle: import.meta.env.VITE_KIOSK_SUBTITLE ?? "RoboLancers 321",
+  accentColor: import.meta.env.VITE_KIOSK_ACCENT_COLOR ?? "#1d7a8c",
+  successColor: import.meta.env.VITE_KIOSK_SUCCESS_COLOR ?? "#2f8a49",
+  warningColor: import.meta.env.VITE_KIOSK_WARNING_COLOR ?? "#9d7a18",
+  dangerColor: import.meta.env.VITE_KIOSK_DANGER_COLOR ?? "#a6333f"
 };
 
 function KioskApp() {
@@ -54,7 +64,11 @@ function KioskApp() {
   }, [state.updatedAt, state.status]);
 
   return (
-    <main className="kiosk-shell">
+    <main className="kiosk-shell" style={themeStyle()}>
+      <header className="kiosk-brand">
+        <span>{kioskBrand.title}</span>
+        <strong>{kioskBrand.subtitle}</strong>
+      </header>
       <section className={`scan-panel scan-panel-${state.status}`}>
         <div className="reader-mark" aria-hidden="true" />
         <h1>{state.message}</h1>
@@ -62,6 +76,15 @@ function KioskApp() {
       </section>
     </main>
   );
+}
+
+function themeStyle() {
+  return {
+    "--accent-color": kioskBrand.accentColor,
+    "--success-color": kioskBrand.successColor,
+    "--warning-color": kioskBrand.warningColor,
+    "--danger-color": kioskBrand.dangerColor
+  } as CSSProperties;
 }
 
 function apiBaseUrl() {

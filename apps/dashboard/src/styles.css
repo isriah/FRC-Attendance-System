@@ -1,12 +1,20 @@
 html,
 body,
 #root {
+  --page-bg: #f5f7f9;
+  --surface-bg: #ffffff;
+  --text-color: #17202a;
+  --muted-color: #52616f;
+  --border-color: #d8dee6;
+  --control-border: #b9c3ce;
+  --accent-color: #1d7a8c;
+  --danger-color: #a6333f;
   width: 100%;
   min-height: 100%;
   margin: 0;
   font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  color: #17202a;
-  background: #f5f7f9;
+  color: var(--text-color);
+  background: var(--page-bg);
 }
 
 button,
@@ -17,18 +25,18 @@ textarea {
 }
 
 button {
-  border: 1px solid #b9c3ce;
+  border: 1px solid var(--control-border);
   border-radius: 6px;
-  background: #ffffff;
+  background: var(--surface-bg);
   padding: 10px 14px;
   cursor: pointer;
 }
 
 button.active,
 button:hover {
-  background: #1d7a8c;
-  border-color: #1d7a8c;
-  color: #ffffff;
+  background: var(--accent-color);
+  border-color: var(--accent-color);
+  color: var(--surface-bg);
 }
 
 .dashboard {
@@ -38,8 +46,8 @@ button:hover {
 }
 
 aside {
-  border-right: 1px solid #d8dee6;
-  background: #ffffff;
+  border-right: 1px solid var(--border-color);
+  background: var(--surface-bg);
   padding: 24px;
   display: flex;
   flex-direction: column;
@@ -69,8 +77,8 @@ header {
 
 section,
 .metric {
-  background: #ffffff;
-  border: 1px solid #d8dee6;
+  background: var(--surface-bg);
+  border: 1px solid var(--border-color);
   border-radius: 8px;
   padding: 18px;
   box-sizing: border-box;
@@ -84,7 +92,7 @@ section,
 
 .metric span {
   display: block;
-  color: #5d6b78;
+  color: var(--muted-color);
   margin-bottom: 10px;
 }
 
@@ -95,10 +103,10 @@ section,
 input,
 select,
 textarea {
-  border: 1px solid #b9c3ce;
+  border: 1px solid var(--control-border);
   border-radius: 6px;
   padding: 10px 12px;
-  background: #ffffff;
+  background: var(--surface-bg);
 }
 
 textarea {
@@ -141,7 +149,7 @@ td {
 }
 
 th {
-  color: #52616f;
+  color: var(--muted-color);
   font-weight: 600;
 }
 
@@ -154,7 +162,7 @@ pre {
 }
 
 .error {
-  color: #a6333f;
+  color: var(--danger-color);
 }
 
 .notice {
@@ -191,8 +199,8 @@ pre {
   width: min(420px, calc(100vw - 32px));
   display: grid;
   gap: 14px;
-  background: #ffffff;
-  border: 1px solid #d8dee6;
+  background: var(--surface-bg);
+  border: 1px solid var(--border-color);
   border-radius: 8px;
   padding: 24px;
 }
