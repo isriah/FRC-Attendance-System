@@ -30,6 +30,14 @@ export async function createKioskCommand(env: Env, input: { kioskId: string; act
   return command;
 }
 
+export async function listRecentKioskCommands(env: Env, limit = 50): Promise<KioskCommand[]> {
+  const cappedLimit = Math.max(1, Math.min(Math.floor(limit), 200));
+  const rows = await env.DB.prepare(
+    "SELECT * FROM kiosk_commands ORDER BY requested_at DESC LIMIT ?"
+  ).bind(cappedLimit).all<KioskCommandRow>();
+  return rows.results.map(rowToCommand);
+}
+
 export async function claimPendingKioskCommands(env: Env, kioskId: string): Promise<KioskCommand[]> {
   const now = new Date().toISOString();
   const rows = await env.DB.prepare(

@@ -4,7 +4,7 @@ import { addManualEvent, syncKioskEvents } from "./attendanceStore";
 import type { Env } from "./env";
 import { buildLegacySheetExport } from "./export";
 import { errorResponse, json, noContent, optionsResponse, readJson } from "./http";
-import { claimPendingKioskCommands, completeKioskCommand, createKioskCommand, requireKioskCommandAction } from "./kioskCommands";
+import { claimPendingKioskCommands, completeKioskCommand, createKioskCommand, listRecentKioskCommands, requireKioskCommandAction } from "./kioskCommands";
 import { buildMemberAttendanceReport, buildPresenceReport } from "./reports";
 import { syncRoster, type RosterMemberInput } from "./roster";
 
@@ -67,6 +67,11 @@ export default {
         await requireAdmin(request, env);
         const rows = await env.DB.prepare("SELECT kiosk_id, name, location, active, last_seen_at FROM kiosks ORDER BY name").all();
         return json({ kiosks: rows.results });
+      }
+
+      if (route === "GET /admin/kiosk-commands") {
+        await requireAdmin(request, env);
+        return json({ commands: await listRecentKioskCommands(env, Number(url.searchParams.get("limit") ?? 50)) });
       }
 
       const adminKioskCommand = url.pathname.match(/^\/admin\/kiosks\/([^/]+)\/commands$/);

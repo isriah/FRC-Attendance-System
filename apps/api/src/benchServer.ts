@@ -165,6 +165,12 @@ const server = createServer(async (request, response) => {
       return;
     }
 
+    if (request.method === "GET" && request.url?.startsWith("/admin/kiosk-commands")) {
+      const url = new URL(request.url, `http://${request.headers.host ?? "localhost"}`);
+      sendJson(response, 200, { commands: listRecentKioskCommands(Number(url.searchParams.get("limit") ?? 50)) });
+      return;
+    }
+
     const adminKioskCommand = request.url?.match(/^\/admin\/kiosks\/([^/]+)\/commands$/);
     if (request.method === "POST" && adminKioskCommand) {
       const body = await readBody<{ action: KioskCommandAction }>(request);
@@ -250,6 +256,12 @@ function createKioskCommand(kioskId: string, action: KioskCommandAction): KioskC
     "INSERT INTO kiosk_commands (id, kiosk_id, action, status, requested_at) VALUES (?, ?, ?, 'pending', ?)"
   ).run(command.id, kioskId, action, command.requestedAt);
   return command;
+}
+
+function listRecentKioskCommands(limit = 50): KioskCommand[] {
+  const cappedLimit = Math.max(1, Math.min(Math.floor(limit), 200));
+  const rows = db.prepare("SELECT * FROM kiosk_commands ORDER BY requested_at DESC LIMIT ?").all(cappedLimit) as KioskCommandRow[];
+  return rows.map(rowToCommand);
 }
 
 function claimPendingKioskCommands(kioskId: string): KioskCommand[] {

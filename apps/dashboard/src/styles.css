@@ -219,6 +219,78 @@ pre {
   white-space: nowrap;
 }
 
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  padding: 4px 9px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--muted-color);
+  background: var(--page-bg);
+}
+
+.status-badge.active,
+.status-badge.completed {
+  border-color: var(--primary-soft);
+  color: var(--primary-dark);
+  background: var(--primary-bg);
+}
+
+.status-badge.pending,
+.status-badge.running {
+  border-color: var(--accent-soft);
+  color: var(--accent-dark);
+  background: var(--accent-bg);
+}
+
+.status-badge.failed,
+.status-badge.inactive {
+  border-color: var(--danger-soft);
+  color: var(--danger-color);
+  background: var(--danger-bg);
+}
+
+.command-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.command-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) auto;
+  gap: 8px;
+  align-items: start;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 10px;
+  background: var(--page-bg);
+}
+
+.command-row strong,
+.command-row span {
+  display: block;
+}
+
+.command-row span,
+.command-row p,
+.empty-state {
+  color: var(--muted-color);
+  font-size: 13px;
+}
+
+.command-row p {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.empty-state {
+  margin: 8px 0 0;
+}
+
 .login {
   min-height: 100vh;
   display: grid;

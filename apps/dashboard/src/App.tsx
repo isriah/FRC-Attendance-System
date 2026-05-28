@@ -5,6 +5,7 @@ import "./styles.css";
 
 type Tab = "overview" | "roster" | "kiosks" | "events" | "reports" | "export";
 type KioskCommandAction = "restart_display" | "restart_services" | "reboot_system";
+type KioskCommandStatus = "pending" | "running" | "completed" | "failed";
 
 interface KioskRow {
   kiosk_id: string;
@@ -12,6 +13,18 @@ interface KioskRow {
   location?: string;
   active: number;
   last_seen_at?: string;
+}
+
+interface KioskCommandRow {
+  id: string;
+  kioskId: string;
+  action: KioskCommandAction;
+  status: KioskCommandStatus;
+  requestedBy?: string;
+  requestedAt: string;
+  claimedAt?: string;
+  completedAt?: string;
+  message?: string;
 }
 
 const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
@@ -219,8 +232,10 @@ function Roster({ session }: { session: DashboardSession }) {
 
 function Kiosks({ session }: { session: DashboardSession }) {
   const { data, error, reload } = useApi<{ kiosks: KioskRow[] }>("/admin/kiosks", session);
+  const { data: commands, error: commandError, reload: reloadCommands } = useApi<{ commands: KioskCommandRow[] }>("/admin/kiosk-commands?limit=75", session);
   const [commandMessages, setCommandMessages] = useState<Record<string, { kind: "success" | "error"; text: string }>>({});
   const [runningCommand, setRunningCommand] = useState<string>();
+  const commandsByKiosk = groupCommandsByKiosk(commands?.commands ?? []);
 
   async function sendCommand(kiosk: KioskRow, action: KioskCommandAction) {
     if (action === "reboot_system" && !window.confirm(`Reboot ${kiosk.kiosk_id}? The kiosk will go offline briefly.`)) return;
@@ -232,6 +247,7 @@ function Kiosks({ session }: { session: DashboardSession }) {
       await apiPost(`/admin/kiosks/${encodeURIComponent(kiosk.kiosk_id)}/commands`, { action }, session);
       setCommandMessages((messages) => ({ ...messages, [kiosk.kiosk_id]: { kind: "success", text: `${commandLabel(action)} command queued. The kiosk should pick it up shortly.` } }));
       reload();
+      reloadCommands();
     } catch (error) {
       setCommandMessages((messages) => ({ ...messages, [kiosk.kiosk_id]: { kind: "error", text: friendlyDashboardError(error) } }));
     } finally {
@@ -258,43 +274,70 @@ function Kiosks({ session }: { session: DashboardSession }) {
       <section>
         <h2>Kiosks</h2>
         {error ? <p className="error">{error}</p> : null}
+        {commandError ? <p className="error">{commandError}</p> : null}
         <table>
           <thead>
             <tr>
-              {["kiosk_id", "name", "location", "active", "last_seen_at", "actions"].map((column) => <th key={column}>{column}</th>)}
+              {["kiosk_id", "name", "location", "health", "last_seen_at", "commands"].map((column) => <th key={column}>{column}</th>)}
             </tr>
           </thead>
           <tbody>
-            {(data?.kiosks ?? []).map((kiosk) => (
-              <tr key={kiosk.kiosk_id}>
-                <td>{kiosk.kiosk_id}</td>
-                <td>{kiosk.name}</td>
-                <td>{kiosk.location ?? ""}</td>
-                <td>{String(kiosk.active)}</td>
-                <td>{kiosk.last_seen_at ?? ""}</td>
-                <td>
-                  <div className="kiosk-actions">
-                    {(["restart_display", "restart_services", "reboot_system"] as KioskCommandAction[]).map((action) => {
-                      const commandKey = `${kiosk.kiosk_id}:${action}`;
-                      return (
-                        <button key={action} disabled={runningCommand === commandKey || !kiosk.active} onClick={() => sendCommand(kiosk, action)}>
-                          {runningCommand === commandKey ? "Queuing..." : commandLabel(action)}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  {(() => {
-                    const commandMessage = commandMessages[kiosk.kiosk_id];
-                    return commandMessage ? <p className={`notice ${commandMessage.kind}`}>{commandMessage.text}</p> : null;
-                  })()}
-                </td>
-              </tr>
-            ))}
+            {(data?.kiosks ?? []).map((kiosk) => {
+              const recentCommands = commandsByKiosk[kiosk.kiosk_id] ?? [];
+              return (
+                <tr key={kiosk.kiosk_id}>
+                  <td>{kiosk.kiosk_id}</td>
+                  <td>{kiosk.name}</td>
+                  <td>{kiosk.location ?? ""}</td>
+                  <td><StatusBadge status={kiosk.active ? "active" : "inactive"} /></td>
+                  <td>{formatDateTime(kiosk.last_seen_at)}</td>
+                  <td>
+                    <div className="kiosk-actions">
+                      {(["restart_display", "restart_services", "reboot_system"] as KioskCommandAction[]).map((action) => {
+                        const commandKey = `${kiosk.kiosk_id}:${action}`;
+                        return (
+                          <button key={action} disabled={runningCommand === commandKey || !kiosk.active} onClick={() => sendCommand(kiosk, action)}>
+                            {runningCommand === commandKey ? "Queuing..." : commandLabel(action)}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {(() => {
+                      const commandMessage = commandMessages[kiosk.kiosk_id];
+                      return commandMessage ? <p className={`notice ${commandMessage.kind}`}>{commandMessage.text}</p> : null;
+                    })()}
+                    <CommandTimeline commands={recentCommands.slice(0, 4)} />
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </section>
     </>
   );
+}
+
+function CommandTimeline({ commands }: { commands: KioskCommandRow[] }) {
+  if (commands.length === 0) return <p className="empty-state">No recent commands.</p>;
+  return (
+    <div className="command-list">
+      {commands.map((command) => (
+        <article key={command.id} className="command-row">
+          <div>
+            <strong>{commandLabel(command.action)}</strong>
+            <span>{commandTimestamp(command)}</span>
+          </div>
+          <StatusBadge status={command.status} />
+          {command.message ? <p>{command.message}</p> : null}
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function StatusBadge({ status }: { status: KioskCommandStatus | "active" | "inactive" }) {
+  return <span className={`status-badge ${status}`}>{statusLabel(status)}</span>;
 }
 
 function Events({ session }: { session: DashboardSession }) {
@@ -541,6 +584,38 @@ function commandLabel(action: KioskCommandAction) {
   if (action === "restart_display") return "Restart display";
   if (action === "restart_services") return "Restart services";
   return "Reboot system";
+}
+
+function groupCommandsByKiosk(commands: KioskCommandRow[]) {
+  return commands.reduce<Record<string, KioskCommandRow[]>>((groups, command) => {
+    groups[command.kioskId] = [...(groups[command.kioskId] ?? []), command];
+    return groups;
+  }, {});
+}
+
+function commandTimestamp(command: KioskCommandRow) {
+  if (command.completedAt) return `Completed ${formatDateTime(command.completedAt)}`;
+  if (command.claimedAt) return `Started ${formatDateTime(command.claimedAt)}`;
+  return `Queued ${formatDateTime(command.requestedAt)}`;
+}
+
+function formatDateTime(value?: string) {
+  if (!value) return "";
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  }).format(new Date(value));
+}
+
+function statusLabel(status: KioskCommandStatus | "active" | "inactive") {
+  if (status === "active") return "Active";
+  if (status === "inactive") return "Inactive";
+  if (status === "pending") return "Queued";
+  if (status === "running") return "Running";
+  if (status === "completed") return "Completed";
+  return "Failed";
 }
 
 function parseCsvLine(line: string) {
