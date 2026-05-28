@@ -26,6 +26,9 @@ const kioskBrand = {
 
 function KioskApp() {
   const [state, setState] = useState<KioskDisplayState>(readyState);
+  const [startedAt] = useState(() => Date.now());
+  const [lastRefreshAt, setLastRefreshAt] = useState<number>();
+  const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
     const root = document.documentElement;
@@ -43,6 +46,7 @@ function KioskApp() {
         if (!response.ok) throw new Error(`Display state request failed: ${response.status}`);
         const next = (await response.json()) as KioskDisplayState;
         if (!isMounted) return;
+        setLastRefreshAt(Date.now());
         if (next.updatedAt && next.updatedAt !== lastSeenUpdate) {
           lastSeenUpdate = next.updatedAt;
           setState(next);
@@ -58,6 +62,11 @@ function KioskApp() {
       isMounted = false;
       window.clearInterval(timer);
     };
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
   }, []);
 
   useEffect(() => {
@@ -77,12 +86,27 @@ function KioskApp() {
         <h1>{state.message}</h1>
         <p>{state.detail}</p>
       </section>
+      <footer className="debug-status" aria-label="Kiosk debug timing">
+        <span>Uptime {formatDuration(now - startedAt)}</span>
+        <span>{lastRefreshAt ? `Last refresh ${formatDuration(now - lastRefreshAt)} ago` : "Last refresh pending"}</span>
+      </footer>
     </main>
   );
 }
 
 function apiBaseUrl() {
   return `${window.location.protocol}//${window.location.hostname}:8787`;
+}
+
+function formatDuration(milliseconds: number) {
+  const totalSeconds = Math.max(0, Math.floor(milliseconds / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (hours > 0) return `${hours}h ${minutes}m ${seconds}s`;
+  if (minutes > 0) return `${minutes}m ${seconds}s`;
+  return `${seconds}s`;
 }
 
 createRoot(document.getElementById("root")!).render(<KioskApp />);
