@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { displayStateForAcknowledgement } from "../src/service/displayStateServer";
+import { DisplayStateServer, displayStateForAcknowledgement } from "../src/service/displayStateServer";
 
 describe("display state acknowledgements", () => {
   it("shows accepted check-ins as welcome messages", () => {
@@ -29,6 +29,29 @@ describe("display state acknowledgements", () => {
       status: "duplicate",
       message: "Already recorded",
       detail: "Bench Student"
+    });
+  });
+
+  it("falls back to member IDs when the sync result has no acknowledgement", () => {
+    const server = new DisplayStateServer();
+    server.setSyncResult("local-3", "100001", {
+      accepted: [{
+        id: "bench-01:local-3",
+        kioskId: "bench-01",
+        localEventId: "local-3",
+        studentId: "100001",
+        occurredAt: new Date().toISOString(),
+        source: "fingerprint",
+        status: "accepted"
+      }],
+      duplicates: [],
+      rejected: []
+    });
+
+    expect(server.current()).toMatchObject({
+      status: "welcome",
+      message: "Scan accepted",
+      detail: "Member 100001"
     });
   });
 });

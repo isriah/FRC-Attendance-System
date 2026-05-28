@@ -24,6 +24,8 @@ bridge.on("bridge-event", async (event: FingerprintBridgeEvent) => {
       if (acknowledgement) {
         display.setAcknowledgement(acknowledgement);
         console.log(`Scan acknowledged: ${acknowledgement.message}`);
+      } else if (result) {
+        display.setSyncResult(local.localEventId, event.studentId, result);
       }
       console.log("Synced pending scans");
     } catch (error) {

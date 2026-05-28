@@ -1,5 +1,5 @@
 import { createServer, type Server } from "node:http";
-import type { KioskScanAcknowledgement } from "@frc-attendance/shared";
+import type { KioskScanAcknowledgement, KioskSyncResult } from "@frc-attendance/shared";
 
 export type DisplayStatus = "ready" | "syncing" | "welcome" | "goodbye" | "duplicate" | "rejected" | "unknown" | "offline";
 
@@ -18,6 +18,10 @@ export class DisplayStateServer {
   });
 
   private server?: Server;
+
+  current(): KioskDisplayState {
+    return this.state;
+  }
 
   start(port: number): void {
     if (this.server) return;
@@ -59,6 +63,37 @@ export class DisplayStateServer {
 
   setAcknowledgement(acknowledgement: KioskScanAcknowledgement): void {
     this.set(displayStateForAcknowledgement(acknowledgement));
+  }
+
+  setSyncResult(localEventId: string, studentId: string, result: KioskSyncResult): void {
+    const accepted = result.accepted.find((event) => event.localEventId === localEventId);
+    if (accepted) {
+      this.set({
+        status: "welcome",
+        message: "Scan accepted",
+        detail: `Member ${studentId}`
+      });
+      return;
+    }
+
+    const duplicate = result.duplicates.find((event) => event.localEventId === localEventId);
+    if (duplicate) {
+      this.set({
+        status: "duplicate",
+        message: "Already recorded",
+        detail: `Member ${studentId}`
+      });
+      return;
+    }
+
+    const rejected = result.rejected.find((event) => event.localEventId === localEventId);
+    if (rejected) {
+      this.set({
+        status: "rejected",
+        message: "Scan rejected",
+        detail: rejected.reason
+      });
+    }
   }
 
   setUnknownFingerprint(): void {
