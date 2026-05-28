@@ -21,10 +21,8 @@ const readyState: KioskDisplayState = {
 const kioskBrand = {
   title: import.meta.env.VITE_KIOSK_TITLE ?? "FRC Attendance",
   subtitle: import.meta.env.VITE_KIOSK_SUBTITLE ?? "RoboLancers 321",
-  accentColor: import.meta.env.VITE_KIOSK_ACCENT_COLOR ?? "#1d7a8c",
-  successColor: import.meta.env.VITE_KIOSK_SUCCESS_COLOR ?? "#2f8a49",
-  warningColor: import.meta.env.VITE_KIOSK_WARNING_COLOR ?? "#9d7a18",
-  dangerColor: import.meta.env.VITE_KIOSK_DANGER_COLOR ?? "#a6333f"
+  primaryColor: import.meta.env.VITE_KIOSK_PRIMARY_COLOR ?? "#1d7a8c",
+  accentColor: import.meta.env.VITE_KIOSK_ACCENT_COLOR ?? "#f2c14e"
 };
 
 function KioskApp() {
@@ -80,10 +78,8 @@ function KioskApp() {
 
 function themeStyle() {
   return {
-    "--accent-color": kioskBrand.accentColor,
-    "--success-color": kioskBrand.successColor,
-    "--warning-color": kioskBrand.warningColor,
-    "--danger-color": kioskBrand.dangerColor
+    "--primary-color": kioskBrand.primaryColor,
+    "--accent-color": kioskBrand.accentColor
   } as CSSProperties;
 }
 

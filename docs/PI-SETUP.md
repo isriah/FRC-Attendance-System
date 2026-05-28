@@ -122,11 +122,11 @@ The kiosk UI supports simple branding through the `frc-kiosk-ui.service` environ
 ```ini
 Environment="VITE_KIOSK_TITLE=FRC Attendance"
 Environment="VITE_KIOSK_SUBTITLE=RoboLancers 321"
-Environment="VITE_KIOSK_ACCENT_COLOR=#1d7a8c"
-Environment="VITE_KIOSK_SUCCESS_COLOR=#2f8a49"
-Environment="VITE_KIOSK_WARNING_COLOR=#9d7a18"
-Environment="VITE_KIOSK_DANGER_COLOR=#a6333f"
+Environment="VITE_KIOSK_PRIMARY_COLOR=#1d7a8c"
+Environment="VITE_KIOSK_ACCENT_COLOR=#f2c14e"
 ```
+
+The rest of the kiosk palette is derived automatically from those two colors.
 
 After editing the service file, reload and restart:
 

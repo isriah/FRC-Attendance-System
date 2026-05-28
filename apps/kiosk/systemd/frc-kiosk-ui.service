@@ -9,7 +9,8 @@ WorkingDirectory=%h/FRC-Attendance-System
 Environment=HOST=0.0.0.0
 Environment="VITE_KIOSK_TITLE=FRC Attendance"
 Environment="VITE_KIOSK_SUBTITLE=RoboLancers 321"
-Environment="VITE_KIOSK_ACCENT_COLOR=#1d7a8c"
+Environment="VITE_KIOSK_PRIMARY_COLOR=#1d7a8c"
+Environment="VITE_KIOSK_ACCENT_COLOR=#f2c14e"
 ExecStart=/bin/bash -lc 'source %h/.nvm/nvm.sh; nvm use 22 >/dev/null; npm --workspace @frc-attendance/kiosk run dev -- --host 0.0.0.0'
 Restart=always
 RestartSec=5

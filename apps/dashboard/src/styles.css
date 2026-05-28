@@ -7,8 +7,17 @@ body,
   --muted-color: #52616f;
   --border-color: #d8dee6;
   --control-border: #b9c3ce;
-  --accent-color: #1d7a8c;
-  --danger-color: #a6333f;
+  --primary-color: #1d7a8c;
+  --accent-color: #f2c14e;
+  --primary-dark: color-mix(in srgb, var(--primary-color), #000000 24%);
+  --primary-soft: color-mix(in srgb, var(--primary-color), #ffffff 78%);
+  --primary-bg: color-mix(in srgb, var(--primary-color), #ffffff 93%);
+  --accent-dark: color-mix(in srgb, var(--accent-color), #000000 38%);
+  --accent-soft: color-mix(in srgb, var(--accent-color), #ffffff 72%);
+  --accent-bg: color-mix(in srgb, var(--accent-color), #ffffff 91%);
+  --danger-color: color-mix(in srgb, var(--accent-color), #8b0000 58%);
+  --danger-soft: color-mix(in srgb, var(--danger-color), #ffffff 74%);
+  --danger-bg: color-mix(in srgb, var(--danger-color), #ffffff 92%);
   width: 100%;
   min-height: 100%;
   margin: 0;
@@ -34,8 +43,8 @@ button {
 
 button.active,
 button:hover {
-  background: var(--accent-color);
-  border-color: var(--accent-color);
+  background: var(--primary-color);
+  border-color: var(--primary-color);
   color: var(--surface-bg);
 }
 
@@ -172,21 +181,21 @@ pre {
 }
 
 .notice.info {
-  background: #edf4fb;
-  border: 1px solid #bed5eb;
-  color: #224a6b;
+  background: var(--primary-bg);
+  border: 1px solid var(--primary-soft);
+  color: var(--primary-dark);
 }
 
 .notice.success {
-  background: #edf7ef;
-  border: 1px solid #b7d9bf;
-  color: #245232;
+  background: var(--primary-bg);
+  border: 1px solid var(--primary-soft);
+  color: var(--primary-dark);
 }
 
 .notice.error {
-  background: #fbeff1;
-  border: 1px solid #e4b7bf;
-  color: #8c2635;
+  background: var(--danger-bg);
+  border: 1px solid var(--danger-soft);
+  color: var(--danger-color);
 }
 
 .login {

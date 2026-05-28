@@ -6,17 +6,17 @@ body,
   --text-color: #17202a;
   --muted-color: #52616f;
   --border-color: #d8dee6;
-  --accent-color: #1d7a8c;
-  --accent-soft: #c7edf2;
-  --success-color: #2f8a49;
-  --success-soft: #c9efd2;
-  --success-bg: #f2fbf4;
-  --warning-color: #9d7a18;
-  --warning-soft: #f5e7af;
-  --warning-bg: #fff9e7;
-  --danger-color: #a6333f;
-  --danger-soft: #f1c3cb;
-  --danger-bg: #fff3f5;
+  --primary-color: #1d7a8c;
+  --accent-color: #f2c14e;
+  --primary-dark: color-mix(in srgb, var(--primary-color), #000000 26%);
+  --primary-soft: color-mix(in srgb, var(--primary-color), #ffffff 76%);
+  --primary-bg: color-mix(in srgb, var(--primary-color), #ffffff 92%);
+  --accent-dark: color-mix(in srgb, var(--accent-color), #000000 38%);
+  --accent-soft: color-mix(in srgb, var(--accent-color), #ffffff 70%);
+  --accent-bg: color-mix(in srgb, var(--accent-color), #ffffff 90%);
+  --danger-color: color-mix(in srgb, var(--accent-color), #8b0000 58%);
+  --danger-soft: color-mix(in srgb, var(--danger-color), #ffffff 74%);
+  --danger-bg: color-mix(in srgb, var(--danger-color), #ffffff 92%);
   width: 100%;
   height: 100%;
   margin: 0;
@@ -69,30 +69,30 @@ body,
   width: 132px;
   height: 132px;
   border-radius: 50%;
-  border: 14px solid var(--accent-color);
-  box-shadow: inset 0 0 0 18px var(--accent-soft);
+  border: 14px solid var(--primary-color);
+  box-shadow: inset 0 0 0 18px var(--primary-soft);
 }
 
 .scan-panel-welcome,
 .scan-panel-goodbye {
-  border-color: var(--success-color);
-  background: var(--success-bg);
+  border-color: var(--primary-dark);
+  background: var(--primary-bg);
 }
 
 .scan-panel-welcome .reader-mark,
 .scan-panel-goodbye .reader-mark {
-  border-color: var(--success-color);
-  box-shadow: inset 0 0 0 18px var(--success-soft);
+  border-color: var(--primary-dark);
+  box-shadow: inset 0 0 0 18px var(--primary-soft);
 }
 
 .scan-panel-duplicate {
-  border-color: var(--warning-color);
-  background: var(--warning-bg);
+  border-color: var(--accent-dark);
+  background: var(--accent-bg);
 }
 
 .scan-panel-duplicate .reader-mark {
-  border-color: var(--warning-color);
-  box-shadow: inset 0 0 0 18px var(--warning-soft);
+  border-color: var(--accent-dark);
+  box-shadow: inset 0 0 0 18px var(--accent-soft);
 }
 
 .scan-panel-rejected,
