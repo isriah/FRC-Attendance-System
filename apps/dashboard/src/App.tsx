@@ -5,17 +5,19 @@ import "./styles.css";
 
 type Tab = "overview" | "roster" | "kiosks" | "events" | "reports" | "export";
 
+const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+const googleAuthEnabled = Boolean(googleClientId);
+
 function App() {
-  const [session, setSession] = useState<DashboardSession>(() => ({
-    email: localStorage.getItem("adminEmail") ?? "",
-    idToken: sessionStorage.getItem("googleIdToken") ?? undefined
-  }));
+  const [session, setSession] = useState<DashboardSession>(readStoredSession);
   const [tab, setTab] = useState<Tab>("overview");
 
-  if (!session.email) {
+  if (!session.email || (googleAuthEnabled && !session.idToken)) {
     return <Login onLogin={(email) => {
       localStorage.setItem("adminEmail", email);
       setSession({ email });
+    }} onGoogleLogin={(googleSession) => {
+      setSession(googleSession);
     }} />;
   }
 
@@ -49,10 +51,9 @@ function App() {
   );
 }
 
-function Login({ onLogin }: { onLogin: (email: string) => void }) {
+function Login({ onLogin, onGoogleLogin }: { onLogin: (email: string) => void; onGoogleLogin: (session: DashboardSession) => void }) {
   useEffect(() => {
-    const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
-    if (!clientId) return;
+    if (!googleClientId) return;
     const script = document.createElement("script");
     script.src = "https://accounts.google.com/gsi/client";
     script.async = true;
@@ -71,14 +72,15 @@ function Login({ onLogin }: { onLogin: (email: string) => void }) {
       const target = document.getElementById("google-sign-in");
       if (!google || !target) return;
       google.accounts.id.initialize({
-        client_id: clientId,
+        client_id: googleClientId,
         callback: (response) => {
           const encodedPayload = response.credential.split(".")[1];
           if (!encodedPayload) return;
-          const payload = JSON.parse(atob(encodedPayload.replace(/-/g, "+").replace(/_/g, "/")));
-          localStorage.setItem("adminEmail", payload.email);
+          const payload = decodeGooglePayload(encodedPayload);
+          const email = payload.email.toLowerCase();
+          localStorage.setItem("adminEmail", email);
           sessionStorage.setItem("googleIdToken", response.credential);
-          window.location.reload();
+          onGoogleLogin({ email, idToken: response.credential });
         }
       });
       google.accounts.id.renderButton(target, { theme: "outline", size: "large", width: 320 });
@@ -97,8 +99,12 @@ function Login({ onLogin }: { onLogin: (email: string) => void }) {
         <h1>Attendance Admin</h1>
         <p>Use Google sign-in in production. Local development can use an allowlisted mentor email when no Google client ID is configured.</p>
         <div id="google-sign-in" />
-        <input name="email" type="email" placeholder="mentor@example.org" required />
-        <button>Continue</button>
+        {!googleAuthEnabled ? (
+          <>
+            <input name="email" type="email" placeholder="mentor@example.org" required />
+            <button>Continue</button>
+          </>
+        ) : null}
       </form>
     </main>
   );
@@ -500,6 +506,24 @@ function parseCsvLine(line: string) {
 
   cells.push(cell);
   return cells;
+}
+
+function readStoredSession(): DashboardSession {
+  const idToken = sessionStorage.getItem("googleIdToken") ?? undefined;
+  if (googleAuthEnabled && !idToken) {
+    localStorage.removeItem("adminEmail");
+    return { email: "" };
+  }
+  return {
+    email: localStorage.getItem("adminEmail") ?? "",
+    idToken
+  };
+}
+
+function decodeGooglePayload(encodedPayload: string): { email: string } {
+  const payload = JSON.parse(atob(encodedPayload.replace(/-/g, "+").replace(/_/g, "/"))) as { email?: string };
+  if (!payload.email) throw new Error("Google token did not include an email");
+  return { email: payload.email };
 }
 
 createRoot(document.getElementById("root")!).render(<App />);

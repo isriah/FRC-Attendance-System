@@ -1,4 +1,5 @@
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? defaultApiBaseUrl();
+const googleAuthEnabled = Boolean(import.meta.env.VITE_GOOGLE_CLIENT_ID);
 
 export interface DashboardSession {
   email: string;
@@ -29,6 +30,7 @@ export async function apiPost<T>(path: string, body: unknown, session: Dashboard
 
 function adminHeaders(session: DashboardSession): Record<string, string> {
   if (session.idToken) return { authorization: `Bearer ${session.idToken}` };
+  if (googleAuthEnabled) return {};
   return { "x-admin-email": session.email };
 }
 

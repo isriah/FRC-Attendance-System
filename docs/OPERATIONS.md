@@ -2,6 +2,29 @@
 
 ## Cloudflare Setup
 
+Current production API:
+
+- Worker URL: `https://frc-attendance-api.frc-attendance.workers.dev`
+- D1 database: `frc-attendance`
+- D1 database ID: `c02c0ca8-033b-435f-ae21-2d8f3b203b22`
+- Workers account subdomain: `frc-attendance.workers.dev`
+
+Current production dashboard:
+
+- Cloudflare Pages project: `frc-attendance-dashboard`
+- Pages URL: `https://frc-attendance-dashboard.pages.dev`
+- Latest verified deployment: `https://9c9f9dd1.frc-attendance-dashboard.pages.dev`
+- API base URL baked into the uploaded Vite build: `https://frc-attendance-api.frc-attendance.workers.dev`
+- Google OAuth client ID baked into the uploaded Vite build: `180849199739-v04bktp7rfmimgjpvohmq7pinrrpr337.apps.googleusercontent.com`
+
+Before applying remote migrations or deploying the Worker, run:
+
+```bash
+npm --workspace @frc-attendance/api run check:deploy-config
+```
+
+This preflight fails until `apps/api/wrangler.toml` has a real D1 `database_id`, a production `GOOGLE_CLIENT_ID`, and either `GOOGLE_ALLOWED_EMAILS` or `GOOGLE_ALLOWED_DOMAIN`.
+
 1. Create a D1 database:
 
    ```bash
@@ -9,19 +32,44 @@
    ```
 
 2. Copy the generated database ID into `apps/api/wrangler.toml`.
-3. Apply migrations:
+3. Register a `workers.dev` account subdomain in Cloudflare Workers & Pages if the account does not already have one.
+4. Apply remote migrations:
 
    ```bash
    npm --workspace @frc-attendance/api run db:migrate
    ```
 
-4. Configure Worker variables:
+5. Configure Worker variables before deploying:
 
    - `TIME_ZONE`: default `America/New_York`.
    - `GOOGLE_CLIENT_ID`: Google OAuth client ID for the dashboard.
    - `GOOGLE_ALLOWED_EMAILS`: comma-separated mentor emails.
    - `GOOGLE_ALLOWED_DOMAIN`: optional Google Workspace domain.
    - `DUPLICATE_WINDOW_SECONDS`: default `90`.
+
+6. Deploy the Worker:
+
+   ```bash
+   npm --workspace @frc-attendance/api run deploy
+   ```
+
+7. Verify the deployed health endpoint:
+
+   ```bash
+   curl https://frc-attendance-api.frc-attendance.workers.dev/health
+   ```
+
+   Expected response:
+
+   ```json
+   { "ok": true, "service": "frc-attendance-api" }
+   ```
+
+   On this Windows workstation, the default HTTPS check may try a failing IPv6/TLS path. If that happens, force IPv4:
+
+   ```powershell
+   curl.exe -4 https://frc-attendance-api.frc-attendance.workers.dev/health
+   ```
 
 ## Local API Bench Test
 
@@ -49,10 +97,40 @@ npm --workspace @frc-attendance/api run dev
 
 ## Dashboard
 
-Deploy `apps/dashboard` to Cloudflare Pages. Set:
+`apps/dashboard` is deployed to Cloudflare Pages project `frc-attendance-dashboard`.
 
-- `VITE_API_BASE_URL`: deployed Worker URL.
-- `VITE_GOOGLE_CLIENT_ID`: same OAuth client ID configured for the API.
+For direct uploads, build with production Vite variables before deploying:
+
+```powershell
+$env:VITE_API_BASE_URL='https://frc-attendance-api.frc-attendance.workers.dev'
+$env:VITE_GOOGLE_CLIENT_ID='180849199739-v04bktp7rfmimgjpvohmq7pinrrpr337.apps.googleusercontent.com'
+npm.cmd --workspace @frc-attendance/dashboard run build
+npx.cmd wrangler pages deploy apps/dashboard/dist --project-name frc-attendance-dashboard --branch main --commit-dirty=true
+```
+
+Production values:
+
+- `VITE_API_BASE_URL`: `https://frc-attendance-api.frc-attendance.workers.dev`.
+- `VITE_GOOGLE_CLIENT_ID`: `180849199739-v04bktp7rfmimgjpvohmq7pinrrpr337.apps.googleusercontent.com`.
+
+Verification completed on 2026-05-28:
+
+- Dashboard production build completed successfully.
+- Cloudflare Pages deployment completed for project `frc-attendance-dashboard`.
+- `https://frc-attendance-dashboard.pages.dev` returned HTTP 200.
+- Uploaded dashboard JS contains the production Worker URL and Google OAuth client ID.
+- Headless Chrome loaded the Pages URL, fetched `https://accounts.google.com/gsi/client`, and rendered the Google sign-in button.
+- Worker health returned `{ "ok": true, "service": "frc-attendance-api" }`.
+- API CORS preflight from the Pages origin allowed `authorization`, `content-type`, and `x-admin-email`.
+- Unauthenticated admin API access returned `401 Missing admin identity`, confirming the deployed API requires a Google bearer token when `GOOGLE_CLIENT_ID` is configured.
+
+Interactive Google sign-in was fixed by adding the deployed Pages origin to the Google OAuth client's Authorized JavaScript origins:
+
+- `https://frc-attendance-dashboard.pages.dev`
+
+Credentialed Google admin access was verified after signing in as the allowlisted Google account. The dashboard now loads admin pages successfully against the deployed Worker.
+
+Deployment `https://9c9f9dd1.frc-attendance-dashboard.pages.dev` also hardens stale-session handling so the production dashboard only enters the app with a Google ID token and does not use the local `x-admin-email` fallback when `VITE_GOOGLE_CLIENT_ID` is configured.
 
 For local development only, if no Google client ID is configured, the dashboard can send an `x-admin-email` header and the API will still enforce the configured allowlist.
 
