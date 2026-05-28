@@ -213,7 +213,8 @@ pre {
   place-items: center;
 }
 
-.login form {
+.login form,
+.login-panel {
   width: min(420px, calc(100vw - 32px));
   display: grid;
   gap: 14px;
@@ -221,4 +222,11 @@ pre {
   border: 1px solid var(--border-color);
   border-radius: 8px;
   padding: 24px;
+  box-sizing: border-box;
+}
+
+.login-note {
+  margin: 0;
+  color: var(--muted-color);
+  font-size: 14px;
 }

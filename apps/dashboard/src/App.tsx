@@ -13,7 +13,7 @@ function App() {
   const [tab, setTab] = useState<Tab>("overview");
 
   if (!session.email || (googleAuthEnabled && !session.idToken)) {
-    return <Login onLogin={(email) => {
+    return <Login onLocalLogin={(email) => {
       localStorage.setItem("adminEmail", email);
       setSession({ email });
     }} onGoogleLogin={(googleSession) => {
@@ -51,7 +51,7 @@ function App() {
   );
 }
 
-function Login({ onLogin, onGoogleLogin }: { onLogin: (email: string) => void; onGoogleLogin: (session: DashboardSession) => void }) {
+function Login({ onLocalLogin, onGoogleLogin }: { onLocalLogin: (email: string) => void; onGoogleLogin: (session: DashboardSession) => void }) {
   useEffect(() => {
     if (!googleClientId) return;
     const script = document.createElement("script");
@@ -89,22 +89,30 @@ function Login({ onLogin, onGoogleLogin }: { onLogin: (email: string) => void; o
     return () => script.remove();
   }, []);
 
+  if (googleAuthEnabled) {
+    return (
+      <main className="login">
+        <section className="login-panel">
+          <h1>Attendance Admin</h1>
+          <p>Sign in with the configured Google account to manage attendance.</p>
+          <div id="google-sign-in" />
+          <p className="login-note">Email-only local login is disabled for this configured deployment.</p>
+        </section>
+      </main>
+    );
+  }
+
   return (
     <main className="login">
       <form onSubmit={(event: FormEvent<HTMLFormElement>) => {
         event.preventDefault();
         const form = new FormData(event.currentTarget);
-        onLogin(String(form.get("email")));
+        onLocalLogin(String(form.get("email")));
       }}>
         <h1>Attendance Admin</h1>
-        <p>Use Google sign-in in production. Local development can use an allowlisted mentor email when no Google client ID is configured.</p>
-        <div id="google-sign-in" />
-        {!googleAuthEnabled ? (
-          <>
-            <input name="email" type="email" placeholder="mentor@example.org" required />
-            <button>Continue</button>
-          </>
-        ) : null}
+        <p>Local development can use an allowlisted mentor email when no Google client ID is configured.</p>
+        <input name="email" type="email" placeholder="mentor@example.org" required />
+        <button>Continue</button>
       </form>
     </main>
   );
