@@ -157,6 +157,30 @@ pre {
   color: #a6333f;
 }
 
+.notice {
+  border-radius: 6px;
+  margin: 0;
+  padding: 10px 12px;
+}
+
+.notice.info {
+  background: #edf4fb;
+  border: 1px solid #bed5eb;
+  color: #224a6b;
+}
+
+.notice.success {
+  background: #edf7ef;
+  border: 1px solid #b7d9bf;
+  color: #245232;
+}
+
+.notice.error {
+  background: #fbeff1;
+  border: 1px solid #e4b7bf;
+  color: #8c2635;
+}
+
 .login {
   min-height: 100vh;
   display: grid;

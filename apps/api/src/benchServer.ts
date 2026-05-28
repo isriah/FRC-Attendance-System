@@ -182,7 +182,13 @@ async function enrollFingerprint(input: { memberId: string; slot: number; finger
       ...(fingerLabel ? ["--finger-label", fingerLabel] : [])
     ], 180_000);
 
-    return { memberId, slot, fingerLabel: fingerLabel || null, output: result.output.trim() };
+    return {
+      memberId,
+      slot,
+      fingerLabel: fingerLabel || null,
+      message: `Fingerprint linked to member ${memberId} in slot ${slot}. You can test it on the kiosk screen now.`,
+      details: result.output.trim()
+    };
   } finally {
     await runCommand("systemctl", ["--user", "start", "frc-kiosk-service"]).catch((error) => {
       console.error(`Could not restart kiosk service after enrollment: ${error instanceof Error ? error.message : String(error)}`);

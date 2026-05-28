@@ -123,9 +123,10 @@ function Roster({ session }: { session: DashboardSession }) {
   const [enrollMemberId, setEnrollMemberId] = useState("");
   const [enrollSlot, setEnrollSlot] = useState("2");
   const [enrollFingerLabel, setEnrollFingerLabel] = useState("right-index");
-  const [enrollMessage, setEnrollMessage] = useState<string>();
+  const [enrollMessage, setEnrollMessage] = useState<{ kind: "info" | "success" | "error"; text: string }>();
   const [enrolling, setEnrolling] = useState(false);
   const activeStudents = data?.students.filter((student) => student.active) ?? [];
+  const selectedEnrollmentMember = activeStudents.find((student) => student.student_id === enrollMemberId);
 
   return (
     <>
@@ -150,16 +151,23 @@ function Roster({ session }: { session: DashboardSession }) {
         <form className="toolbar wrap" onSubmit={async (event) => {
           event.preventDefault();
           setEnrolling(true);
-          setEnrollMessage("Enrollment started. Place the selected finger on the reader, lift it after a moment, then place it again.");
+          setEnrollMessage({
+            kind: "info",
+            text: "Enrollment is running. Place the selected finger on the reader, remove it when the reader light changes, then place the same finger again."
+          });
           try {
-            const result = await apiPost<{ output?: string }>("/admin/fingerprint/enroll", {
+            await apiPost<{ message?: string }>("/admin/fingerprint/enroll", {
               memberId: enrollMemberId,
               slot: Number(enrollSlot),
               fingerLabel: enrollFingerLabel
             }, session);
-            setEnrollMessage(result.output || `Linked slot ${enrollSlot} to ${enrollMemberId}`);
+            const memberName = selectedEnrollmentMember ? `${selectedEnrollmentMember.first_name} ${selectedEnrollmentMember.last_name}` : enrollMemberId;
+            setEnrollMessage({
+              kind: "success",
+              text: `Fingerprint linked to ${memberName} using slot ${enrollSlot}. Test it on the kiosk screen now.`
+            });
           } catch (err) {
-            setEnrollMessage(err instanceof Error ? err.message : String(err));
+            setEnrollMessage({ kind: "error", text: friendlyEnrollmentError(err) });
           } finally {
             setEnrolling(false);
           }
@@ -176,7 +184,7 @@ function Roster({ session }: { session: DashboardSession }) {
           <input value={enrollFingerLabel} onChange={(event) => setEnrollFingerLabel(event.target.value)} placeholder="Finger label" />
           <button disabled={enrolling}>{enrolling ? "Enrolling..." : "Enroll fingerprint"}</button>
         </form>
-        {enrollMessage ? <p className={enrollMessage.includes("error") || enrollMessage.includes("exited") ? "error" : undefined}>{enrollMessage}</p> : null}
+        {enrollMessage ? <p className={`notice ${enrollMessage.kind}`}>{enrollMessage.text}</p> : null}
       </section>
       <Table title="Roster" error={error} rows={data?.students ?? []} columns={["student_id", "first_name", "last_name", "active"]} />
     </>
@@ -309,6 +317,16 @@ function findHeaderIndex(header: string[], names: string[]) {
   const index = header.findIndex((cell) => names.includes(cell));
   if (index === -1) throw new Error(`Missing roster column: ${names[0]}`);
   return index;
+}
+
+function friendlyEnrollmentError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message.includes("Fingerprint scans did not match")) return "The two scans did not match. Try again with the same finger, held flat both times.";
+  if (message.includes("Fingerprint sensor not found")) return "The fingerprint reader did not respond. Check the reader connection and try again.";
+  if (message.includes("timed out")) return "Enrollment timed out. Try again, placing the finger on the reader soon after clicking the button.";
+  if (message.includes("member is not active in roster")) return "That member is not active in the roster. Sync the roster first, then try again.";
+  if (message.includes("already in progress")) return "Another enrollment is already running. Wait for it to finish, then try again.";
+  return message.replace(/^.*"error":"?/, "").replace(/"}$/, "");
 }
 
 function parseCsvLine(line: string) {
