@@ -244,8 +244,71 @@ function Events({ session }: { session: DashboardSession }) {
 
 function Reports({ session }: { session: DashboardSession }) {
   const { data, error, reload } = useApi<{ sessions: Array<Record<string, unknown>> }>("/admin/reports/sessions", session);
+  const { data: students } = useApi<{ students: Array<{ student_id: string; first_name: string; last_name: string; active: number }> }>("/admin/students", session);
+  const [presenceDate, setPresenceDate] = useState(localDateInputValue());
+  const [selectedMemberId, setSelectedMemberId] = useState("");
+  const { data: presence, error: presenceError, reload: reloadPresence } = useApi<PresenceReport>(`/admin/reports/presence?date=${presenceDate}`, session);
+  const { data: memberReport, error: memberError, reload: reloadMember } = useOptionalApi<MemberAttendanceReport>(
+    selectedMemberId ? `/admin/reports/member?studentId=${encodeURIComponent(selectedMemberId)}` : undefined,
+    session
+  );
+  const activeStudents = students?.students.filter((student) => student.active) ?? [];
+
   return (
     <>
+      <section>
+        <h2>Daily Presence</h2>
+        <div className="toolbar wrap">
+          <input value={presenceDate} onChange={(event) => setPresenceDate(event.target.value)} type="date" />
+          <button onClick={reloadPresence}>Refresh</button>
+        </div>
+        {presenceError ? <p className="error">{presenceError}</p> : null}
+        <div className="grid compact-grid">
+          <Metric label="Signed In" value={presence?.counts.signedIn ?? 0} />
+          <Metric label="Signed Out" value={presence?.counts.signedOut ?? 0} />
+          <Metric label="Not Seen" value={presence?.counts.notSeen ?? 0} />
+        </div>
+        <DataTable
+          rows={presence?.rows ?? []}
+          columns={["studentId", "firstName", "lastName", "status", "checkInAt", "checkOutAt"]}
+        />
+      </section>
+
+      <section>
+        <h2>Member Attendance</h2>
+        <div className="toolbar wrap">
+          <select value={selectedMemberId} onChange={(event) => setSelectedMemberId(event.target.value)}>
+            <option value="">Select member</option>
+            {activeStudents.map((student) => (
+              <option key={student.student_id} value={student.student_id}>
+                {student.student_id} - {student.first_name} {student.last_name}
+              </option>
+            ))}
+          </select>
+          <button disabled={!selectedMemberId} onClick={reloadMember}>Refresh</button>
+        </div>
+        {memberError ? <p className="error">{memberError}</p> : null}
+        {memberReport ? (
+          <>
+            <div className="grid compact-grid">
+              <Metric label="Attendance" value={formatPercent(memberReport.attendanceRate)} />
+              <Metric label="Present" value={memberReport.presentMeetings} />
+              <Metric label="Missed" value={memberReport.missedMeetings} />
+            </div>
+            <h3>{memberReport.firstName} {memberReport.lastName}</h3>
+            <DataTable
+              rows={[{
+                totalMeetings: memberReport.totalMeetings,
+                presentDates: memberReport.presentDates.join(", "),
+                absentDates: memberReport.absentDates.join(", "),
+                openSessionDates: memberReport.openSessionDates.join(", ")
+              }]}
+              columns={["totalMeetings", "presentDates", "absentDates", "openSessionDates"]}
+            />
+          </>
+        ) : null}
+      </section>
+
       <form className="toolbar" onSubmit={async (event) => {
         event.preventDefault();
         const formElement = event.currentTarget;
@@ -291,15 +354,21 @@ function Table({ title, rows, columns, error }: { title: string; rows: Array<Rec
     <section>
       <h2>{title}</h2>
       {error ? <p className="error">{error}</p> : null}
-      <table>
-        <thead><tr>{columns.map((column) => <th key={column}>{column}</th>)}</tr></thead>
-        <tbody>
-          {rows.map((row, index) => (
-            <tr key={index}>{columns.map((column) => <td key={column}>{String(row[column] ?? "")}</td>)}</tr>
-          ))}
-        </tbody>
-      </table>
+      <DataTable rows={rows} columns={columns} />
     </section>
+  );
+}
+
+function DataTable({ rows, columns }: { rows: Array<Record<string, unknown>>; columns: string[] }) {
+  return (
+    <table>
+      <thead><tr>{columns.map((column) => <th key={column}>{column}</th>)}</tr></thead>
+      <tbody>
+        {rows.map((row, index) => (
+          <tr key={index}>{columns.map((column) => <td key={column}>{String(row[column] ?? "")}</td>)}</tr>
+        ))}
+      </tbody>
+    </table>
   );
 }
 
@@ -308,6 +377,23 @@ function useApi<T>(path: string, session: DashboardSession) {
   const [error, setError] = useState<string | undefined>();
   const [nonce, setNonce] = useState(0);
   useEffect(() => {
+    setError(undefined);
+    apiGet<T>(path, session).then(setData, (err) => setError(err instanceof Error ? err.message : String(err)));
+  }, [path, session, nonce]);
+  return { data, error, reload: () => setNonce((value) => value + 1) };
+}
+
+function useOptionalApi<T>(path: string | undefined, session: DashboardSession) {
+  const [data, setData] = useState<T | undefined>();
+  const [error, setError] = useState<string | undefined>();
+  const [nonce, setNonce] = useState(0);
+  useEffect(() => {
+    if (!path) {
+      setData(undefined);
+      setError(undefined);
+      return;
+    }
+    setError(undefined);
     apiGet<T>(path, session).then(setData, (err) => setError(err instanceof Error ? err.message : String(err)));
   }, [path, session, nonce]);
   return { data, error, reload: () => setNonce((value) => value + 1) };
@@ -336,10 +422,44 @@ function parseRosterCsv(text: string) {
   });
 }
 
+function localDateInputValue(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function formatPercent(value: number | null) {
+  return value === null ? "N/A" : `${Math.round(value * 100)}%`;
+}
+
 function findHeaderIndex(header: string[], names: string[]) {
   const index = header.findIndex((cell) => names.includes(cell));
   if (index === -1) throw new Error(`Missing roster column: ${names[0]}`);
   return index;
+}
+
+interface PresenceReport {
+  date: string;
+  counts: {
+    signedIn: number;
+    signedOut: number;
+    notSeen: number;
+  };
+  rows: Array<Record<string, unknown>>;
+}
+
+interface MemberAttendanceReport {
+  studentId: string;
+  firstName: string;
+  lastName: string;
+  totalMeetings: number;
+  presentMeetings: number;
+  missedMeetings: number;
+  attendanceRate: number | null;
+  presentDates: string[];
+  absentDates: string[];
+  openSessionDates: string[];
 }
 
 function friendlyEnrollmentError(error: unknown) {

@@ -68,6 +68,11 @@ aside h1 {
   margin: 0 0 16px;
 }
 
+h3 {
+  font-size: 18px;
+  margin: 18px 0 10px;
+}
+
 .content {
   padding: 24px;
 }
@@ -97,6 +102,10 @@ section,
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 16px;
+}
+
+.compact-grid {
+  margin-bottom: 16px;
 }
 
 .metric span {

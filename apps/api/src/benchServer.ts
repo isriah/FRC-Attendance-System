@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { DEFAULT_DUPLICATE_WINDOW_MS, isDuplicateScan, meetingDateForTimestamp, type KioskScanAcknowledgement, type KioskSyncRequest, type ScanEvent } from "@frc-attendance/shared";
+import { DEFAULT_DUPLICATE_WINDOW_MS, deriveAttendanceSessions, isDuplicateScan, meetingDateForTimestamp, type AttendanceSession, type KioskScanAcknowledgement, type KioskSyncRequest, type ScanEvent } from "@frc-attendance/shared";
 import { sha256Hex } from "./auth";
 
 const port = Number(process.env.PORT ?? "8787");
@@ -129,6 +129,18 @@ const server = createServer(async (request, response) => {
     if (request.method === "POST" && request.url === "/admin/kiosk-ui/restart") {
       await runCommand("systemctl", ["--user", "restart", "frc-kiosk-ui"]);
       sendJson(response, 200, { message: "Kiosk display service restarted. The kiosk screen should reconnect in a few seconds." });
+      return;
+    }
+
+    if (request.method === "GET" && request.url?.startsWith("/admin/reports/presence")) {
+      const url = new URL(request.url, `http://${request.headers.host ?? "localhost"}`);
+      sendJson(response, 200, buildPresenceReport(url.searchParams.get("date") ?? undefined));
+      return;
+    }
+
+    if (request.method === "GET" && request.url?.startsWith("/admin/reports/member")) {
+      const url = new URL(request.url, `http://${request.headers.host ?? "localhost"}`);
+      sendJson(response, 200, buildMemberAttendanceReport(requireNonEmptyString(url.searchParams.get("studentId") ?? undefined, "studentId")));
       return;
     }
 
@@ -365,6 +377,69 @@ function displayStateForAcknowledgement(acknowledgement: KioskScanAcknowledgemen
   };
 }
 
+function buildPresenceReport(date = meetingDateForTimestamp(new Date().toISOString())) {
+  const students = db.prepare(
+    "SELECT student_id, first_name, last_name FROM students WHERE active = 1 ORDER BY last_name, first_name"
+  ).all() as Array<{ student_id: string; first_name: string; last_name: string }>;
+  const sessionsByStudent = new Map(deriveBenchSessions().filter((session) => session.meetingDate === date).map((session) => [session.studentId, session]));
+  const rows = students.map((student) => {
+    const session = sessionsByStudent.get(student.student_id);
+    return {
+      studentId: student.student_id,
+      firstName: student.first_name,
+      lastName: student.last_name,
+      status: session ? session.status === "open" ? "signed_in" : "signed_out" : "not_seen",
+      checkInAt: session?.checkInAt,
+      checkOutAt: session?.checkOutAt
+    };
+  });
+
+  return {
+    date,
+    counts: {
+      signedIn: rows.filter((row) => row.status === "signed_in").length,
+      signedOut: rows.filter((row) => row.status === "signed_out").length,
+      notSeen: rows.filter((row) => row.status === "not_seen").length
+    },
+    rows
+  };
+}
+
+function buildMemberAttendanceReport(studentId: string) {
+  const student = db.prepare("SELECT student_id, first_name, last_name FROM students WHERE student_id = ?").get(studentId) as { student_id: string; first_name: string; last_name: string } | undefined;
+  if (!student) throw httpError(404, "Member not found");
+
+  const sessions = deriveBenchSessions();
+  const allDates = [...new Set(sessions.map((session) => session.meetingDate))].sort();
+  const studentSessions = sessions.filter((session) => session.studentId === studentId);
+  const presentDates = [...new Set(studentSessions.map((session) => session.meetingDate))];
+  const presentDateSet = new Set(presentDates);
+  const absentDates = allDates.filter((date) => !presentDateSet.has(date));
+
+  return {
+    studentId: student.student_id,
+    firstName: student.first_name,
+    lastName: student.last_name,
+    totalMeetings: allDates.length,
+    presentMeetings: presentDates.length,
+    missedMeetings: absentDates.length,
+    attendanceRate: allDates.length === 0 ? null : presentDates.length / allDates.length,
+    presentDates,
+    absentDates,
+    openSessionDates: studentSessions.filter((session) => session.status === "open").map((session) => session.meetingDate)
+  };
+}
+
+function deriveBenchSessions(): AttendanceSession[] {
+  const rows = db.prepare("SELECT id, student_id, occurred_at, status FROM scan_events WHERE status = 'accepted' ORDER BY occurred_at ASC").all() as Array<{
+    id: string;
+    student_id: string;
+    occurred_at: string;
+    status: "accepted";
+  }>;
+  return deriveAttendanceSessions(rows.map((row) => ({ id: row.id, studentId: row.student_id, occurredAt: row.occurred_at, status: row.status })));
+}
+
 function setDisplayState(state: Omit<KioskDisplayState, "updatedAt">) {
   latestDisplayState = { ...state, updatedAt: new Date().toISOString() };
 }
@@ -450,6 +525,11 @@ function corsHeaders() {
 
 function httpError(status: number, message: string) {
   return Object.assign(new Error(message), { status });
+}
+
+function requireNonEmptyString(value: string | undefined, name: string) {
+  if (!value?.trim()) throw httpError(400, `${name} is required`);
+  return value.trim();
 }
 
 interface DbScanEvent {

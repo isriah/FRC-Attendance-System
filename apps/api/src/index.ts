@@ -4,6 +4,7 @@ import { addManualEvent, syncKioskEvents } from "./attendanceStore";
 import type { Env } from "./env";
 import { buildLegacySheetExport } from "./export";
 import { errorResponse, json, noContent, optionsResponse, readJson } from "./http";
+import { buildMemberAttendanceReport, buildPresenceReport } from "./reports";
 import { syncRoster, type RosterMemberInput } from "./roster";
 
 export default {
@@ -77,6 +78,16 @@ export default {
           "SELECT student_id, meeting_date, check_in_at, check_out_at, status FROM attendance_sessions ORDER BY meeting_date DESC, student_id LIMIT 500"
         ).all();
         return json({ sessions: rows.results });
+      }
+
+      if (route === "GET /admin/reports/presence") {
+        await requireAdmin(request, env);
+        return json(await buildPresenceReport(env, url.searchParams.get("date") ?? undefined));
+      }
+
+      if (route === "GET /admin/reports/member") {
+        await requireAdmin(request, env);
+        return json(await buildMemberAttendanceReport(env, requireNonEmptyString(url.searchParams.get("studentId") ?? undefined, "studentId")));
       }
 
       if (route === "GET /admin/export/legacy-sheets") {
