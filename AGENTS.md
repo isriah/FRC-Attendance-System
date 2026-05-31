@@ -124,3 +124,17 @@ npm --workspace <package> run <script>
 - Keep commits focused. Agents should create a Git commit after each completed, verified discrete unit unless the user explicitly asks not to commit.
 - Before committing, inspect `git status --short`, stage only files related to the completed unit, and do not stage unrelated user changes.
 - Use concise commit messages that describe the shipped behavior, not the process. Push completed, tested, and verified code at the end of sessions unless the user explicitly asks not to push.
+
+## End-of-Session Handoff
+
+At the end of each completed session, include a compact next-session handoff so the user does not need to decide or reconstruct context.
+
+Final responses should include:
+
+- the latest pushed commit hash
+- whether the local repo is clean
+- any known unrelated dirty files that must be preserved
+- one recommended next task, chosen from the highest-value remaining work
+- a ready-to-paste kickoff prompt for the next Codex session
+
+Keep this handoff short. Do not repeat long logs, full verification output, or broad project history.
