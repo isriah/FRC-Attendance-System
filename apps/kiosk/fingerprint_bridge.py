@@ -99,8 +99,15 @@ def hardware_loop():
                 if finger.finger_search() == adafruit_fingerprint.OK:
                     slot = int(finger.finger_id)
                     slot_map = load_slot_map()
-                    student_id = slot_map.get(slot, str(slot))
+                    student_id = slot_map.get(slot)
                     now = time.monotonic()
+                    if student_id is None:
+                        if now - last_no_match_at >= debounce_seconds:
+                            emit("NO_MATCH")
+                            last_no_match_at = now
+                        time.sleep(repeat_delay_seconds)
+                        continue
+
                     if last_match != slot or now - last_match_at >= debounce_seconds:
                         emit(f"MATCH:{student_id},{slot}")
                         last_match = slot

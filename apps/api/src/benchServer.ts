@@ -9,6 +9,7 @@ import { sha256Hex } from "./auth";
 const port = Number(process.env.PORT ?? "8787");
 const dbPath = process.env.BENCH_DB_PATH ?? "./bench-api.sqlite";
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+const localEnrollmentDbPath = process.env.KIOSK_DB_PATH ?? resolve(repoRoot, "apps/kiosk/kiosk-cache.sqlite");
 let enrollmentInProgress = false;
 let latestDisplayState: KioskDisplayState = {
   status: "ready",
@@ -153,9 +154,26 @@ const server = createServer(async (request, response) => {
     }
 
     if (request.method === "POST" && request.url === "/admin/fingerprint/enroll") {
-      const body = await readBody<{ memberId: string; slot: number; fingerLabel?: string }>(request);
+      const body = await readBody<{ memberId: string; slot: number; fingerLabel?: string; confirmOverwrite?: boolean }>(request);
       const result = await enrollFingerprint(body);
       sendJson(response, 200, result);
+      return;
+    }
+
+    if (request.method === "GET" && request.url === "/admin/fingerprint/enrollments") {
+      sendJson(response, 200, { enrollments: listFingerprintEnrollments() });
+      return;
+    }
+
+    if (request.method === "POST" && request.url === "/admin/fingerprint/map") {
+      const body = await readBody<{ memberId: string; slot: number; fingerLabel?: string; confirmOverwrite?: boolean }>(request);
+      sendJson(response, 200, mapFingerprintSlot(body));
+      return;
+    }
+
+    if (request.method === "POST" && request.url === "/admin/fingerprint/enrollments/delete") {
+      const body = await readBody<{ slot: number }>(request);
+      sendJson(response, 200, deleteFingerprintEnrollment(body.slot));
       return;
     }
 
@@ -283,17 +301,11 @@ function completeKioskCommand(kioskId: string, commandId: string, input: { statu
   return rowToCommand(row);
 }
 
-async function enrollFingerprint(input: { memberId: string; slot: number; fingerLabel?: string }) {
+async function enrollFingerprint(input: { memberId: string; slot: number; fingerLabel?: string; confirmOverwrite?: boolean }) {
   if (enrollmentInProgress) throw httpError(409, "Fingerprint enrollment is already in progress");
 
-  const memberId = input.memberId?.trim();
-  const slot = Number(input.slot);
-  const fingerLabel = input.fingerLabel?.trim();
-  if (!memberId) throw httpError(400, "memberId is required");
-  if (!Number.isInteger(slot) || slot < 1 || slot > 200) throw httpError(400, "slot must be an integer from 1 to 200");
-
-  const student = db.prepare("SELECT active FROM students WHERE student_id = ?").get(memberId) as { active: number } | undefined;
-  if (!student?.active) throw httpError(400, "member is not active in roster");
+  const { memberId, slot, fingerLabel } = validateFingerprintMappingInput(input);
+  requireOverwriteConfirmation(slot, input.confirmOverwrite);
 
   enrollmentInProgress = true;
   try {
@@ -326,6 +338,128 @@ async function enrollFingerprint(input: { memberId: string; slot: number; finger
     });
     enrollmentInProgress = false;
   }
+}
+
+function mapFingerprintSlot(input: { memberId: string; slot: number; fingerLabel?: string; confirmOverwrite?: boolean }) {
+  const { memberId, slot, fingerLabel } = validateFingerprintMappingInput(input);
+  requireOverwriteConfirmation(slot, input.confirmOverwrite);
+  saveLocalEnrollmentMapping(memberId, slot, fingerLabel);
+  return {
+    memberId,
+    slot,
+    fingerLabel: fingerLabel || null,
+    message: `Fingerprint slot ${slot} now maps to member ${memberId}.`
+  };
+}
+
+function validateFingerprintMappingInput(input: { memberId: string; slot: number; fingerLabel?: string }) {
+  const memberId = input.memberId?.trim();
+  const slot = Number(input.slot);
+  const fingerLabel = input.fingerLabel?.trim();
+  if (!memberId) throw httpError(400, "memberId is required");
+  if (!Number.isInteger(slot) || slot < 1 || slot > 200) throw httpError(400, "slot must be an integer from 1 to 200");
+
+  const student = db.prepare("SELECT active FROM students WHERE student_id = ?").get(memberId) as { active: number } | undefined;
+  if (!student?.active) throw httpError(400, "member is not active in roster");
+  return { memberId, slot, fingerLabel };
+}
+
+function listFingerprintEnrollments(): FingerprintEnrollmentRow[] {
+  const localDb = openLocalEnrollmentDb();
+  try {
+    const rows = localDb.prepare(`
+      SELECT student_id, template_slot, finger_label, enrolled_at
+      FROM local_enrollments
+      WHERE deleted_at IS NULL
+      ORDER BY template_slot ASC
+    `).all() as Array<{ student_id: string; template_slot: number; finger_label: string | null; enrolled_at: string }>;
+
+    return rows.map((row) => {
+      const student = db.prepare("SELECT first_name, last_name, active FROM students WHERE student_id = ?").get(row.student_id) as { first_name: string; last_name: string; active: number } | undefined;
+      return {
+        memberId: row.student_id,
+        firstName: student?.first_name,
+        lastName: student?.last_name,
+        active: student?.active ?? 0,
+        slot: row.template_slot,
+        fingerLabel: row.finger_label ?? undefined,
+        enrolledAt: row.enrolled_at
+      };
+    });
+  } finally {
+    localDb.close();
+  }
+}
+
+function deleteFingerprintEnrollment(slotInput: number) {
+  const slot = Number(slotInput);
+  if (!Number.isInteger(slot) || slot < 1 || slot > 200) throw httpError(400, "slot must be an integer from 1 to 200");
+  const localDb = openLocalEnrollmentDb();
+  try {
+    const deletedAt = new Date().toISOString();
+    const result = localDb.prepare("UPDATE local_enrollments SET deleted_at = ? WHERE template_slot = ? AND deleted_at IS NULL").run(deletedAt, slot);
+    if (result.changes === 0) throw httpError(404, "Fingerprint enrollment not found");
+    return { slot, deletedAt, message: `Fingerprint slot ${slot} mapping removed. The sensor template was not deleted.` };
+  } finally {
+    localDb.close();
+  }
+}
+
+function requireOverwriteConfirmation(slot: number, confirmed = false) {
+  const localDb = openLocalEnrollmentDb();
+  try {
+    const existing = localDb.prepare(`
+      SELECT student_id, template_slot, finger_label
+      FROM local_enrollments
+      WHERE template_slot = ? AND deleted_at IS NULL
+    `).get(slot) as { student_id: string; template_slot: number; finger_label: string | null } | undefined;
+    if (existing && !confirmed) {
+      throw httpError(409, `slot ${slot} is already mapped to member ${existing.student_id}; confirm overwrite to replace it`);
+    }
+  } finally {
+    localDb.close();
+  }
+}
+
+function saveLocalEnrollmentMapping(memberId: string, slot: number, fingerLabel?: string) {
+  const localDb = openLocalEnrollmentDb();
+  try {
+    const enrolledAt = new Date().toISOString();
+    const transaction = localDb.transaction(() => {
+      localDb.prepare("UPDATE local_enrollments SET deleted_at = ? WHERE template_slot = ? AND deleted_at IS NULL").run(enrolledAt, slot);
+      localDb.prepare(`
+        INSERT INTO local_enrollments (student_id, template_slot, finger_label, enrolled_at, deleted_at)
+        VALUES (?, ?, ?, ?, NULL)
+        ON CONFLICT(student_id, template_slot) DO UPDATE SET
+          finger_label = excluded.finger_label,
+          enrolled_at = excluded.enrolled_at,
+          deleted_at = NULL
+      `).run(memberId, slot, fingerLabel || null, enrolledAt);
+    });
+    transaction();
+  } finally {
+    localDb.close();
+  }
+}
+
+function openLocalEnrollmentDb() {
+  const localDb = new Database(localEnrollmentDbPath);
+  localDb.pragma("journal_mode = WAL");
+  localDb.exec(`
+    CREATE TABLE IF NOT EXISTS local_enrollments (
+      student_id TEXT NOT NULL,
+      template_slot INTEGER NOT NULL,
+      finger_label TEXT,
+      enrolled_at TEXT NOT NULL,
+      deleted_at TEXT,
+      PRIMARY KEY (student_id, template_slot)
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS local_enrollments_active_slot_idx
+    ON local_enrollments(template_slot)
+    WHERE deleted_at IS NULL;
+  `);
+  return localDb;
 }
 
 function runCommand(command: string, args: string[], timeoutMs = 30_000): Promise<{ output: string }> {
@@ -682,4 +816,14 @@ interface KioskDisplayState {
   message: string;
   detail: string;
   updatedAt: string;
+}
+
+interface FingerprintEnrollmentRow {
+  memberId: string;
+  firstName?: string;
+  lastName?: string;
+  active: number;
+  slot: number;
+  fingerLabel?: string;
+  enrolledAt: string;
 }

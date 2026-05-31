@@ -27,6 +27,16 @@ interface KioskCommandRow {
   message?: string;
 }
 
+interface FingerprintEnrollment {
+  memberId: string;
+  firstName?: string;
+  lastName?: string;
+  active: number;
+  slot: number;
+  fingerLabel?: string;
+  enrolledAt: string;
+}
+
 const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
 const googleAuthEnabled = Boolean(googleClientId);
 const fingerprintEnrollmentAvailable = !apiBaseUrl.includes("workers.dev");
@@ -158,15 +168,81 @@ function Overview({ session }: { session: DashboardSession }) {
 
 function Roster({ session }: { session: DashboardSession }) {
   const { data, error, reload } = useApi<{ students: Array<{ student_id: string; first_name: string; last_name: string; active: number }> }>("/admin/students", session);
+  const { data: enrollmentData, error: enrollmentError, reload: reloadEnrollments } = useOptionalApi<{ enrollments: FingerprintEnrollment[] }>(
+    fingerprintEnrollmentAvailable ? "/admin/fingerprint/enrollments" : undefined,
+    session
+  );
   const [importText, setImportText] = useState("memberId,firstName,lastName\n100001,Bench,Student");
   const [importMessage, setImportMessage] = useState<string>();
   const [enrollMemberId, setEnrollMemberId] = useState("");
-  const [enrollSlot, setEnrollSlot] = useState("2");
+  const [enrollSlot, setEnrollSlot] = useState("");
   const [enrollFingerLabel, setEnrollFingerLabel] = useState("right-index");
+  const [confirmOverwrite, setConfirmOverwrite] = useState(false);
   const [enrollMessage, setEnrollMessage] = useState<{ kind: "info" | "success" | "error"; text: string }>();
   const [enrolling, setEnrolling] = useState(false);
   const activeStudents = data?.students.filter((student) => student.active) ?? [];
+  const enrollments = enrollmentData?.enrollments ?? [];
+  const nextOpenSlot = nextAvailableFingerprintSlot(enrollments);
+  const occupiedEnrollment = enrollments.find((enrollment) => enrollment.slot === Number(enrollSlot));
   const selectedEnrollmentMember = activeStudents.find((student) => student.student_id === enrollMemberId);
+
+  useEffect(() => {
+    if (!fingerprintEnrollmentAvailable || enrollSlot) return;
+    setEnrollSlot(String(nextAvailableFingerprintSlot(enrollments)));
+  }, [enrollSlot, enrollments]);
+
+  async function submitFingerprintEnrollment(mapOnly = false) {
+    if (!fingerprintEnrollmentAvailable) {
+      setEnrollMessage({
+        kind: "error",
+        text: "Open the Pi dashboard at http://AttKiosk:5174 to enroll fingerprints. The production dashboard cannot access the local reader."
+      });
+      return;
+    }
+    setEnrolling(true);
+    setEnrollMessage({
+      kind: "info",
+      text: mapOnly
+        ? "Saving the slot mapping without changing the fingerprint sensor template."
+        : "Enrollment is running. Place the selected finger on the reader, remove it when the reader light changes, then place the same finger again."
+    });
+    try {
+      const path = mapOnly ? "/admin/fingerprint/map" : "/admin/fingerprint/enroll";
+      await apiPost<{ message?: string }>(path, {
+        memberId: enrollMemberId,
+        slot: Number(enrollSlot),
+        fingerLabel: enrollFingerLabel,
+        confirmOverwrite
+      }, session);
+      const memberName = selectedEnrollmentMember ? `${selectedEnrollmentMember.first_name} ${selectedEnrollmentMember.last_name}` : enrollMemberId;
+      setEnrollMessage({
+        kind: "success",
+        text: mapOnly
+          ? `Slot ${enrollSlot} now maps to ${memberName}. Restarting the kiosk service is not required.`
+          : `Fingerprint linked to ${memberName} using slot ${enrollSlot}. Test it on the kiosk screen now.`
+      });
+      setConfirmOverwrite(false);
+      reloadEnrollments();
+    } catch (err) {
+      setEnrollMessage({ kind: "error", text: friendlyEnrollmentError(err) });
+    } finally {
+      setEnrolling(false);
+    }
+  }
+
+  async function deleteEnrollment(slot: number) {
+    if (!window.confirm(`Remove the mapping for fingerprint slot ${slot}? The template on the sensor will not be deleted.`)) return;
+    setEnrolling(true);
+    try {
+      await apiPost("/admin/fingerprint/enrollments/delete", { slot }, session);
+      setEnrollMessage({ kind: "success", text: `Removed mapping for slot ${slot}. The sensor template was left in place.` });
+      reloadEnrollments();
+    } catch (err) {
+      setEnrollMessage({ kind: "error", text: friendlyEnrollmentError(err) });
+    } finally {
+      setEnrolling(false);
+    }
+  }
 
   return (
     <>
@@ -195,34 +271,7 @@ function Roster({ session }: { session: DashboardSession }) {
         ) : null}
         <form className="toolbar wrap" onSubmit={async (event) => {
           event.preventDefault();
-          if (!fingerprintEnrollmentAvailable) {
-            setEnrollMessage({
-              kind: "error",
-              text: "Open the Pi dashboard at http://AttKiosk:5174 to enroll fingerprints. The production dashboard cannot access the local reader."
-            });
-            return;
-          }
-          setEnrolling(true);
-          setEnrollMessage({
-            kind: "info",
-            text: "Enrollment is running. Place the selected finger on the reader, remove it when the reader light changes, then place the same finger again."
-          });
-          try {
-            await apiPost<{ message?: string }>("/admin/fingerprint/enroll", {
-              memberId: enrollMemberId,
-              slot: Number(enrollSlot),
-              fingerLabel: enrollFingerLabel
-            }, session);
-            const memberName = selectedEnrollmentMember ? `${selectedEnrollmentMember.first_name} ${selectedEnrollmentMember.last_name}` : enrollMemberId;
-            setEnrollMessage({
-              kind: "success",
-              text: `Fingerprint linked to ${memberName} using slot ${enrollSlot}. Test it on the kiosk screen now.`
-            });
-          } catch (err) {
-            setEnrollMessage({ kind: "error", text: friendlyEnrollmentError(err) });
-          } finally {
-            setEnrolling(false);
-          }
+          await submitFingerprintEnrollment(false);
         }}>
           <select value={enrollMemberId} onChange={(event) => setEnrollMemberId(event.target.value)} required>
             <option value="">Select member</option>
@@ -234,12 +283,53 @@ function Roster({ session }: { session: DashboardSession }) {
           </select>
           <input value={enrollSlot} onChange={(event) => setEnrollSlot(event.target.value)} type="number" min="1" max="200" placeholder="Slot" required />
           <input value={enrollFingerLabel} onChange={(event) => setEnrollFingerLabel(event.target.value)} placeholder="Finger label" />
+          <button type="button" onClick={() => setEnrollSlot(String(nextOpenSlot))} disabled={!fingerprintEnrollmentAvailable || enrolling}>Use slot {nextOpenSlot}</button>
           <button disabled={enrolling || !fingerprintEnrollmentAvailable}>{enrolling ? "Enrolling..." : "Enroll fingerprint"}</button>
+          <button type="button" disabled={enrolling || !fingerprintEnrollmentAvailable || !enrollMemberId || !enrollSlot} onClick={() => submitFingerprintEnrollment(true)}>
+            Save mapping only
+          </button>
         </form>
+        {occupiedEnrollment ? (
+          <label className="inline-check notice info">
+            <input type="checkbox" checked={confirmOverwrite} onChange={(event) => setConfirmOverwrite(event.target.checked)} />
+            Replace slot {occupiedEnrollment.slot}, currently mapped to {fingerprintEnrollmentName(occupiedEnrollment)}
+          </label>
+        ) : null}
         {enrollMessage ? <p className={`notice ${enrollMessage.kind}`}>{enrollMessage.text}</p> : null}
+        {enrollmentError ? <p className="error">{enrollmentError}</p> : null}
+        {fingerprintEnrollmentAvailable ? (
+          <FingerprintEnrollmentTable enrollments={enrollments} onDelete={deleteEnrollment} deleting={enrolling} />
+        ) : null}
       </section>
       <Table title="Roster" error={error} rows={data?.students ?? []} columns={["student_id", "first_name", "last_name", "active"]} />
     </>
+  );
+}
+
+function FingerprintEnrollmentTable({ enrollments, onDelete, deleting }: { enrollments: FingerprintEnrollment[]; onDelete: (slot: number) => void; deleting: boolean }) {
+  if (enrollments.length === 0) return <p className="empty-state">No local fingerprint mappings yet.</p>;
+  return (
+    <table className="compact-table">
+      <thead>
+        <tr>
+          {["slot", "member", "finger", "enrolled", "actions"].map((column) => <th key={column}>{column}</th>)}
+        </tr>
+      </thead>
+      <tbody>
+        {enrollments.map((enrollment) => (
+          <tr key={enrollment.slot}>
+            <td>{enrollment.slot}</td>
+            <td>
+              {fingerprintEnrollmentName(enrollment)}
+              {!enrollment.active ? <span className="muted"> inactive</span> : null}
+            </td>
+            <td>{enrollment.fingerLabel ?? ""}</td>
+            <td>{formatDateTime(enrollment.enrolledAt)}</td>
+            <td><button type="button" disabled={deleting} onClick={() => onDelete(enrollment.slot)}>Remove mapping</button></td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }
 
@@ -585,6 +675,7 @@ function friendlyEnrollmentError(error: unknown) {
   if (message.includes("timed out")) return "Enrollment timed out. Try again, placing the finger on the reader soon after clicking the button.";
   if (message.includes("member is not active in roster")) return "That member is not active in the roster. Sync the roster first, then try again.";
   if (message.includes("already in progress")) return "Another enrollment is already running. Wait for it to finish, then try again.";
+  if (message.includes("confirm overwrite")) return "That slot already has a member mapping. Check the replace confirmation, then try again.";
   if (message.includes("Not found")) return "Fingerprint enrollment is only available from the Pi dashboard at http://AttKiosk:5174.";
   return message.replace(/^.*"error":"?/, "").replace(/"}$/, "");
 }
@@ -605,6 +696,19 @@ function groupCommandsByKiosk(commands: KioskCommandRow[]) {
     groups[command.kioskId] = [...(groups[command.kioskId] ?? []), command];
     return groups;
   }, {});
+}
+
+function nextAvailableFingerprintSlot(enrollments: FingerprintEnrollment[]) {
+  const occupiedSlots = new Set(enrollments.map((enrollment) => enrollment.slot));
+  for (let slot = 1; slot <= 200; slot += 1) {
+    if (!occupiedSlots.has(slot)) return slot;
+  }
+  return 200;
+}
+
+function fingerprintEnrollmentName(enrollment: FingerprintEnrollment) {
+  const name = [enrollment.firstName, enrollment.lastName].filter(Boolean).join(" ");
+  return name ? `${enrollment.memberId} - ${name}` : enrollment.memberId;
 }
 
 function commandTimestamp(command: KioskCommandRow) {

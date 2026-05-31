@@ -69,6 +69,10 @@ def save_mapping(db_path: str, student_id: str, slot: int, finger_label: str | N
             """
             INSERT INTO local_enrollments (student_id, template_slot, finger_label, enrolled_at, deleted_at)
             VALUES (?, ?, ?, ?, NULL)
+            ON CONFLICT(student_id, template_slot) DO UPDATE SET
+              finger_label = excluded.finger_label,
+              enrolled_at = excluded.enrolled_at,
+              deleted_at = NULL
             """,
             (student_id, slot, finger_label, enrolled_at),
         )

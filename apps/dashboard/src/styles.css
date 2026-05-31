@@ -148,6 +148,17 @@ textarea {
   flex-wrap: wrap;
 }
 
+.inline-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.inline-check input {
+  width: auto;
+}
+
 button:disabled {
   opacity: 0.6;
   cursor: wait;
@@ -289,6 +300,18 @@ pre {
 
 .empty-state {
   margin: 8px 0 0;
+}
+
+.compact-table {
+  margin-top: 14px;
+}
+
+.compact-table button {
+  padding: 7px 9px;
+}
+
+.muted {
+  color: var(--muted-color);
 }
 
 .login {

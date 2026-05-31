@@ -172,9 +172,9 @@ The normal path is the dashboard:
 
 1. Open `http://<pi-hostname-or-ip>:5174`.
 2. Go to the roster tab.
-3. Select an active member, choose an unused slot, and click `Enroll fingerprint`.
+3. Select an active member, use the suggested next available slot or choose another unused slot, and click `Enroll fingerprint`.
 
-The dashboard temporarily stops the kiosk scanning service, runs enrollment against the local reader, saves the slot mapping, and restarts scanning.
+The dashboard shows the current local slot mappings, warns before overwriting an occupied slot, can save a mapping without touching the sensor, and can remove a mapping while leaving the sensor template intact. The dashboard temporarily stops the kiosk scanning service, runs enrollment against the local reader, saves the slot mapping, and restarts scanning.
 
 To enroll a new finger into slot `1` and map it to student `100001`:
 
