@@ -1,6 +1,7 @@
-import { DEFAULT_DUPLICATE_WINDOW_MS, deriveAttendanceSessions, isDuplicateScan } from "@frc-attendance/shared";
-import type { KioskSyncEventInput, KioskSyncResult, ScanEvent } from "@frc-attendance/shared";
+import { DEFAULT_DUPLICATE_WINDOW_MS, deriveAttendanceSessions, isDuplicateScan, meetingDateForTimestamp } from "@frc-attendance/shared";
+import type { KioskScanAcknowledgement, KioskSyncEventInput, KioskSyncResult, ScanEvent, ScanEventStatus } from "@frc-attendance/shared";
 import type { Env } from "./env";
+import { buildMemberAttendanceReport } from "./reports";
 
 const eventId = (kioskId: string, localEventId: string) => `${kioskId}:${localEventId}`;
 
@@ -8,6 +9,7 @@ export async function syncKioskEvents(env: Env, kioskId: string, events: KioskSy
   const accepted: ScanEvent[] = [];
   const duplicates: ScanEvent[] = [];
   const rejected: KioskSyncResult["rejected"] = [];
+  const acknowledgementInputs: AcknowledgementInput[] = [];
   const duplicateWindow = Number(env.DUPLICATE_WINDOW_SECONDS || "90") * 1000 || DEFAULT_DUPLICATE_WINDOW_MS;
   const now = new Date().toISOString();
 
@@ -30,13 +32,21 @@ export async function syncKioskEvents(env: Env, kioskId: string, events: KioskSy
       if (event.status === "duplicate") duplicates.push(event);
       else if (event.status === "accepted") accepted.push(event);
       else rejected.push({ ...input, reason: "previously rejected" });
+      acknowledgementInputs.push({
+        input,
+        status: event.status,
+        reason: event.status === "rejected" ? "previously rejected" : undefined,
+        action: event.status === "accepted" ? await actionForAcceptedScan(env, input) : undefined
+      });
       continue;
     }
 
     const student = await env.DB.prepare("SELECT active FROM students WHERE student_id = ?").bind(input.studentId).first<{ active: number }>();
     if (!student || !student.active) {
-      rejected.push({ ...input, reason: "student is not active in roster" });
-      await insertScanEvent(env, kioskId, input, now, "rejected", "student is not active in roster");
+      const reason = "student is not active in roster";
+      rejected.push({ ...input, reason });
+      await insertScanEvent(env, kioskId, input, now, "rejected", reason);
+      acknowledgementInputs.push({ input, status: "rejected", reason });
       continue;
     }
 
@@ -47,15 +57,22 @@ export async function syncKioskEvents(env: Env, kioskId: string, events: KioskSy
     if (isDuplicateScan(previous ? rowToScanEvent(previous) : undefined, input, duplicateWindow)) {
       const event = await insertScanEvent(env, kioskId, input, now, "duplicate", "duplicate scan window");
       duplicates.push(event);
+      acknowledgementInputs.push({ input, status: "duplicate", reason: "duplicate scan window" });
       continue;
     }
 
     const event = await insertScanEvent(env, kioskId, input, now, "accepted");
     accepted.push(event);
+    acknowledgementInputs.push({ input, status: "accepted", action: await actionForAcceptedScan(env, input) });
   }
 
   if (accepted.length > 0) await rebuildAttendanceSessions(env);
-  return { accepted, duplicates, rejected };
+  return {
+    accepted,
+    duplicates,
+    rejected,
+    acknowledgements: await Promise.all(acknowledgementInputs.map((acknowledgement) => buildAcknowledgement(env, acknowledgement)))
+  };
 }
 
 export async function addManualEvent(env: Env, input: { studentId: string; occurredAt: string; action: "check_in" | "check_out"; reason: string; adminEmail: string }) {
@@ -142,4 +159,76 @@ function rowToScanEvent(row: {
     source: row.source,
     status: row.status
   };
+}
+
+async function buildAcknowledgement(env: Env, acknowledgement: AcknowledgementInput): Promise<KioskScanAcknowledgement> {
+  const student = await env.DB.prepare(
+    "SELECT first_name, last_name FROM students WHERE student_id = ?"
+  ).bind(acknowledgement.input.studentId).first<{ first_name: string; last_name: string }>();
+  const displayName = student ? `${student.first_name} ${student.last_name}` : undefined;
+  const attendance = await attendanceSummary(env, acknowledgement.input.studentId);
+
+  if (acknowledgement.status === "duplicate") {
+    return {
+      localEventId: acknowledgement.input.localEventId,
+      studentId: acknowledgement.input.studentId,
+      status: "duplicate",
+      displayName,
+      attendanceRate: attendance.rate,
+      attendanceSummary: attendance.summary,
+      message: displayName ? `${displayName} was already recorded.` : "Scan was already recorded."
+    };
+  }
+
+  if (acknowledgement.status === "rejected") {
+    return {
+      localEventId: acknowledgement.input.localEventId,
+      studentId: acknowledgement.input.studentId,
+      status: "rejected",
+      displayName,
+      attendanceRate: attendance.rate,
+      attendanceSummary: attendance.summary,
+      message: acknowledgement.reason === "student is not active in roster" ? "Member is not active in the roster." : "Scan could not be accepted."
+    };
+  }
+
+  return {
+    localEventId: acknowledgement.input.localEventId,
+    studentId: acknowledgement.input.studentId,
+    status: "accepted",
+    displayName,
+    action: acknowledgement.action,
+    attendanceRate: attendance.rate,
+    attendanceSummary: attendance.summary,
+    message: acknowledgement.action === "check_out" ? `Goodbye, ${displayName ?? acknowledgement.input.studentId}` : `Welcome, ${displayName ?? acknowledgement.input.studentId}`
+  };
+}
+
+async function actionForAcceptedScan(env: Env, input: KioskSyncEventInput): Promise<"check_in" | "check_out"> {
+  const meetingDate = meetingDateForTimestamp(input.occurredAt, env.TIME_ZONE);
+  const rows = await env.DB.prepare(
+    "SELECT id, occurred_at FROM scan_events WHERE student_id = ? AND status = 'accepted' ORDER BY occurred_at ASC, id ASC"
+  ).bind(input.studentId).all<{ id: string; occurred_at: string }>();
+  const acceptedForMeeting = rows.results.filter((row) => meetingDateForTimestamp(row.occurred_at, env.TIME_ZONE) === meetingDate);
+  return acceptedForMeeting.length % 2 === 0 ? "check_out" : "check_in";
+}
+
+async function attendanceSummary(env: Env, studentId: string): Promise<{ rate: number | null; summary?: string }> {
+  try {
+    const report = await buildMemberAttendanceReport(env, studentId);
+    if (report.attendanceRate === null) return { rate: null };
+    return {
+      rate: report.attendanceRate,
+      summary: `Attendance ${Math.round(report.attendanceRate * 100)}% (${report.presentMeetings}/${report.totalMeetings})`
+    };
+  } catch {
+    return { rate: null };
+  }
+}
+
+interface AcknowledgementInput {
+  input: KioskSyncEventInput;
+  status: ScanEventStatus;
+  reason?: string;
+  action?: "check_in" | "check_out";
 }
