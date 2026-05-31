@@ -189,19 +189,32 @@ function Roster({ session }: { session: DashboardSession }) {
   const activeStudents = data?.students.filter((student) => student.active) ?? [];
   const enrollments = enrollmentData?.enrollments ?? [];
   const nextOpenSlot = nextAvailableFingerprintSlot(enrollments);
-  const occupiedEnrollment = enrollments.find((enrollment) => enrollment.slot === Number(enrollSlot));
+  const selectedSlot = Number(enrollSlot);
+  const occupiedEnrollment = enrollments.find((enrollment) => enrollment.slot === selectedSlot);
   const selectedEnrollmentMember = activeStudents.find((student) => student.student_id === enrollMemberId);
+  const overwriteBlocked = Boolean(occupiedEnrollment && !confirmOverwrite);
 
   useEffect(() => {
     if (!fingerprintEnrollmentAvailable || enrollSlot) return;
     setEnrollSlot(String(nextAvailableFingerprintSlot(enrollments)));
   }, [enrollSlot, enrollments]);
 
+  useEffect(() => {
+    setConfirmOverwrite(false);
+  }, [enrollSlot, enrollMemberId]);
+
   async function submitFingerprintEnrollment(mapOnly = false) {
     if (!fingerprintEnrollmentAvailable) {
       setEnrollMessage({
         kind: "error",
         text: "Open the Pi dashboard at http://AttKiosk:5174 to enroll fingerprints. The production dashboard cannot access the local reader."
+      });
+      return;
+    }
+    if (occupiedEnrollment && !confirmOverwrite) {
+      setEnrollMessage({
+        kind: "error",
+        text: `Slot ${occupiedEnrollment.slot} is mapped to ${fingerprintEnrollmentName(occupiedEnrollment)}. Check the replace confirmation before continuing.`
       });
       return;
     }
@@ -228,6 +241,7 @@ function Roster({ session }: { session: DashboardSession }) {
           : `Fingerprint linked to ${memberName} using slot ${enrollSlot}. Test it on the kiosk screen now.`
       });
       setConfirmOverwrite(false);
+      setEnrollSlot(String(nextAvailableFingerprintSlot(enrollments, selectedSlot)));
       reloadEnrollments();
     } catch (err) {
       setEnrollMessage({ kind: "error", text: friendlyEnrollmentError(err) });
@@ -287,14 +301,22 @@ function Roster({ session }: { session: DashboardSession }) {
               </option>
             ))}
           </select>
-          <input value={enrollSlot} onChange={(event) => setEnrollSlot(event.target.value)} type="number" min="1" max="200" placeholder="Slot" required />
+          <label className="field-label">
+            <span>Template slot</span>
+            <input value={enrollSlot} onChange={(event) => setEnrollSlot(event.target.value)} type="number" min="1" max="200" placeholder="Slot" required />
+          </label>
           <input value={enrollFingerLabel} onChange={(event) => setEnrollFingerLabel(event.target.value)} placeholder="Finger label" />
           <button type="button" onClick={() => setEnrollSlot(String(nextOpenSlot))} disabled={!fingerprintEnrollmentAvailable || enrolling}>Use slot {nextOpenSlot}</button>
-          <button disabled={enrolling || !fingerprintEnrollmentAvailable}>{enrolling ? "Enrolling..." : "Enroll fingerprint"}</button>
-          <button type="button" disabled={enrolling || !fingerprintEnrollmentAvailable || !enrollMemberId || !enrollSlot} onClick={() => submitFingerprintEnrollment(true)}>
+          <button disabled={enrolling || !fingerprintEnrollmentAvailable || overwriteBlocked}>{enrolling ? "Enrolling..." : "Enroll fingerprint"}</button>
+          <button type="button" disabled={enrolling || !fingerprintEnrollmentAvailable || !enrollMemberId || !enrollSlot || overwriteBlocked} onClick={() => submitFingerprintEnrollment(true)}>
             Save mapping only
           </button>
         </form>
+        {fingerprintEnrollmentAvailable ? (
+          <p className="slot-suggestion">
+            Suggested next open slot: <button type="button" onClick={() => setEnrollSlot(String(nextOpenSlot))} disabled={enrolling}>{nextOpenSlot}</button>
+          </p>
+        ) : null}
         {occupiedEnrollment ? (
           <label className="inline-check notice info">
             <input type="checkbox" checked={confirmOverwrite} onChange={(event) => setConfirmOverwrite(event.target.checked)} />
@@ -313,29 +335,39 @@ function Roster({ session }: { session: DashboardSession }) {
 }
 
 function FingerprintEnrollmentTable({ enrollments, onDelete, deleting }: { enrollments: FingerprintEnrollment[]; onDelete: (slot: number) => void; deleting: boolean }) {
-  if (enrollments.length === 0) return <p className="empty-state">No local fingerprint mappings yet.</p>;
+  if (enrollments.length === 0) {
+    return (
+      <div className="enrollment-list">
+        <h3>Current slot mappings</h3>
+        <p className="empty-state">No local fingerprint mappings yet.</p>
+      </div>
+    );
+  }
   return (
-    <table className="compact-table">
-      <thead>
-        <tr>
-          {["slot", "member", "finger", "enrolled", "actions"].map((column) => <th key={column}>{column}</th>)}
-        </tr>
-      </thead>
-      <tbody>
-        {enrollments.map((enrollment) => (
-          <tr key={enrollment.slot}>
-            <td>{enrollment.slot}</td>
-            <td>
-              {fingerprintEnrollmentName(enrollment)}
-              {!enrollment.active ? <span className="muted"> inactive</span> : null}
-            </td>
-            <td>{enrollment.fingerLabel ?? ""}</td>
-            <td>{formatDateTime(enrollment.enrolledAt)}</td>
-            <td><button type="button" disabled={deleting} onClick={() => onDelete(enrollment.slot)}>Remove mapping</button></td>
+    <div className="enrollment-list">
+      <h3>Current slot mappings</h3>
+      <table className="compact-table">
+        <thead>
+          <tr>
+            {["slot", "member", "finger", "enrolled", "actions"].map((column) => <th key={column}>{column}</th>)}
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {enrollments.map((enrollment) => (
+            <tr key={enrollment.slot}>
+              <td>{enrollment.slot}</td>
+              <td>
+                {fingerprintEnrollmentName(enrollment)}
+                {!enrollment.active ? <span className="muted"> inactive</span> : null}
+              </td>
+              <td>{enrollment.fingerLabel ?? ""}</td>
+              <td>{formatDateTime(enrollment.enrolledAt)}</td>
+              <td><button type="button" disabled={deleting} onClick={() => onDelete(enrollment.slot)}>Remove mapping</button></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -722,8 +754,9 @@ function groupCommandsByKiosk(commands: KioskCommandRow[]) {
   }, {});
 }
 
-function nextAvailableFingerprintSlot(enrollments: FingerprintEnrollment[]) {
+function nextAvailableFingerprintSlot(enrollments: FingerprintEnrollment[], pendingOccupiedSlot?: number) {
   const occupiedSlots = new Set(enrollments.map((enrollment) => enrollment.slot));
+  if (pendingOccupiedSlot) occupiedSlots.add(pendingOccupiedSlot);
   for (let slot = 1; slot <= 200; slot += 1) {
     if (!occupiedSlots.has(slot)) return slot;
   }
