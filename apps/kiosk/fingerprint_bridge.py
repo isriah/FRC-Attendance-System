@@ -20,6 +20,25 @@ def emit(line: str):
     print(line, flush=True)
 
 
+LED_ENABLED = os.environ.get("FINGERPRINT_LED_ENABLED", "true").lower() not in {"0", "false", "no"}
+LED_RED = 1
+LED_BLUE = 2
+LED_PURPLE = 3
+LED_BREATHE = 1
+LED_FLASH = 2
+LED_ON = 3
+LED_OFF = 4
+
+
+def set_reader_led(finger, color=LED_BLUE, mode=LED_ON, speed=0x40, cycles=0):
+    if not LED_ENABLED or not hasattr(finger, "set_led"):
+        return
+    try:
+        finger.set_led(color=color, mode=mode, speed=speed, cycles=cycles)
+    except Exception as exc:
+        print(f"Could not set fingerprint LED: {exc}", file=sys.stderr, flush=True)
+
+
 def load_slot_map():
     import json
     import sqlite3
@@ -85,6 +104,7 @@ def hardware_loop():
                 emit("STAT:OFFLINE")
                 raise RuntimeError("Fingerprint sensor did not accept password")
 
+            set_reader_led(finger, color=LED_BLUE, mode=LED_BREATHE, speed=0x80, cycles=0)
             emit("STAT:ONLINE")
 
             while True:
@@ -92,7 +112,11 @@ def hardware_loop():
                     time.sleep(poll_seconds)
                     continue
 
+                set_reader_led(finger, color=LED_PURPLE, mode=LED_ON)
+
                 if finger.image_2_tz(1) != adafruit_fingerprint.OK:
+                    set_reader_led(finger, color=LED_RED, mode=LED_FLASH, speed=0x30, cycles=2)
+                    set_reader_led(finger, color=LED_BLUE, mode=LED_BREATHE, speed=0x80, cycles=0)
                     time.sleep(poll_seconds)
                     continue
 
@@ -103,20 +127,26 @@ def hardware_loop():
                     now = time.monotonic()
                     if student_id is None:
                         if now - last_no_match_at >= debounce_seconds:
+                            set_reader_led(finger, color=LED_RED, mode=LED_FLASH, speed=0x30, cycles=2)
                             emit("NO_MATCH")
                             last_no_match_at = now
+                        set_reader_led(finger, color=LED_BLUE, mode=LED_BREATHE, speed=0x80, cycles=0)
                         time.sleep(repeat_delay_seconds)
                         continue
 
                     if last_match != slot or now - last_match_at >= debounce_seconds:
+                        set_reader_led(finger, color=LED_PURPLE, mode=LED_FLASH, speed=0x30, cycles=1)
                         emit(f"MATCH:{student_id},{slot}")
                         last_match = slot
                         last_match_at = now
+                    set_reader_led(finger, color=LED_BLUE, mode=LED_BREATHE, speed=0x80, cycles=0)
                 else:
                     now = time.monotonic()
                     if now - last_no_match_at >= debounce_seconds:
+                        set_reader_led(finger, color=LED_RED, mode=LED_FLASH, speed=0x30, cycles=2)
                         emit("NO_MATCH")
                         last_no_match_at = now
+                    set_reader_led(finger, color=LED_BLUE, mode=LED_BREATHE, speed=0x80, cycles=0)
 
                 time.sleep(repeat_delay_seconds)
         except Exception as exc:
