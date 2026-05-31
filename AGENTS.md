@@ -12,6 +12,42 @@ This repository is a fingerprint-based multi-kiosk attendance system for FRC tea
 - `packages/shared`: shared attendance logic, types, and validation used across apps.
 - `docs`: operational references. Use `docs/OPERATIONS.md` for Cloudflare, deployment, local bench API, dashboard config, kiosk provisioning, fingerprint integration, and roster sync operations. Use `docs/PI-SETUP.md` for Raspberry Pi setup, display/UART wiring, user services, browser autostart, and hardware-specific steps.
 
+## Token-Efficient Session Workflow
+
+Avoid requiring large copy/paste handoffs at the start of new Codex sessions. Stable project facts belong in this file and in `docs`, not in chat. Future sessions should be able to start from a short prompt plus local inspection.
+
+Recommended user kickoff:
+
+```text
+Continue in C:\Users\Izz\Desktop\FRC Attendance System.
+Read AGENTS.md. Read docs/OPERATIONS.md only if the task touches Cloudflare/API/deploy/roster sync. Read docs/PI-SETUP.md only if the task touches Pi services/display/UART/fingerprint hardware.
+Task: <one concrete outcome>.
+Latest known commit: <optional hash>.
+Known unrelated dirty files: <optional short list>.
+Verify, commit, push, and update the Pi only if relevant.
+```
+
+At session start, agents should:
+
+- Read `AGENTS.md` first.
+- Check `git status --short --branch` and `git log --oneline -5` instead of asking the user to paste repository state.
+- Read only the docs relevant to the requested task:
+  - `docs/OPERATIONS.md` for Cloudflare, API deployment, dashboard deployment, bench API, auth, roster sync, or kiosk provisioning.
+  - `docs/PI-SETUP.md` for Raspberry Pi services, display/browser autostart, UART, fingerprint hardware, or service restarts.
+- Prefer inspecting files, commit history, and deployed/local state directly over carrying forward a long chat transcript.
+- Keep each session focused on one discrete unit of work. If the next task is unrelated, start a fresh session with the short kickoff above.
+- Do not paste full docs, AGENTS content, command logs, or broad project history into chat unless specifically needed. Put durable handoff notes in a small repo file instead.
+
+If richer continuity is needed, create or update a short handoff file such as `docs/CODEX-HANDOFF.md` with only:
+
+- latest pushed commit
+- current local/Pi dirty files that must be preserved
+- last verification/deployment status
+- one recommended next task
+- any temporary credentials/config caveats, without secrets
+
+Agents should treat that handoff as a pointer for discovery, not as a substitute for checking the real current repo, deployment, and Pi state.
+
 ## Common Commands
 
 Run commands from the repo root unless a workspace is specified.
