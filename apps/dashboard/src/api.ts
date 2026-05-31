@@ -1,4 +1,4 @@
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? defaultApiBaseUrl();
+export const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? defaultApiBaseUrl();
 const googleAuthEnabled = Boolean(import.meta.env.VITE_GOOGLE_CLIENT_ID);
 
 export interface DashboardSession {

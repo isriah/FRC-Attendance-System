@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { apiGet, apiPost, type DashboardSession } from "./api";
+import { apiBaseUrl, apiGet, apiPost, type DashboardSession } from "./api";
 import "./styles.css";
 
 type Tab = "overview" | "roster" | "kiosks" | "events" | "reports" | "export";
@@ -29,6 +29,7 @@ interface KioskCommandRow {
 
 const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
 const googleAuthEnabled = Boolean(googleClientId);
+const fingerprintEnrollmentAvailable = !apiBaseUrl.includes("workers.dev");
 
 function App() {
   const [session, setSession] = useState<DashboardSession>(readStoredSession);
@@ -187,8 +188,20 @@ function Roster({ session }: { session: DashboardSession }) {
       </section>
       <section>
         <h2>Fingerprint Enrollment</h2>
+        {!fingerprintEnrollmentAvailable ? (
+          <p className="notice info">
+            Fingerprint enrollment must run from the Raspberry Pi dashboard at http://AttKiosk:5174 because it needs direct access to the local fingerprint reader.
+          </p>
+        ) : null}
         <form className="toolbar wrap" onSubmit={async (event) => {
           event.preventDefault();
+          if (!fingerprintEnrollmentAvailable) {
+            setEnrollMessage({
+              kind: "error",
+              text: "Open the Pi dashboard at http://AttKiosk:5174 to enroll fingerprints. The production dashboard cannot access the local reader."
+            });
+            return;
+          }
           setEnrolling(true);
           setEnrollMessage({
             kind: "info",
@@ -221,7 +234,7 @@ function Roster({ session }: { session: DashboardSession }) {
           </select>
           <input value={enrollSlot} onChange={(event) => setEnrollSlot(event.target.value)} type="number" min="1" max="200" placeholder="Slot" required />
           <input value={enrollFingerLabel} onChange={(event) => setEnrollFingerLabel(event.target.value)} placeholder="Finger label" />
-          <button disabled={enrolling}>{enrolling ? "Enrolling..." : "Enroll fingerprint"}</button>
+          <button disabled={enrolling || !fingerprintEnrollmentAvailable}>{enrolling ? "Enrolling..." : "Enroll fingerprint"}</button>
         </form>
         {enrollMessage ? <p className={`notice ${enrollMessage.kind}`}>{enrollMessage.text}</p> : null}
       </section>
@@ -572,6 +585,7 @@ function friendlyEnrollmentError(error: unknown) {
   if (message.includes("timed out")) return "Enrollment timed out. Try again, placing the finger on the reader soon after clicking the button.";
   if (message.includes("member is not active in roster")) return "That member is not active in the roster. Sync the roster first, then try again.";
   if (message.includes("already in progress")) return "Another enrollment is already running. Wait for it to finish, then try again.";
+  if (message.includes("Not found")) return "Fingerprint enrollment is only available from the Pi dashboard at http://AttKiosk:5174.";
   return message.replace(/^.*"error":"?/, "").replace(/"}$/, "");
 }
 
