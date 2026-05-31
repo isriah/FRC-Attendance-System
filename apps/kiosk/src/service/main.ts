@@ -2,6 +2,7 @@ import { executeKioskCommand, commandLabel } from "./commandExecutor";
 import { loadConfig } from "./config";
 import { DisplayStateServer } from "./displayStateServer";
 import { FingerprintBridge, type FingerprintBridgeEvent } from "./fingerprintBridge";
+import { ledStateForAcknowledgement, ledStateForSyncResult } from "./kioskStateDecisions";
 import { OfflineQueue } from "./offlineQueue";
 import { SyncClient } from "./syncClient";
 
@@ -23,16 +24,12 @@ bridge.on("bridge-event", async (event: FingerprintBridgeEvent) => {
       const acknowledgement = result?.acknowledgements?.find((ack) => ack.localEventId === local.localEventId);
       if (acknowledgement) {
         display.setAcknowledgement(acknowledgement);
-        bridge.setLedState(acknowledgement.status === "accepted" ? (acknowledgement.action === "check_out" ? "goodbye" : "welcome") : acknowledgement.status);
+        bridge.setLedState(ledStateForAcknowledgement(acknowledgement));
         console.log(`Scan acknowledged: ${acknowledgement.message}`);
       } else if (result) {
         display.setSyncResult(local.localEventId, event.studentId, result);
-        const accepted = result.accepted.some((scan) => scan.localEventId === local.localEventId);
-        const duplicate = result.duplicates.some((scan) => scan.localEventId === local.localEventId);
-        const rejected = result.rejected.some((scan) => scan.localEventId === local.localEventId);
-        if (accepted) bridge.setLedState("welcome");
-        if (duplicate) bridge.setLedState("duplicate");
-        if (rejected) bridge.setLedState("rejected");
+        const ledState = ledStateForSyncResult(local.localEventId, result);
+        if (ledState) bridge.setLedState(ledState);
       }
       console.log("Synced pending scans");
     } catch (error) {
