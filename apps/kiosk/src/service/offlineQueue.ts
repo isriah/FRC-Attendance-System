@@ -56,6 +56,11 @@ export class OfflineQueue {
     ).all(limit).map((row) => rowToEvent(row as Parameters<typeof rowToEvent>[0]));
   }
 
+  pendingCount(): number {
+    const row = this.db.prepare("SELECT COUNT(*) AS count FROM local_scan_events WHERE synced_at IS NULL").get() as { count: number };
+    return row.count;
+  }
+
   markSynced(localEventIds: string[], syncedAt = new Date().toISOString()) {
     if (localEventIds.length === 0) return;
     const statement = this.db.prepare("UPDATE local_scan_events SET synced_at = ?, sync_error = NULL WHERE local_event_id = ?");

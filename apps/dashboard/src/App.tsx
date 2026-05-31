@@ -6,6 +6,7 @@ import "./styles.css";
 type Tab = "overview" | "roster" | "kiosks" | "events" | "reports" | "export";
 type KioskCommandAction = "restart_display" | "restart_services" | "reboot_system";
 type KioskCommandStatus = "pending" | "running" | "completed" | "failed";
+type KioskHealthStatus = "online" | "degraded" | "offline" | "unknown";
 
 interface KioskRow {
   kiosk_id: string;
@@ -13,6 +14,11 @@ interface KioskRow {
   location?: string;
   active: number;
   last_seen_at?: string;
+  last_heartbeat_at?: string;
+  reader_online?: number | null;
+  pending_scan_count?: number;
+  last_sync_at?: string;
+  last_sync_error?: string;
 }
 
 interface KioskCommandRow {
@@ -381,7 +387,7 @@ function Kiosks({ session }: { session: DashboardSession }) {
         <table>
           <thead>
             <tr>
-              {["kiosk_id", "name", "location", "health", "last_seen_at", "commands"].map((column) => <th key={column}>{column}</th>)}
+              {["kiosk_id", "name", "location", "provisioned", "sync_health", "last_seen_at", "commands"].map((column) => <th key={column}>{column}</th>)}
             </tr>
           </thead>
           <tbody>
@@ -393,6 +399,7 @@ function Kiosks({ session }: { session: DashboardSession }) {
                   <td>{kiosk.name}</td>
                   <td>{kiosk.location ?? ""}</td>
                   <td><StatusBadge status={kiosk.active ? "active" : "inactive"} /></td>
+                  <td><KioskHealthSummary kiosk={kiosk} /></td>
                   <td>{formatDateTime(kiosk.last_seen_at)}</td>
                   <td>
                     <div className="kiosk-actions">
@@ -421,6 +428,23 @@ function Kiosks({ session }: { session: DashboardSession }) {
   );
 }
 
+function KioskHealthSummary({ kiosk }: { kiosk: KioskRow }) {
+  const status = kioskHealthStatus(kiosk);
+  const details = [
+    kiosk.reader_online === null || kiosk.reader_online === undefined ? "reader unknown" : kiosk.reader_online ? "reader online" : "reader offline",
+    `${kiosk.pending_scan_count ?? 0} queued`,
+    kiosk.last_sync_error ? "sync failing" : kiosk.last_sync_at ? `synced ${formatDateTime(kiosk.last_sync_at)}` : undefined
+  ].filter(Boolean);
+
+  return (
+    <div className="health-summary">
+      <StatusBadge status={status} />
+      <span>{details.join(" | ")}</span>
+      {kiosk.last_sync_error ? <p>{kiosk.last_sync_error}</p> : null}
+    </div>
+  );
+}
+
 function CommandTimeline({ commands }: { commands: KioskCommandRow[] }) {
   if (commands.length === 0) return <p className="empty-state">No recent commands.</p>;
   return (
@@ -439,7 +463,7 @@ function CommandTimeline({ commands }: { commands: KioskCommandRow[] }) {
   );
 }
 
-function StatusBadge({ status }: { status: KioskCommandStatus | "active" | "inactive" }) {
+function StatusBadge({ status }: { status: KioskCommandStatus | KioskHealthStatus | "active" | "inactive" }) {
   return <span className={`status-badge ${status}`}>{statusLabel(status)}</span>;
 }
 
@@ -727,9 +751,22 @@ function formatDateTime(value?: string) {
   }).format(new Date(value));
 }
 
-function statusLabel(status: KioskCommandStatus | "active" | "inactive") {
+function kioskHealthStatus(kiosk: KioskRow): KioskHealthStatus {
+  if (!kiosk.active) return "offline";
+  if (!kiosk.last_heartbeat_at) return "unknown";
+  const heartbeatAgeMs = Date.now() - new Date(kiosk.last_heartbeat_at).getTime();
+  if (heartbeatAgeMs > 60_000) return "offline";
+  if (kiosk.reader_online === 0 || (kiosk.pending_scan_count ?? 0) > 0 || kiosk.last_sync_error) return "degraded";
+  return "online";
+}
+
+function statusLabel(status: KioskCommandStatus | KioskHealthStatus | "active" | "inactive") {
   if (status === "active") return "Active";
   if (status === "inactive") return "Inactive";
+  if (status === "online") return "Online";
+  if (status === "degraded") return "Needs attention";
+  if (status === "offline") return "Offline";
+  if (status === "unknown") return "Unknown";
   if (status === "pending") return "Queued";
   if (status === "running") return "Running";
   if (status === "completed") return "Completed";

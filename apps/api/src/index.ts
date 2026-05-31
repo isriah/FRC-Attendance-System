@@ -1,4 +1,4 @@
-import { requireIsoTimestamp, requireNonEmptyString, type KioskSyncRequest } from "@frc-attendance/shared";
+import { requireIsoTimestamp, requireNonEmptyString, type KioskHealthReport, type KioskSyncRequest } from "@frc-attendance/shared";
 import { requireAdmin, requireKiosk, sha256Hex } from "./auth";
 import { addManualEvent, syncKioskEvents } from "./attendanceStore";
 import type { Env } from "./env";
@@ -23,6 +23,14 @@ export default {
         const body = await readJson<KioskSyncRequest>(request);
         if (body.kioskId !== kioskId) throw Object.assign(new Error("Kiosk token does not match kioskId"), { status: 403 });
         return json(await syncKioskEvents(env, kioskId, body.events));
+      }
+
+      if (route === "POST /kiosk/health") {
+        const kioskId = await requireKiosk(request, env);
+        const body = await readJson<KioskHealthReport>(request);
+        if (body.kioskId !== kioskId) throw Object.assign(new Error("Kiosk token does not match kioskId"), { status: 403 });
+        await updateKioskHealth(env, body);
+        return noContent();
       }
 
       if (route === "GET /kiosk/commands") {
@@ -65,7 +73,11 @@ export default {
 
       if (route === "GET /admin/kiosks") {
         await requireAdmin(request, env);
-        const rows = await env.DB.prepare("SELECT kiosk_id, name, location, active, last_seen_at FROM kiosks ORDER BY name").all();
+        const rows = await env.DB.prepare(`
+          SELECT kiosk_id, name, location, active, last_seen_at, last_heartbeat_at, reader_online, pending_scan_count, last_sync_at, last_sync_error
+          FROM kiosks
+          ORDER BY name
+        `).all();
         return json({ kiosks: rows.results });
       }
 
@@ -137,3 +149,24 @@ export default {
     }
   }
 };
+
+async function updateKioskHealth(env: Env, report: KioskHealthReport) {
+  const pendingScanCount = Math.max(0, Math.floor(Number(report.pendingScanCount) || 0));
+  await env.DB.prepare(`
+    UPDATE kiosks
+    SET
+      last_heartbeat_at = ?,
+      reader_online = ?,
+      pending_scan_count = ?,
+      last_sync_at = ?,
+      last_sync_error = ?
+    WHERE kiosk_id = ?
+  `).bind(
+    new Date().toISOString(),
+    report.readerOnline === null || report.readerOnline === undefined ? null : report.readerOnline ? 1 : 0,
+    pendingScanCount,
+    report.lastSyncAt ?? null,
+    report.lastSyncError ?? null,
+    report.kioskId
+  ).run();
+}

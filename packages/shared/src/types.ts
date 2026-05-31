@@ -19,6 +19,11 @@ export interface Kiosk {
   location?: string;
   active: boolean;
   lastSeenAt?: string;
+  lastHeartbeatAt?: string;
+  readerOnline?: boolean | null;
+  pendingScanCount?: number;
+  lastSyncAt?: string;
+  lastSyncError?: string;
 }
 
 export interface FingerprintEnrollment {
@@ -88,6 +93,14 @@ export interface KioskSyncResult {
   duplicates: ScanEvent[];
   rejected: Array<KioskSyncEventInput & { reason: string }>;
   acknowledgements?: KioskScanAcknowledgement[];
+}
+
+export interface KioskHealthReport {
+  kioskId: string;
+  readerOnline?: boolean | null;
+  pendingScanCount: number;
+  lastSyncAt?: string;
+  lastSyncError?: string;
 }
 
 export type KioskCommandAction = "restart_display" | "restart_services" | "reboot_system";

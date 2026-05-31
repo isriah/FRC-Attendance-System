@@ -137,6 +137,8 @@ Deployment `https://c1a584ae.frc-attendance-dashboard.pages.dev` adds per-kiosk 
 
 Deployment `https://933d1d20.frc-attendance-dashboard.pages.dev` shows recent queued/running/completed/failed kiosk command results per kiosk. The associated Worker deployment exposes `GET /admin/kiosk-commands` for credentialed dashboard command-history reads.
 
+Kiosk services report health to `POST /kiosk/health`, including reader online/offline state, pending local scan count, latest successful sync time, and latest sync error. The dashboard Kiosks tab shows this as sync health alongside command controls.
+
 The dashboard login UI follows the same boundary: when `VITE_GOOGLE_CLIENT_ID` is configured, it shows Google sign-in and a production notice that email-only local login is disabled. The email-only form is rendered only for local development builds with no Google client ID.
 
 For local development only, if no Google client ID is configured, the dashboard can send an `x-admin-email` header and the API will still enforce the configured allowlist.
@@ -198,9 +200,9 @@ bash apps/kiosk/scripts/install-browser-autostart.sh
 This installs and starts:
 
 - `frc-bench-api.service`: lightweight local API on `http://localhost:8787`.
-- `frc-kiosk-service.service`: fingerprint bridge, offline queue sync, and local display state on `http://localhost:8788/kiosk/display-state`.
+- `frc-kiosk-service.service`: fingerprint bridge, offline queue sync, local display state on `http://localhost:8788/kiosk/display-state`, and API health reporting.
 - `frc-kiosk-ui.service`: kiosk UI dev server on `http://localhost:5173`.
-- `frc-kiosk-service.service` also polls the configured API for remote kiosk commands every `KIOSK_COMMAND_POLL_SECONDS`, default `10`.
+- `frc-kiosk-service.service` reports reader/sync health every 15 seconds, and also polls the configured API for remote kiosk commands every `KIOSK_COMMAND_POLL_SECONDS`, default `10`.
 - The kiosk UI polls display state from the kiosk service on port `8788` first, then falls back to the local bench API on port `8787`.
 
 Useful commands:

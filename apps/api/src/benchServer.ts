@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { DEFAULT_DUPLICATE_WINDOW_MS, deriveAttendanceSessions, isDuplicateScan, meetingDateForTimestamp, type AttendanceSession, type KioskCommand, type KioskCommandAction, type KioskCommandStatus, type KioskScanAcknowledgement, type KioskSyncRequest, type ScanEvent } from "@frc-attendance/shared";
+import { DEFAULT_DUPLICATE_WINDOW_MS, deriveAttendanceSessions, isDuplicateScan, meetingDateForTimestamp, type AttendanceSession, type KioskCommand, type KioskCommandAction, type KioskCommandStatus, type KioskHealthReport, type KioskScanAcknowledgement, type KioskSyncRequest, type ScanEvent } from "@frc-attendance/shared";
 import { sha256Hex } from "./auth";
 
 const port = Number(process.env.PORT ?? "8787");
@@ -30,9 +30,16 @@ db.exec(`
 
   CREATE TABLE IF NOT EXISTS kiosks (
     kiosk_id TEXT PRIMARY KEY,
+    name TEXT NOT NULL DEFAULT 'Bench kiosk',
+    location TEXT,
     token_hash TEXT NOT NULL,
     active INTEGER NOT NULL DEFAULT 1,
-    last_seen_at TEXT
+    last_seen_at TEXT,
+    last_heartbeat_at TEXT,
+    reader_online INTEGER,
+    pending_scan_count INTEGER NOT NULL DEFAULT 0,
+    last_sync_at TEXT,
+    last_sync_error TEXT
   );
 
   CREATE TABLE IF NOT EXISTS scan_events (
@@ -62,6 +69,13 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS kiosk_commands_kiosk_status_idx ON kiosk_commands(kiosk_id, status, requested_at);
 `);
+ensureColumn("kiosks", "name", "TEXT NOT NULL DEFAULT 'Bench kiosk'");
+ensureColumn("kiosks", "location", "TEXT");
+ensureColumn("kiosks", "last_heartbeat_at", "TEXT");
+ensureColumn("kiosks", "reader_online", "INTEGER");
+ensureColumn("kiosks", "pending_scan_count", "INTEGER NOT NULL DEFAULT 0");
+ensureColumn("kiosks", "last_sync_at", "TEXT");
+ensureColumn("kiosks", "last_sync_error", "TEXT");
 
 async function seedBenchData() {
   db.prepare(`
@@ -71,8 +85,8 @@ async function seedBenchData() {
   `).run();
 
   db.prepare(`
-    INSERT INTO kiosks (kiosk_id, token_hash, active)
-    VALUES ('bench-01', ?, 1)
+    INSERT INTO kiosks (kiosk_id, name, location, token_hash, active)
+    VALUES ('bench-01', 'Bench kiosk', 'Pi bench', ?, 1)
     ON CONFLICT(kiosk_id) DO UPDATE SET token_hash = excluded.token_hash, active = 1
   `).run(await sha256Hex("dev-token"));
 }
@@ -101,6 +115,15 @@ const server = createServer(async (request, response) => {
       const body = await readBody<KioskSyncRequest>(request);
       if (body.kioskId !== kioskId) throw httpError(403, "Kiosk token does not match kioskId");
       sendJson(response, 200, syncKioskEvents(kioskId, body));
+      return;
+    }
+
+    if (request.method === "POST" && request.url === "/kiosk/health") {
+      const kioskId = await requireKiosk(request.headers.authorization);
+      const body = await readBody<KioskHealthReport>(request);
+      if (body.kioskId !== kioskId) throw httpError(403, "Kiosk token does not match kioskId");
+      updateKioskHealth(body);
+      sendNoContent(response);
       return;
     }
 
@@ -143,6 +166,32 @@ const server = createServer(async (request, response) => {
     if (request.method === "GET" && request.url === "/admin/students") {
       const students = db.prepare("SELECT student_id, first_name, last_name, active FROM students ORDER BY last_name, first_name").all();
       sendJson(response, 200, { students });
+      return;
+    }
+
+    if (request.method === "GET" && request.url === "/admin/kiosks") {
+      const kiosks = db.prepare(`
+        SELECT kiosk_id, name, location, active, last_seen_at, last_heartbeat_at, reader_online, pending_scan_count, last_sync_at, last_sync_error
+        FROM kiosks
+        ORDER BY name
+      `).all();
+      sendJson(response, 200, { kiosks });
+      return;
+    }
+
+    if (request.method === "POST" && request.url === "/admin/kiosks") {
+      const body = await readBody<{ kioskId: string; name: string; location?: string; token: string }>(request);
+      const tokenHash = await sha256Hex(requireNonEmptyString(body.token, "token"));
+      db.prepare(`
+        INSERT INTO kiosks (kiosk_id, name, location, token_hash, active)
+        VALUES (?, ?, ?, ?, 1)
+        ON CONFLICT(kiosk_id) DO UPDATE SET
+          name = excluded.name,
+          location = excluded.location,
+          token_hash = excluded.token_hash,
+          active = 1
+      `).run(requireNonEmptyString(body.kioskId, "kioskId"), requireNonEmptyString(body.name, "name"), body.location || null, tokenHash);
+      sendNoContent(response);
       return;
     }
 
@@ -230,6 +279,33 @@ async function requireKiosk(authHeader: string | undefined): Promise<string> {
   if (!row) throw httpError(401, "Invalid kiosk token");
   db.prepare("UPDATE kiosks SET last_seen_at = ? WHERE kiosk_id = ?").run(new Date().toISOString(), row.kiosk_id);
   return row.kiosk_id;
+}
+
+function updateKioskHealth(report: KioskHealthReport) {
+  const pendingScanCount = Math.max(0, Math.floor(Number(report.pendingScanCount) || 0));
+  db.prepare(`
+    UPDATE kiosks
+    SET
+      last_heartbeat_at = ?,
+      reader_online = ?,
+      pending_scan_count = ?,
+      last_sync_at = ?,
+      last_sync_error = ?
+    WHERE kiosk_id = ?
+  `).run(
+    new Date().toISOString(),
+    report.readerOnline === null || report.readerOnline === undefined ? null : report.readerOnline ? 1 : 0,
+    pendingScanCount,
+    report.lastSyncAt ?? null,
+    report.lastSyncError ?? null,
+    report.kioskId
+  );
+}
+
+function ensureColumn(table: string, column: string, definition: string) {
+  const rows = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  if (rows.some((row) => row.name === column)) return;
+  db.prepare(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`).run();
 }
 
 function syncRoster(members: Array<{ memberId: string; firstName: string; lastName: string }>) {

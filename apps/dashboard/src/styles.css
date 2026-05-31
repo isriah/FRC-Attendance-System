@@ -244,6 +244,7 @@ pre {
 }
 
 .status-badge.active,
+.status-badge.online,
 .status-badge.completed {
   border-color: var(--primary-soft);
   color: var(--primary-dark);
@@ -251,17 +252,38 @@ pre {
 }
 
 .status-badge.pending,
-.status-badge.running {
+.status-badge.running,
+.status-badge.degraded,
+.status-badge.unknown {
   border-color: var(--accent-soft);
   color: var(--accent-dark);
   background: var(--accent-bg);
 }
 
 .status-badge.failed,
+.status-badge.offline,
 .status-badge.inactive {
   border-color: var(--danger-soft);
   color: var(--danger-color);
   background: var(--danger-bg);
+}
+
+.health-summary {
+  display: grid;
+  gap: 6px;
+  max-width: 260px;
+}
+
+.health-summary span,
+.health-summary p {
+  color: var(--muted-color);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.health-summary p {
+  margin: 0;
+  color: var(--danger-color);
 }
 
 .command-list {

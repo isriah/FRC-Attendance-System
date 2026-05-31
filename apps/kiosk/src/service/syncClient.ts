@@ -1,4 +1,4 @@
-import type { KioskCommand, KioskCommandStatus, KioskSyncResult } from "@frc-attendance/shared";
+import type { KioskCommand, KioskCommandStatus, KioskHealthReport, KioskSyncResult } from "@frc-attendance/shared";
 import type { KioskConfig } from "./config";
 import type { OfflineQueue } from "./offlineQueue";
 
@@ -68,5 +68,21 @@ export class SyncClient {
       body: JSON.stringify({ status, message })
     });
     if (!response.ok) throw new Error(`Command completion failed: ${response.status} ${await response.text()}`);
+  }
+
+  async reportHealth(input: Omit<KioskHealthReport, "kioskId" | "pendingScanCount">): Promise<void> {
+    const response = await fetch(`${this.config.apiBaseUrl}/kiosk/health`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${this.config.kioskToken}`
+      },
+      body: JSON.stringify({
+        kioskId: this.config.kioskId,
+        pendingScanCount: this.queue.pendingCount(),
+        ...input
+      } satisfies KioskHealthReport)
+    });
+    if (!response.ok) throw new Error(`Health report failed: ${response.status} ${await response.text()}`);
   }
 }

@@ -11,6 +11,11 @@ const queue = new OfflineQueue(config.databasePath);
 const sync = new SyncClient(config, queue);
 const bridge = new FingerprintBridge();
 const display = new DisplayStateServer();
+const health = {
+  readerOnline: null as boolean | null,
+  lastSyncAt: undefined as string | undefined,
+  lastSyncError: undefined as string | undefined
+};
 
 display.start(config.displayStatePort);
 
@@ -32,11 +37,16 @@ bridge.on("bridge-event", async (event: FingerprintBridgeEvent) => {
         if (ledState) bridge.setLedState(ledState);
       }
       console.log("Synced pending scans");
+      health.lastSyncAt = new Date().toISOString();
+      health.lastSyncError = undefined;
+      reportHealth();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      health.lastSyncError = message;
       display.setOffline("Scan saved locally and will sync when the connection returns.");
       bridge.setLedState("offline");
       console.log(`Offline or sync failed; scan remains cached: ${message}`);
+      reportHealth();
     }
   }
 
@@ -49,16 +59,34 @@ bridge.on("bridge-event", async (event: FingerprintBridgeEvent) => {
 
   if (event.type === "state") display.setState(event.state);
   if (event.type === "status") {
+    health.readerOnline = event.online;
     if (event.online) display.setState("ready");
     else display.setReaderOffline();
     console.log(`Fingerprint reader ${event.online ? "online" : "offline"}`);
+    reportHealth();
   }
   if (event.type === "error") console.error(event.message);
 });
 
 setInterval(() => {
-  sync.flushPending().catch((error) => console.log(`Periodic sync failed: ${error instanceof Error ? error.message : String(error)}`));
+  sync.flushPending().then((result) => {
+    if (result) {
+      health.lastSyncAt = new Date().toISOString();
+      health.lastSyncError = undefined;
+    }
+    reportHealth();
+  }).catch((error) => {
+    health.lastSyncError = error instanceof Error ? error.message : String(error);
+    console.log(`Periodic sync failed: ${health.lastSyncError}`);
+    reportHealth();
+  });
 }, 30_000);
+
+function reportHealth() {
+  sync.reportHealth(health).catch((error) => {
+    console.log(`Health report failed: ${error instanceof Error ? error.message : String(error)}`);
+  });
+}
 
 async function pollCommands() {
   const commands = await sync.fetchCommands();
@@ -84,5 +112,8 @@ setInterval(() => {
 }, config.commandPollSeconds * 1000);
 
 pollCommands().catch((error) => console.log(`Initial command poll failed: ${error instanceof Error ? error.message : String(error)}`));
+
+reportHealth();
+setInterval(reportHealth, 15_000);
 
 bridge.start(config.pythonPath, config.fingerprintBridgePath);

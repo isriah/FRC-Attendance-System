@@ -107,6 +107,7 @@ Expected:
 - admin dashboard active on `http://localhost:5174`
 - fingerprint service log says `Fingerprint reader online`
 - kiosk service display state active on `http://localhost:8788/kiosk/display-state`
+- dashboard Kiosks tab shows sync health, including reader state, pending queued scans, and the latest sync error when connectivity is failing
 
 The admin dashboard Kiosks tab includes remote command buttons for each active kiosk:
 
