@@ -16,32 +16,46 @@ display.start(config.displayStatePort);
 bridge.on("bridge-event", async (event: FingerprintBridgeEvent) => {
   if (event.type === "match") {
     const local = queue.addFingerprintScan(event.studentId);
-    display.setSyncing(event.studentId);
+    display.setProcessing(`Member ${event.studentId}`);
     console.log(`Queued scan ${local.localEventId} for student ${event.studentId}`);
     try {
       const result = await sync.flushPending();
       const acknowledgement = result?.acknowledgements?.find((ack) => ack.localEventId === local.localEventId);
       if (acknowledgement) {
         display.setAcknowledgement(acknowledgement);
+        bridge.setLedState(acknowledgement.status === "accepted" ? (acknowledgement.action === "check_out" ? "goodbye" : "welcome") : acknowledgement.status);
         console.log(`Scan acknowledged: ${acknowledgement.message}`);
       } else if (result) {
         display.setSyncResult(local.localEventId, event.studentId, result);
+        const accepted = result.accepted.some((scan) => scan.localEventId === local.localEventId);
+        const duplicate = result.duplicates.some((scan) => scan.localEventId === local.localEventId);
+        const rejected = result.rejected.some((scan) => scan.localEventId === local.localEventId);
+        if (accepted) bridge.setLedState("welcome");
+        if (duplicate) bridge.setLedState("duplicate");
+        if (rejected) bridge.setLedState("rejected");
       }
       console.log("Synced pending scans");
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       display.setOffline("Scan saved locally and will sync when the connection returns.");
+      bridge.setLedState("offline");
       console.log(`Offline or sync failed; scan remains cached: ${message}`);
     }
   }
 
   if (event.type === "no-match") {
     display.setUnknownFingerprint();
+    bridge.setLedState("unknown");
     console.log("Fingerprint was not recognized");
     sync.reportNoMatch().catch((error) => console.log(`Could not report unknown fingerprint: ${error instanceof Error ? error.message : String(error)}`));
   }
 
-  if (event.type === "status") console.log(`Fingerprint reader ${event.online ? "online" : "offline"}`);
+  if (event.type === "state") display.setState(event.state);
+  if (event.type === "status") {
+    if (event.online) display.setState("ready");
+    else display.setReaderOffline();
+    console.log(`Fingerprint reader ${event.online ? "online" : "offline"}`);
+  }
   if (event.type === "error") console.error(event.message);
 });
 

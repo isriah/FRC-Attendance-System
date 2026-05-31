@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { baseDisplayState, type DisplayStatus } from "../kioskStates";
 import "./styles.css";
-
-type DisplayStatus = "ready" | "syncing" | "welcome" | "goodbye" | "duplicate" | "rejected" | "unknown" | "offline";
 
 interface KioskDisplayState {
   status: DisplayStatus;
@@ -11,11 +10,7 @@ interface KioskDisplayState {
   updatedAt?: string;
 }
 
-const readyState: KioskDisplayState = {
-  status: "ready",
-  message: "Place finger on reader",
-  detail: "Attendance kiosk ready"
-};
+const readyState: KioskDisplayState = baseDisplayState("ready");
 
 const kioskBrand = {
   title: import.meta.env.VITE_KIOSK_TITLE ?? "FRC Attendance",
@@ -50,7 +45,7 @@ function KioskApp() {
           setState(next);
         }
       } catch {
-        if (isMounted) setState({ status: "offline", message: "Connection offline", detail: "Scans will continue caching locally" });
+        if (isMounted) setState({ ...baseDisplayState("reader_offline"), detail: "Display state service is not responding" });
       }
     }
 
@@ -68,7 +63,7 @@ function KioskApp() {
   }, []);
 
   useEffect(() => {
-    if (state.status === "ready" || state.status === "offline") return;
+    if (state.status === "ready" || state.status === "reader_offline") return;
     const timer = window.setTimeout(() => setState(readyState), 5000);
     return () => window.clearTimeout(timer);
   }, [state.updatedAt, state.status]);

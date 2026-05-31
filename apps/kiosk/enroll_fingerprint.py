@@ -1,4 +1,5 @@
 import argparse
+import json
 import sqlite3
 import time
 from datetime import datetime, timezone
@@ -16,6 +17,17 @@ LED_BREATHE = 1
 LED_FLASH = 2
 LED_ON = 3
 LED_OFF = 4
+LED_COLORS = {"red": LED_RED, "blue": LED_BLUE, "purple": LED_PURPLE}
+LED_MODES = {"breathe": LED_BREATHE, "flash": LED_FLASH, "on": LED_ON, "off": LED_OFF}
+
+
+def load_kiosk_states():
+    states_path = Path(__file__).resolve().parent / "src" / "kioskStates.json"
+    with states_path.open("r", encoding="utf-8") as file:
+        return json.load(file)
+
+
+KIOSK_STATES = load_kiosk_states()
 
 
 def set_reader_led(finger, color=LED_BLUE, mode=LED_ON, speed=0x40, cycles=0):
@@ -27,39 +39,56 @@ def set_reader_led(finger, color=LED_BLUE, mode=LED_ON, speed=0x40, cycles=0):
         print(f"Could not set fingerprint LED: {exc}")
 
 
+def set_semantic_led(finger, state_id: str):
+    state = KIOSK_STATES[state_id]
+    led = state["led"]
+    set_reader_led(
+        finger,
+        color=LED_COLORS[led["color"]],
+        mode=LED_MODES[led["mode"]],
+        speed=int(led.get("speed", 0x40)),
+        cycles=int(led.get("cycles", 0)),
+    )
+
+    return_to = led.get("returnTo")
+    if return_to:
+        time.sleep(float(led.get("returnAfterSeconds", 1.0)))
+        set_semantic_led(finger, return_to)
+
+
 def connect_reader(port: str, baudrate: int):
     uart = serial.Serial(port, baudrate=baudrate, timeout=2)
     finger = adafruit_fingerprint.Adafruit_Fingerprint(uart)
     if finger.verify_password() != adafruit_fingerprint.OK:
         raise RuntimeError("Fingerprint sensor not found or password rejected")
-    set_reader_led(finger, color=LED_BLUE, mode=LED_BREATHE, speed=0x80, cycles=0)
+    set_semantic_led(finger, "ready")
     return finger
 
 
 def enroll_sensor_slot(finger, slot: int):
     for scan_num in range(1, 3):
-        set_reader_led(finger, color=LED_PURPLE, mode=LED_BREATHE, speed=0x60, cycles=0)
+        set_semantic_led(finger, "enroll_wait_first" if scan_num == 1 else "enroll_wait_second")
         print(f"Place finger for scan {scan_num}")
         while finger.get_image() != adafruit_fingerprint.OK:
             time.sleep(0.1)
 
         if finger.image_2_tz(scan_num) != adafruit_fingerprint.OK:
-            set_reader_led(finger, color=LED_RED, mode=LED_FLASH, speed=0x30, cycles=3)
+            set_semantic_led(finger, "enroll_failure")
             raise RuntimeError("Could not convert fingerprint image")
 
-        set_reader_led(finger, color=LED_BLUE, mode=LED_FLASH, speed=0x30, cycles=2)
+        set_semantic_led(finger, "enroll_scan_accepted")
         print("Remove finger")
         time.sleep(2)
 
     if finger.create_model() != adafruit_fingerprint.OK:
-        set_reader_led(finger, color=LED_RED, mode=LED_FLASH, speed=0x30, cycles=3)
+        set_semantic_led(finger, "enroll_failure")
         raise RuntimeError("Fingerprint scans did not match")
 
     if finger.store_model(slot) != adafruit_fingerprint.OK:
-        set_reader_led(finger, color=LED_RED, mode=LED_FLASH, speed=0x30, cycles=3)
+        set_semantic_led(finger, "enroll_failure")
         raise RuntimeError(f"Could not store fingerprint in slot {slot}")
 
-    set_reader_led(finger, color=LED_BLUE, mode=LED_FLASH, speed=0x30, cycles=3)
+    set_semantic_led(finger, "enroll_success")
 
 
 def save_mapping(db_path: str, student_id: str, slot: int, finger_label: str | None):

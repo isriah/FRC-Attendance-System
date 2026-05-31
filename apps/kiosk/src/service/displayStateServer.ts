@@ -1,21 +1,11 @@
 import { createServer, type Server } from "node:http";
 import type { KioskScanAcknowledgement, KioskSyncResult } from "@frc-attendance/shared";
+import { baseDisplayState, type KioskDisplayState, type KioskStateId } from "../kioskStates";
 
-export type DisplayStatus = "ready" | "syncing" | "welcome" | "goodbye" | "duplicate" | "rejected" | "unknown" | "offline";
-
-export interface KioskDisplayState {
-  status: DisplayStatus;
-  message: string;
-  detail: string;
-  updatedAt: string;
-}
+export type { DisplayStatus, KioskDisplayState, KioskStateId } from "../kioskStates";
 
 export class DisplayStateServer {
-  private state: KioskDisplayState = withTimestamp({
-    status: "ready",
-    message: "Place finger on reader",
-    detail: "Attendance kiosk ready"
-  });
+  private state: KioskDisplayState = withTimestamp(baseDisplayState("ready"));
 
   private server?: Server;
 
@@ -53,11 +43,10 @@ export class DisplayStateServer {
     });
   }
 
-  setSyncing(studentId: string): void {
+  setProcessing(detail?: string): void {
     this.set({
-      status: "syncing",
-      message: "Checking scan",
-      detail: `Member ${studentId}`
+      ...baseDisplayState("processing"),
+      detail: detail ?? baseDisplayState("processing").detail
     });
   }
 
@@ -97,18 +86,24 @@ export class DisplayStateServer {
   }
 
   setUnknownFingerprint(): void {
-    this.set({
-      status: "unknown",
-      message: "Fingerprint not recognized",
-      detail: "Try again or ask a mentor for help."
-    });
+    this.set(baseDisplayState("unknown"));
   }
 
   setOffline(message: string): void {
     this.set({
-      status: "offline",
-      message: "Connection offline",
+      ...baseDisplayState("offline"),
       detail: message
+    });
+  }
+
+  setReaderOffline(): void {
+    this.set(baseDisplayState("reader_offline"));
+  }
+
+  setState(status: KioskStateId, detail?: string): void {
+    this.set({
+      ...baseDisplayState(status),
+      detail: detail ?? baseDisplayState(status).detail
     });
   }
 
@@ -121,7 +116,7 @@ export function displayStateForAcknowledgement(acknowledgement: KioskScanAcknowl
   if (acknowledgement.status === "duplicate") {
     return {
       status: "duplicate",
-      message: "Already recorded",
+      message: baseDisplayState("duplicate").message,
       detail: acknowledgement.displayName ?? `Member ${acknowledgement.studentId}`
     };
   }
@@ -129,14 +124,14 @@ export function displayStateForAcknowledgement(acknowledgement: KioskScanAcknowl
   if (acknowledgement.status === "rejected") {
     return {
       status: "rejected",
-      message: "Scan rejected",
+      message: baseDisplayState("rejected").message,
       detail: acknowledgement.message
     };
   }
 
   return {
     status: acknowledgement.action === "check_out" ? "goodbye" : "welcome",
-    message: acknowledgement.action === "check_out" ? "Goodbye" : "Welcome",
+    message: baseDisplayState(acknowledgement.action === "check_out" ? "goodbye" : "welcome").message,
     detail: [acknowledgement.displayName ?? `Member ${acknowledgement.studentId}`, acknowledgement.attendanceSummary].filter(Boolean).join(" - ")
   };
 }

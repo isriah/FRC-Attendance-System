@@ -1,7 +1,10 @@
 import os
 import random
+import json
+import select
 import sys
 import time
+from pathlib import Path
 
 # R503/Grow-style fingerprint bridge.
 #
@@ -28,6 +31,17 @@ LED_BREATHE = 1
 LED_FLASH = 2
 LED_ON = 3
 LED_OFF = 4
+LED_COLORS = {"red": LED_RED, "blue": LED_BLUE, "purple": LED_PURPLE}
+LED_MODES = {"breathe": LED_BREATHE, "flash": LED_FLASH, "on": LED_ON, "off": LED_OFF}
+
+
+def load_kiosk_states():
+    states_path = Path(__file__).resolve().parent / "src" / "kioskStates.json"
+    with states_path.open("r", encoding="utf-8") as file:
+        return json.load(file)
+
+
+KIOSK_STATES = load_kiosk_states()
 
 
 def set_reader_led(finger, color=LED_BLUE, mode=LED_ON, speed=0x40, cycles=0):
@@ -39,8 +53,49 @@ def set_reader_led(finger, color=LED_BLUE, mode=LED_ON, speed=0x40, cycles=0):
         print(f"Could not set fingerprint LED: {exc}", file=sys.stderr, flush=True)
 
 
+def set_semantic_led(finger, state_id: str):
+    state = KIOSK_STATES.get(state_id)
+    if state is None:
+        print(f"Unknown kiosk LED state: {state_id}", file=sys.stderr, flush=True)
+        return
+
+    led = state["led"]
+    set_reader_led(
+        finger,
+        color=LED_COLORS[led["color"]],
+        mode=LED_MODES[led["mode"]],
+        speed=int(led.get("speed", 0x40)),
+        cycles=int(led.get("cycles", 0)),
+    )
+
+    return_to = led.get("returnTo")
+    if return_to:
+        time.sleep(float(led.get("returnAfterSeconds", 1.0)))
+        set_semantic_led(finger, return_to)
+
+
+def handle_led_commands(finger):
+    try:
+        readable, _, _ = select.select([sys.stdin], [], [], 0)
+    except Exception:
+        return
+
+    if not readable:
+        return
+
+    line = sys.stdin.readline().strip()
+    if line.startswith("LED_STATE:"):
+        set_semantic_led(finger, line.split(":", 1)[1])
+
+
+def sleep_with_led_commands(finger, seconds: float):
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        handle_led_commands(finger)
+        time.sleep(min(0.1, max(0, deadline - time.monotonic())))
+
+
 def load_slot_map():
-    import json
     import sqlite3
 
     raw = os.environ.get("FINGERPRINT_SLOT_MAP", "{}")
@@ -104,19 +159,25 @@ def hardware_loop():
                 emit("STAT:OFFLINE")
                 raise RuntimeError("Fingerprint sensor did not accept password")
 
-            set_reader_led(finger, color=LED_BLUE, mode=LED_BREATHE, speed=0x80, cycles=0)
+            set_semantic_led(finger, "ready")
             emit("STAT:ONLINE")
 
             while True:
+                handle_led_commands(finger)
                 if finger.get_image() != adafruit_fingerprint.OK:
                     time.sleep(poll_seconds)
                     continue
 
-                set_reader_led(finger, color=LED_PURPLE, mode=LED_ON)
+                set_semantic_led(finger, "processing")
+                emit("STATE:processing")
 
                 if finger.image_2_tz(1) != adafruit_fingerprint.OK:
-                    set_reader_led(finger, color=LED_RED, mode=LED_FLASH, speed=0x30, cycles=2)
-                    set_reader_led(finger, color=LED_BLUE, mode=LED_BREATHE, speed=0x80, cycles=0)
+                    now = time.monotonic()
+                    if now - last_no_match_at >= debounce_seconds:
+                        emit("NO_MATCH")
+                        last_no_match_at = now
+                    else:
+                        set_semantic_led(finger, "ready")
                     time.sleep(poll_seconds)
                     continue
 
@@ -127,28 +188,24 @@ def hardware_loop():
                     now = time.monotonic()
                     if student_id is None:
                         if now - last_no_match_at >= debounce_seconds:
-                            set_reader_led(finger, color=LED_RED, mode=LED_FLASH, speed=0x30, cycles=2)
                             emit("NO_MATCH")
                             last_no_match_at = now
-                        set_reader_led(finger, color=LED_BLUE, mode=LED_BREATHE, speed=0x80, cycles=0)
-                        time.sleep(repeat_delay_seconds)
+                        sleep_with_led_commands(finger, repeat_delay_seconds)
                         continue
 
                     if last_match != slot or now - last_match_at >= debounce_seconds:
-                        set_reader_led(finger, color=LED_PURPLE, mode=LED_FLASH, speed=0x30, cycles=1)
                         emit(f"MATCH:{student_id},{slot}")
                         last_match = slot
                         last_match_at = now
-                    set_reader_led(finger, color=LED_BLUE, mode=LED_BREATHE, speed=0x80, cycles=0)
+                    else:
+                        set_semantic_led(finger, "ready")
                 else:
                     now = time.monotonic()
                     if now - last_no_match_at >= debounce_seconds:
-                        set_reader_led(finger, color=LED_RED, mode=LED_FLASH, speed=0x30, cycles=2)
                         emit("NO_MATCH")
                         last_no_match_at = now
-                    set_reader_led(finger, color=LED_BLUE, mode=LED_BREATHE, speed=0x80, cycles=0)
 
-                time.sleep(repeat_delay_seconds)
+                sleep_with_led_commands(finger, repeat_delay_seconds)
         except Exception as exc:
             emit("STAT:OFFLINE")
             print(f"Fingerprint reader error: {exc}", file=sys.stderr, flush=True)

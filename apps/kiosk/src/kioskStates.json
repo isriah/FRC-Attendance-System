@@ -1,0 +1,186 @@
+{
+  "ready": {
+    "display": {
+      "message": "Place finger on reader",
+      "detail": "Attendance kiosk ready"
+    },
+    "led": {
+      "color": "blue",
+      "mode": "breathe",
+      "speed": 128,
+      "cycles": 0
+    }
+  },
+  "processing": {
+    "display": {
+      "message": "Checking scan",
+      "detail": "Hold still"
+    },
+    "led": {
+      "color": "purple",
+      "mode": "on",
+      "speed": 64,
+      "cycles": 0
+    }
+  },
+  "welcome": {
+    "display": {
+      "message": "Welcome",
+      "detail": "Attendance recorded"
+    },
+    "led": {
+      "color": "blue",
+      "mode": "flash",
+      "speed": 48,
+      "cycles": 2,
+      "returnTo": "ready",
+      "returnAfterSeconds": 1.2
+    }
+  },
+  "goodbye": {
+    "display": {
+      "message": "Goodbye",
+      "detail": "Check-out recorded"
+    },
+    "led": {
+      "color": "blue",
+      "mode": "flash",
+      "speed": 48,
+      "cycles": 3,
+      "returnTo": "ready",
+      "returnAfterSeconds": 1.4
+    }
+  },
+  "duplicate": {
+    "display": {
+      "message": "Already recorded",
+      "detail": "Attendance was not changed"
+    },
+    "led": {
+      "color": "purple",
+      "mode": "flash",
+      "speed": 56,
+      "cycles": 2,
+      "returnTo": "ready",
+      "returnAfterSeconds": 1.2
+    }
+  },
+  "rejected": {
+    "display": {
+      "message": "Scan rejected",
+      "detail": "Ask a mentor for help"
+    },
+    "led": {
+      "color": "red",
+      "mode": "flash",
+      "speed": 48,
+      "cycles": 3,
+      "returnTo": "ready",
+      "returnAfterSeconds": 1.4
+    }
+  },
+  "unknown": {
+    "display": {
+      "message": "Fingerprint not recognized",
+      "detail": "Try again or ask a mentor for help."
+    },
+    "led": {
+      "color": "red",
+      "mode": "flash",
+      "speed": 48,
+      "cycles": 2,
+      "returnTo": "ready",
+      "returnAfterSeconds": 1.2
+    }
+  },
+  "offline": {
+    "display": {
+      "message": "Connection offline",
+      "detail": "Scan saved locally and will sync when the connection returns."
+    },
+    "led": {
+      "color": "red",
+      "mode": "flash",
+      "speed": 64,
+      "cycles": 1,
+      "returnTo": "ready",
+      "returnAfterSeconds": 1.2
+    }
+  },
+  "reader_offline": {
+    "display": {
+      "message": "Reader offline",
+      "detail": "Fingerprint reader is not responding"
+    },
+    "led": {
+      "color": "red",
+      "mode": "breathe",
+      "speed": 128,
+      "cycles": 0
+    }
+  },
+  "enroll_wait_first": {
+    "display": {
+      "message": "Place finger",
+      "detail": "Enrollment scan 1 of 2"
+    },
+    "led": {
+      "color": "purple",
+      "mode": "breathe",
+      "speed": 96,
+      "cycles": 0
+    }
+  },
+  "enroll_wait_second": {
+    "display": {
+      "message": "Place same finger",
+      "detail": "Enrollment scan 2 of 2"
+    },
+    "led": {
+      "color": "purple",
+      "mode": "breathe",
+      "speed": 96,
+      "cycles": 0
+    }
+  },
+  "enroll_scan_accepted": {
+    "display": {
+      "message": "Scan captured",
+      "detail": "Remove finger"
+    },
+    "led": {
+      "color": "blue",
+      "mode": "flash",
+      "speed": 48,
+      "cycles": 2
+    }
+  },
+  "enroll_success": {
+    "display": {
+      "message": "Enrollment saved",
+      "detail": "Fingerprint slot mapped"
+    },
+    "led": {
+      "color": "blue",
+      "mode": "flash",
+      "speed": 48,
+      "cycles": 3,
+      "returnTo": "ready",
+      "returnAfterSeconds": 1.4
+    }
+  },
+  "enroll_failure": {
+    "display": {
+      "message": "Enrollment failed",
+      "detail": "Try again"
+    },
+    "led": {
+      "color": "red",
+      "mode": "flash",
+      "speed": 48,
+      "cycles": 3,
+      "returnTo": "ready",
+      "returnAfterSeconds": 1.4
+    }
+  }
+}
