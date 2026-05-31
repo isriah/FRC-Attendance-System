@@ -11,11 +11,13 @@ describe("display state acknowledgements", () => {
       action: "check_in",
       displayName: "Bench Student",
       attendanceSummary: "Attendance 100% (1/1)",
+      kioskMessage: "Welcome, Bench Student",
+      kioskDetail: "Checked in at 3:00 PM - Attendance 100% (1/1)",
       message: "Welcome, Bench Student"
     })).toEqual({
       status: "welcome",
-      message: "Welcome",
-      detail: "Bench Student - Attendance 100% (1/1)"
+      message: "Welcome, Bench Student",
+      detail: "Checked in at 3:00 PM - Attendance 100% (1/1)"
     });
   });
 
@@ -25,11 +27,13 @@ describe("display state acknowledgements", () => {
       studentId: "100001",
       status: "duplicate",
       displayName: "Bench Student",
+      kioskMessage: "Already recorded",
+      kioskDetail: "Bench Student - This scan was just counted. Please wait before scanning again.",
       message: "Bench Student was already recorded."
     })).toEqual({
       status: "duplicate",
       message: "Already recorded",
-      detail: "Bench Student"
+      detail: "Bench Student - This scan was just counted. Please wait before scanning again."
     });
   });
 
@@ -41,11 +45,13 @@ describe("display state acknowledgements", () => {
       action: "check_out",
       displayName: "Test Person",
       attendanceSummary: "Attendance 100% (1/1)",
+      kioskMessage: "Goodbye, Test Person",
+      kioskDetail: "Checked out at 5:00 PM - Attendance 100% (1/1)",
       message: "Goodbye, Test Person"
     })).toEqual({
       status: "goodbye",
-      message: "Goodbye",
-      detail: "Test Person - Attendance 100% (1/1)"
+      message: "Goodbye, Test Person",
+      detail: "Checked out at 5:00 PM - Attendance 100% (1/1)"
     });
   });
 
@@ -54,11 +60,29 @@ describe("display state acknowledgements", () => {
       localEventId: "local-rejected",
       studentId: "qa-inactive",
       status: "rejected",
+      kioskMessage: "Roster issue",
+      kioskDetail: "Member qa-inactive - Member is not active in the roster.",
       message: "Member is not active in the roster."
     })).toEqual({
       status: "rejected",
-      message: "Scan rejected",
-      detail: "Member is not active in the roster."
+      message: "Roster issue",
+      detail: "Member qa-inactive - Member is not active in the roster."
+    });
+  });
+
+  it("falls back to locally composed acknowledgement messages for older APIs", () => {
+    expect(displayStateForAcknowledgement({
+      localEventId: "local-old",
+      studentId: "100001",
+      status: "accepted",
+      action: "check_in",
+      displayName: "Bench Student",
+      attendanceSummary: "Attendance 100% (1/1)",
+      message: "Welcome, Bench Student"
+    })).toEqual({
+      status: "welcome",
+      message: "Welcome",
+      detail: "Bench Student - Attendance 100% (1/1)"
     });
   });
 

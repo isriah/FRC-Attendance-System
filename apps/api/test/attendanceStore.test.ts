@@ -20,6 +20,8 @@ describe("kiosk sync acknowledgements", () => {
       status: "accepted",
       displayName: "Bench Student",
       action: "check_in",
+      kioskMessage: "Welcome, Bench Student",
+      kioskDetail: "Checked in at 3:00 PM - Attendance 100% (1/1)",
       message: "Welcome, Bench Student",
       attendanceSummary: "Attendance 100% (1/1)"
     });
@@ -35,6 +37,8 @@ describe("kiosk sync acknowledgements", () => {
       localEventId: "scan-2",
       status: "accepted",
       action: "check_out",
+      kioskMessage: "Goodbye, Bench Student",
+      kioskDetail: "Checked out at 5:00 PM - Attendance 100% (1/1)",
       message: "Goodbye, Bench Student",
       attendanceSummary: "Attendance 100% (1/1)"
     });
@@ -62,7 +66,33 @@ describe("kiosk sync acknowledgements", () => {
       studentId: "100001",
       status: "duplicate",
       displayName: "Bench Student",
+      kioskMessage: "Already recorded",
+      kioskDetail: "Bench Student - This scan was just counted. Please wait before scanning again.",
       message: "Bench Student was already recorded."
+    });
+  });
+
+  it("returns roster issue details for inactive member scans", async () => {
+    const env = createTestEnv();
+    await env.DB.prepare("INSERT INTO students (student_id, first_name, last_name, active) VALUES (?, ?, ?, 0)")
+      .bind("100002", "Inactive", "Member")
+      .run();
+
+    const rejected = await syncKioskEvents(env, "bench-01", [{
+      localEventId: "scan-inactive",
+      studentId: "100002",
+      occurredAt: "2026-01-02T20:00:00.000Z",
+      source: "fingerprint"
+    }]);
+
+    expect(rejected.acknowledgements?.[0]).toMatchObject({
+      localEventId: "scan-inactive",
+      studentId: "100002",
+      status: "rejected",
+      displayName: "Inactive Member",
+      kioskMessage: "Roster issue",
+      kioskDetail: "Inactive Member - Member is not active in the roster.",
+      message: "Member is not active in the roster."
     });
   });
 });

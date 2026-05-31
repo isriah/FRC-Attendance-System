@@ -54,6 +54,8 @@ export interface KioskScanAcknowledgement {
   action?: "check_in" | "check_out";
   attendanceRate?: number | null;
   attendanceSummary?: string;
+  kioskMessage?: string;
+  kioskDetail?: string;
   message: string;
 }
 

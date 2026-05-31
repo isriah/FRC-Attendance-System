@@ -116,23 +116,23 @@ export function displayStateForAcknowledgement(acknowledgement: KioskScanAcknowl
   if (acknowledgement.status === "duplicate") {
     return {
       status: "duplicate",
-      message: baseDisplayState("duplicate").message,
-      detail: acknowledgement.displayName ?? `Member ${acknowledgement.studentId}`
+      message: acknowledgement.kioskMessage ?? baseDisplayState("duplicate").message,
+      detail: acknowledgement.kioskDetail ?? acknowledgement.displayName ?? `Member ${acknowledgement.studentId}`
     };
   }
 
   if (acknowledgement.status === "rejected") {
     return {
       status: "rejected",
-      message: baseDisplayState("rejected").message,
-      detail: acknowledgement.message
+      message: acknowledgement.kioskMessage ?? baseDisplayState("rejected").message,
+      detail: acknowledgement.kioskDetail ?? acknowledgement.message
     };
   }
 
   return {
     status: acknowledgement.action === "check_out" ? "goodbye" : "welcome",
-    message: baseDisplayState(acknowledgement.action === "check_out" ? "goodbye" : "welcome").message,
-    detail: [acknowledgement.displayName ?? `Member ${acknowledgement.studentId}`, acknowledgement.attendanceSummary].filter(Boolean).join(" - ")
+    message: acknowledgement.kioskMessage ?? baseDisplayState(acknowledgement.action === "check_out" ? "goodbye" : "welcome").message,
+    detail: acknowledgement.kioskDetail ?? [acknowledgement.displayName ?? `Member ${acknowledgement.studentId}`, acknowledgement.attendanceSummary].filter(Boolean).join(" - ")
   };
 }
 

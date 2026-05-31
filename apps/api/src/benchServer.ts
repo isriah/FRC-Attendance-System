@@ -617,6 +617,8 @@ function buildAcknowledgement(
   const student = db.prepare("SELECT first_name, last_name FROM students WHERE student_id = ?").get(input.studentId) as { first_name: string; last_name: string } | undefined;
   const displayName = student ? `${student.first_name} ${student.last_name}` : undefined;
   const attendance = student ? buildBenchAttendanceSummary(input.studentId) : { rate: null };
+  const memberLabel = displayName ?? `Member ${input.studentId}`;
+  const scannedAt = formatKioskTime(input.occurredAt);
 
   if (status === "duplicate") {
     return {
@@ -626,11 +628,14 @@ function buildAcknowledgement(
       displayName,
       attendanceRate: attendance.rate,
       attendanceSummary: attendance.summary,
+      kioskMessage: "Already recorded",
+      kioskDetail: [memberLabel, "This scan was just counted. Please wait before scanning again."].join(" - "),
       message: displayName ? `${displayName} was already recorded.` : "Scan was already recorded."
     };
   }
 
   if (status === "rejected") {
+    const rosterMessage = reason === "student is not active in roster" ? "Member is not active in the roster." : "Scan could not be accepted.";
     return {
       localEventId: input.localEventId,
       studentId: input.studentId,
@@ -638,11 +643,15 @@ function buildAcknowledgement(
       displayName,
       attendanceRate: attendance.rate,
       attendanceSummary: attendance.summary,
-      message: reason === "student is not active in roster" ? "Member is not active in the roster." : "Scan could not be accepted."
+      kioskMessage: "Roster issue",
+      kioskDetail: [memberLabel, rosterMessage].join(" - "),
+      message: rosterMessage
     };
   }
 
   const action = nextAcceptedScanAction(input.studentId, input.occurredAt);
+  const actionLabel = action === "check_out" ? "Checked out" : "Checked in";
+  const greeting = action === "check_out" ? "Goodbye" : "Welcome";
   return {
     localEventId: input.localEventId,
     studentId: input.studentId,
@@ -651,6 +660,8 @@ function buildAcknowledgement(
     action,
     attendanceRate: attendance.rate,
     attendanceSummary: attendance.summary,
+    kioskMessage: `${greeting}, ${displayName ?? input.studentId}`,
+    kioskDetail: [`${actionLabel} at ${scannedAt}`, attendance.summary].filter(Boolean).join(" - "),
     message: action === "check_in" ? `Welcome, ${displayName ?? input.studentId}` : `Goodbye, ${displayName ?? input.studentId}`
   };
 }
@@ -665,23 +676,23 @@ function displayStateForAcknowledgement(acknowledgement: KioskScanAcknowledgemen
   if (acknowledgement.status === "duplicate") {
     return {
       status: "duplicate",
-      message: "Already recorded",
-      detail: acknowledgement.displayName ?? `Member ${acknowledgement.studentId}`
+      message: acknowledgement.kioskMessage ?? "Already recorded",
+      detail: acknowledgement.kioskDetail ?? acknowledgement.displayName ?? `Member ${acknowledgement.studentId}`
     };
   }
 
   if (acknowledgement.status === "rejected") {
     return {
       status: "rejected",
-      message: "Scan rejected",
-      detail: acknowledgement.message
+      message: acknowledgement.kioskMessage ?? "Scan rejected",
+      detail: acknowledgement.kioskDetail ?? acknowledgement.message
     };
   }
 
   return {
     status: acknowledgement.action === "check_out" ? "goodbye" : "welcome",
-    message: acknowledgement.action === "check_out" ? "Goodbye" : "Welcome",
-    detail: [acknowledgement.displayName ?? `Member ${acknowledgement.studentId}`, acknowledgement.attendanceSummary].filter(Boolean).join(" - ")
+    message: acknowledgement.kioskMessage ?? (acknowledgement.action === "check_out" ? "Goodbye" : "Welcome"),
+    detail: acknowledgement.kioskDetail ?? [acknowledgement.displayName ?? `Member ${acknowledgement.studentId}`, acknowledgement.attendanceSummary].filter(Boolean).join(" - ")
   };
 }
 
@@ -692,6 +703,14 @@ function buildBenchAttendanceSummary(studentId: string): { rate: number | null; 
     rate: report.attendanceRate,
     summary: `Attendance ${Math.round(report.attendanceRate * 100)}% (${report.presentMeetings}/${report.totalMeetings})`
   };
+}
+
+function formatKioskTime(occurredAt: string): string {
+  return new Intl.DateTimeFormat("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: "America/New_York"
+  }).format(new Date(occurredAt));
 }
 
 function buildPresenceReport(date = meetingDateForTimestamp(new Date().toISOString())) {

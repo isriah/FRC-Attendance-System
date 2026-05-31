@@ -167,6 +167,8 @@ async function buildAcknowledgement(env: Env, acknowledgement: AcknowledgementIn
   ).bind(acknowledgement.input.studentId).first<{ first_name: string; last_name: string }>();
   const displayName = student ? `${student.first_name} ${student.last_name}` : undefined;
   const attendance = await attendanceSummary(env, acknowledgement.input.studentId);
+  const memberLabel = displayName ?? `Member ${acknowledgement.input.studentId}`;
+  const scannedAt = formatKioskTime(acknowledgement.input.occurredAt, env.TIME_ZONE);
 
   if (acknowledgement.status === "duplicate") {
     return {
@@ -176,11 +178,16 @@ async function buildAcknowledgement(env: Env, acknowledgement: AcknowledgementIn
       displayName,
       attendanceRate: attendance.rate,
       attendanceSummary: attendance.summary,
+      kioskMessage: "Already recorded",
+      kioskDetail: [memberLabel, "This scan was just counted. Please wait before scanning again."].join(" - "),
       message: displayName ? `${displayName} was already recorded.` : "Scan was already recorded."
     };
   }
 
   if (acknowledgement.status === "rejected") {
+    const rosterMessage = acknowledgement.reason === "student is not active in roster"
+      ? "Member is not active in the roster."
+      : "Scan could not be accepted.";
     return {
       localEventId: acknowledgement.input.localEventId,
       studentId: acknowledgement.input.studentId,
@@ -188,10 +195,14 @@ async function buildAcknowledgement(env: Env, acknowledgement: AcknowledgementIn
       displayName,
       attendanceRate: attendance.rate,
       attendanceSummary: attendance.summary,
-      message: acknowledgement.reason === "student is not active in roster" ? "Member is not active in the roster." : "Scan could not be accepted."
+      kioskMessage: "Roster issue",
+      kioskDetail: [memberLabel, rosterMessage].join(" - "),
+      message: rosterMessage
     };
   }
 
+  const actionLabel = acknowledgement.action === "check_out" ? "Checked out" : "Checked in";
+  const greeting = acknowledgement.action === "check_out" ? "Goodbye" : "Welcome";
   return {
     localEventId: acknowledgement.input.localEventId,
     studentId: acknowledgement.input.studentId,
@@ -200,6 +211,8 @@ async function buildAcknowledgement(env: Env, acknowledgement: AcknowledgementIn
     action: acknowledgement.action,
     attendanceRate: attendance.rate,
     attendanceSummary: attendance.summary,
+    kioskMessage: `${greeting}, ${displayName ?? acknowledgement.input.studentId}`,
+    kioskDetail: [`${actionLabel} at ${scannedAt}`, attendance.summary].filter(Boolean).join(" - "),
     message: acknowledgement.action === "check_out" ? `Goodbye, ${displayName ?? acknowledgement.input.studentId}` : `Welcome, ${displayName ?? acknowledgement.input.studentId}`
   };
 }
@@ -223,6 +236,22 @@ async function attendanceSummary(env: Env, studentId: string): Promise<{ rate: n
     };
   } catch {
     return { rate: null };
+  }
+}
+
+function formatKioskTime(occurredAt: string, timeZone?: string): string {
+  try {
+    return new Intl.DateTimeFormat("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+      timeZone: timeZone || "America/New_York"
+    }).format(new Date(occurredAt));
+  } catch {
+    return new Intl.DateTimeFormat("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+      timeZone: "America/New_York"
+    }).format(new Date(occurredAt));
   }
 }
 
