@@ -52,6 +52,7 @@ export interface MeetingSummaryReportRow {
   hasAttendance: boolean;
   zeroScan: boolean;
   presentCount: number;
+  activePresentCount: number;
   absentCount: number;
   openCheckIns: number;
 }
@@ -170,16 +171,19 @@ export async function buildMeetingSummaryReport(env: Env, range: ReportDateRange
     }>(),
     env.DB.prepare(`
       SELECT
-        meeting_date,
-        COUNT(DISTINCT student_id) AS present_count,
-        SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END) AS open_check_ins
+        attendance_sessions.meeting_date,
+        COUNT(DISTINCT attendance_sessions.student_id) AS present_count,
+        COUNT(DISTINCT CASE WHEN students.active = 1 THEN attendance_sessions.student_id END) AS active_present_count,
+        SUM(CASE WHEN attendance_sessions.status = 'open' THEN 1 ELSE 0 END) AS open_check_ins
       FROM attendance_sessions
+      LEFT JOIN students ON students.student_id = attendance_sessions.student_id
       ${whereDateRange("meeting_date", range)}
-      GROUP BY meeting_date
-      ORDER BY meeting_date DESC
+      GROUP BY attendance_sessions.meeting_date
+      ORDER BY attendance_sessions.meeting_date DESC
     `).bind(...dateRangeParams(range)).all<{
       meeting_date: string;
       present_count: number;
+      active_present_count: number;
       open_check_ins: number;
     }>(),
     env.DB.prepare("SELECT COUNT(*) AS count FROM students WHERE active = 1").first<{ count: number }>(),
@@ -197,6 +201,7 @@ export async function buildMeetingSummaryReport(env: Env, range: ReportDateRange
     const scheduled = Boolean(meeting);
     const required = meeting ? Boolean(meeting.required) : !hasScheduledMeetings;
     const presentCount = Number(session?.present_count ?? 0);
+    const activePresentCount = Number(session?.active_present_count ?? 0);
     return {
       meetingDate,
       title: meeting?.title ?? null,
@@ -207,7 +212,8 @@ export async function buildMeetingSummaryReport(env: Env, range: ReportDateRange
       hasAttendance: Boolean(session),
       zeroScan: scheduled && !session,
       presentCount,
-      absentCount: required ? Math.max(activeCount - presentCount, 0) : 0,
+      activePresentCount,
+      absentCount: required ? Math.max(activeCount - activePresentCount, 0) : 0,
       openCheckIns: Number(session?.open_check_ins ?? 0)
     };
   }).slice(0, limit);

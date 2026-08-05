@@ -1112,18 +1112,30 @@ function buildBenchMeetingSummaryReport(range: BenchReportDateRange = {}, limit 
     ends_at: string | null;
   }>).filter((meeting) => isDateInRange(meeting.meeting_date, range));
   const sessions = deriveBenchSessions().filter((session) => isDateInRange(session.meetingDate, range));
+  const activeStudentRows = db.prepare("SELECT student_id FROM students WHERE active = 1").all() as Array<{ student_id: string }>;
+  const activeStudentIds = new Set(activeStudentRows.map((student) => student.student_id));
   const meetingsByDate = new Map(meetings.map((meeting) => [meeting.meeting_date, meeting]));
-  const sessionsByDate = sessions.reduce<Map<string, { presentCount: number; openCheckIns: number; presentStudents: Set<string> }>>((groups, session) => {
-    const group = groups.get(session.meetingDate) ?? { presentCount: 0, openCheckIns: 0, presentStudents: new Set<string>() };
+  const sessionsByDate = sessions.reduce<Map<string, { presentCount: number; activePresentCount: number; openCheckIns: number; presentStudents: Set<string>; activePresentStudents: Set<string> }>>((groups, session) => {
+    const group = groups.get(session.meetingDate) ?? {
+      presentCount: 0,
+      activePresentCount: 0,
+      openCheckIns: 0,
+      presentStudents: new Set<string>(),
+      activePresentStudents: new Set<string>()
+    };
     if (!group.presentStudents.has(session.studentId)) {
       group.presentStudents.add(session.studentId);
       group.presentCount += 1;
+    }
+    if (activeStudentIds.has(session.studentId) && !group.activePresentStudents.has(session.studentId)) {
+      group.activePresentStudents.add(session.studentId);
+      group.activePresentCount += 1;
     }
     if (session.status === "open") group.openCheckIns += 1;
     groups.set(session.meetingDate, group);
     return groups;
   }, new Map());
-  const activeCount = (db.prepare("SELECT COUNT(*) AS count FROM students WHERE active = 1").get() as { count: number }).count;
+  const activeCount = activeStudentRows.length;
   const hasScheduledMeetings = benchHasScheduledMeetings();
   const dates = [...new Set([...meetingsByDate.keys(), ...sessionsByDate.keys()])].sort((left, right) => right.localeCompare(left));
 
@@ -1143,7 +1155,8 @@ function buildBenchMeetingSummaryReport(range: BenchReportDateRange = {}, limit 
       hasAttendance: Boolean(session),
       zeroScan: scheduled && !session,
       presentCount,
-      absentCount: required ? Math.max(activeCount - presentCount, 0) : 0,
+      activePresentCount: session?.activePresentCount ?? 0,
+      absentCount: required ? Math.max(activeCount - (session?.activePresentCount ?? 0), 0) : 0,
       openCheckIns: session?.openCheckIns ?? 0
     };
   }).slice(0, limit);

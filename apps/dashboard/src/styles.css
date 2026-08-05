@@ -288,6 +288,15 @@ textarea {
   min-width: 760px;
 }
 
+.data-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.data-table {
+  min-width: 720px;
+}
+
 .report-context {
   color: var(--muted-color);
   font-size: 14px;

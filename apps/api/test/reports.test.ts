@@ -189,6 +189,7 @@ describe("report builders", () => {
         hasAttendance: false,
         zeroScan: true,
         presentCount: 0,
+        activePresentCount: 0,
         absentCount: 3,
         openCheckIns: 0
       },
@@ -202,6 +203,7 @@ describe("report builders", () => {
         hasAttendance: true,
         zeroScan: false,
         presentCount: 1,
+        activePresentCount: 1,
         absentCount: 0,
         openCheckIns: 1
       },
@@ -215,10 +217,32 @@ describe("report builders", () => {
         hasAttendance: true,
         zeroScan: false,
         presentCount: 2,
+        activePresentCount: 2,
         absentCount: 1,
         openCheckIns: 1
       }
     ]);
+  });
+
+  it("computes required meeting absences from active roster members when inactive members have sessions", async () => {
+    const env = createTestEnv();
+    insertStudent(env, "100001", "Bench", "Student");
+    insertStudent(env, "100002", "Drive", "Captain");
+    insertStudent(env, "999999", "Former", "Member", 0);
+    insertMeeting(env, "2026-01-02", 1, "Required Build");
+    insertSession(env, "100001", "2026-01-02", "2026-01-02T20:00:00.000Z", null, "open");
+    insertSession(env, "999999", "2026-01-02", "2026-01-02T20:10:00.000Z", null, "open");
+
+    const rows = await buildMeetingSummaryReport(env);
+
+    expect(rows[0]).toMatchObject({
+      meetingDate: "2026-01-02",
+      required: true,
+      presentCount: 2,
+      activePresentCount: 1,
+      absentCount: 1,
+      openCheckIns: 2
+    });
   });
 
   it("returns absent active roster rows for a required meeting", async () => {

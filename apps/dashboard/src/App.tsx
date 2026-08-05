@@ -1013,14 +1013,16 @@ function Table({ title, rows, columns, error }: { title: string; rows: Array<Rec
 
 function DataTable({ rows, columns }: { rows: Array<Record<string, unknown>>; columns: string[] }) {
   return (
-    <table>
-      <thead><tr>{columns.map((column) => <th key={column}>{column}</th>)}</tr></thead>
-      <tbody>
-        {rows.map((row, index) => (
-          <tr key={index}>{columns.map((column) => <td key={column}>{String(row[column] ?? "")}</td>)}</tr>
-        ))}
-      </tbody>
-    </table>
+    <div className="data-table-wrap">
+      <table className="data-table">
+        <thead><tr>{columns.map((column) => <th key={column}>{column}</th>)}</tr></thead>
+        <tbody>
+          {rows.map((row, index) => (
+            <tr key={index}>{columns.map((column) => <td key={column}>{String(row[column] ?? "")}</td>)}</tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -1262,6 +1264,7 @@ interface MeetingSummaryReportRow {
   hasAttendance: boolean;
   zeroScan: boolean;
   presentCount: number;
+  activePresentCount: number;
   absentCount: number;
   openCheckIns: number;
 }
