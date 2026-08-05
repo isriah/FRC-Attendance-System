@@ -28,6 +28,27 @@ export async function apiPost<T>(path: string, body: unknown, session: Dashboard
   return response.json() as Promise<T>;
 }
 
+export async function apiPut<T>(path: string, body: unknown, session: DashboardSession): Promise<T> {
+  const response = await fetch(`${apiBaseUrl}${path}`, {
+    method: "PUT",
+    headers: {
+      "content-type": "application/json",
+      ...adminHeaders(session)
+    },
+    body: JSON.stringify(body)
+  });
+  if (!response.ok) throw new Error(await response.text());
+  return response.json() as Promise<T>;
+}
+
+export async function apiDelete(path: string, session: DashboardSession): Promise<void> {
+  const response = await fetch(`${apiBaseUrl}${path}`, {
+    method: "DELETE",
+    headers: adminHeaders(session)
+  });
+  if (!response.ok) throw new Error(await response.text());
+}
+
 function adminHeaders(session: DashboardSession): Record<string, string> {
   if (session.idToken) return { authorization: `Bearer ${session.idToken}` };
   if (googleAuthEnabled) return {};

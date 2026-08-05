@@ -1,9 +1,9 @@
 import { FormEvent, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { apiBaseUrl, apiGet, apiPost, type DashboardSession } from "./api";
+import { apiBaseUrl, apiDelete, apiGet, apiPost, apiPut, type DashboardSession } from "./api";
 import "./styles.css";
 
-type Tab = "overview" | "roster" | "kiosks" | "events" | "reports" | "export";
+type Tab = "overview" | "roster" | "meetings" | "kiosks" | "events" | "reports" | "export";
 type KioskCommandAction = "restart_display" | "restart_services" | "reboot_system";
 type KioskCommandStatus = "pending" | "running" | "completed" | "failed";
 type KioskHealthStatus = "online" | "degraded" | "offline" | "unknown";
@@ -43,6 +43,27 @@ interface FingerprintEnrollment {
   enrolledAt: string;
 }
 
+interface ScheduledMeeting {
+  id: string;
+  meetingDate: string;
+  title: string;
+  required: boolean;
+  startsAt?: string;
+  endsAt?: string;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface MeetingFormState {
+  meetingDate: string;
+  title: string;
+  required: boolean;
+  startsAt: string;
+  endsAt: string;
+  notes: string;
+}
+
 const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
 const googleAuthEnabled = Boolean(googleClientId);
 const fingerprintEnrollmentAvailable = !apiBaseUrl.includes("workers.dev");
@@ -65,7 +86,7 @@ function App() {
     <main className="dashboard">
       <aside>
         <h1>Attendance Admin</h1>
-        {(["overview", "roster", "kiosks", "events", "reports", "export"] as Tab[]).map((item) => (
+        {(["overview", "roster", "meetings", "kiosks", "events", "reports", "export"] as Tab[]).map((item) => (
           <button key={item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}>
             {item}
           </button>
@@ -82,6 +103,7 @@ function App() {
         </header>
         {tab === "overview" && <Overview session={session} />}
         {tab === "roster" && <Roster session={session} />}
+        {tab === "meetings" && <Meetings session={session} />}
         {tab === "kiosks" && <Kiosks session={session} />}
         {tab === "events" && <Events session={session} />}
         {tab === "reports" && <Reports session={session} />}
@@ -389,6 +411,143 @@ function FingerprintEnrollmentTable({ enrollments, onDelete, deleting }: { enrol
   );
 }
 
+function Meetings({ session }: { session: DashboardSession }) {
+  const { data, error, reload } = useApi<{ meetings: ScheduledMeeting[] }>("/admin/meetings", session);
+  const [editingMeeting, setEditingMeeting] = useState<ScheduledMeeting>();
+  const [formState, setFormState] = useState<MeetingFormState>(emptyMeetingForm());
+  const [message, setMessage] = useState<{ kind: "success" | "error"; text: string }>();
+  const [saving, setSaving] = useState(false);
+  const meetings = data?.meetings ?? [];
+
+  async function submitMeeting(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSaving(true);
+    setMessage(undefined);
+    try {
+      const payload = meetingPayload(formState);
+      if (editingMeeting) {
+        await apiPut<ScheduledMeeting>(`/admin/meetings/${encodeURIComponent(editingMeeting.id)}`, payload, session);
+        setMessage({ kind: "success", text: `Updated ${payload.title}.` });
+      } else {
+        await apiPost<ScheduledMeeting>("/admin/meetings", payload, session);
+        setMessage({ kind: "success", text: `Added ${payload.title}.` });
+      }
+      setEditingMeeting(undefined);
+      setFormState(emptyMeetingForm());
+      reload();
+    } catch (err) {
+      setMessage({ kind: "error", text: friendlyDashboardError(err) });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function deleteMeeting(meeting: ScheduledMeeting) {
+    if (!window.confirm(`Delete ${meeting.title} on ${meeting.meetingDate}? Attendance sessions already recorded for that date will stay in the system.`)) return;
+    setSaving(true);
+    setMessage(undefined);
+    try {
+      await apiDelete(`/admin/meetings/${encodeURIComponent(meeting.id)}`, session);
+      if (editingMeeting?.id === meeting.id) {
+        setEditingMeeting(undefined);
+        setFormState(emptyMeetingForm());
+      }
+      setMessage({ kind: "success", text: `Deleted ${meeting.title}.` });
+      reload();
+    } catch (err) {
+      setMessage({ kind: "error", text: friendlyDashboardError(err) });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function startEditing(meeting: ScheduledMeeting) {
+    setEditingMeeting(meeting);
+    setFormState(meetingToFormState(meeting));
+    setMessage(undefined);
+  }
+
+  function cancelEditing() {
+    setEditingMeeting(undefined);
+    setFormState(emptyMeetingForm());
+    setMessage(undefined);
+  }
+
+  return (
+    <>
+      <section>
+        <h2>{editingMeeting ? "Edit Meeting" : "Add Meeting"}</h2>
+        <form className="meeting-form" onSubmit={submitMeeting}>
+          <label className="field-label">
+            <span>Date</span>
+            <input value={formState.meetingDate} onChange={(event) => setFormState({ ...formState, meetingDate: event.target.value })} type="date" required />
+          </label>
+          <label className="field-label wide-field">
+            <span>Title</span>
+            <input value={formState.title} onChange={(event) => setFormState({ ...formState, title: event.target.value })} placeholder="Build meeting" required />
+          </label>
+          <label className="inline-check required-toggle">
+            <input type="checkbox" checked={formState.required} onChange={(event) => setFormState({ ...formState, required: event.target.checked })} />
+            Required attendance
+          </label>
+          <label className="field-label">
+            <span>Starts</span>
+            <input value={formState.startsAt} onChange={(event) => setFormState({ ...formState, startsAt: event.target.value })} type="datetime-local" />
+          </label>
+          <label className="field-label">
+            <span>Ends</span>
+            <input value={formState.endsAt} onChange={(event) => setFormState({ ...formState, endsAt: event.target.value })} type="datetime-local" />
+          </label>
+          <label className="field-label notes-field">
+            <span>Notes</span>
+            <textarea value={formState.notes} onChange={(event) => setFormState({ ...formState, notes: event.target.value })} rows={3} placeholder="Optional context" />
+          </label>
+          <div className="toolbar compact form-actions">
+            <button disabled={saving}>{saving ? "Saving..." : editingMeeting ? "Save changes" : "Add meeting"}</button>
+            {editingMeeting ? <button type="button" onClick={cancelEditing} disabled={saving}>Cancel</button> : null}
+          </div>
+        </form>
+        {message ? <p className={`notice ${message.kind}`}>{message.text}</p> : null}
+        {error ? <p className="error">{error}</p> : null}
+      </section>
+
+      <section>
+        <div className="section-heading">
+          <h2>Scheduled Meetings</h2>
+          <button type="button" onClick={reload}>Refresh</button>
+        </div>
+        {meetings.length === 0 ? <p className="empty-state">No scheduled meetings yet.</p> : null}
+        {meetings.length > 0 ? (
+          <table>
+            <thead>
+              <tr>
+                {["date", "title", "attendance", "time", "notes", "actions"].map((column) => <th key={column}>{column}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {meetings.map((meeting) => (
+                <tr key={meeting.id}>
+                  <td>{meeting.meetingDate}</td>
+                  <td>{meeting.title}</td>
+                  <td><MeetingRequirementBadge required={meeting.required} /></td>
+                  <td>{meetingTimeRange(meeting)}</td>
+                  <td>{meeting.notes ?? ""}</td>
+                  <td>
+                    <div className="kiosk-actions">
+                      <button type="button" onClick={() => startEditing(meeting)} disabled={saving}>Edit</button>
+                      <button type="button" onClick={() => deleteMeeting(meeting)} disabled={saving}>Delete</button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : null}
+      </section>
+    </>
+  );
+}
+
 function Kiosks({ session }: { session: DashboardSession }) {
   const { data, error, reload } = useApi<{ kiosks: KioskRow[] }>("/admin/kiosks", session);
   const { data: commands, error: commandError, reload: reloadCommands } = useApi<{ commands: KioskCommandRow[] }>("/admin/kiosk-commands?limit=75", session);
@@ -525,6 +684,7 @@ function Events({ session }: { session: DashboardSession }) {
 function Reports({ session }: { session: DashboardSession }) {
   const { data, error, reload } = useApi<{ sessions: Array<Record<string, unknown>> }>("/admin/reports/sessions", session);
   const { data: students } = useApi<{ students: Array<{ student_id: string; first_name: string; last_name: string; active: number }> }>("/admin/students", session);
+  const { data: meetingData } = useApi<{ meetings: ScheduledMeeting[] }>("/admin/meetings", session);
   const [presenceDate, setPresenceDate] = useState(localDateInputValue());
   const [selectedMemberId, setSelectedMemberId] = useState("");
   const { data: presence, error: presenceError, reload: reloadPresence } = useApi<PresenceReport>(`/admin/reports/presence?date=${presenceDate}`, session);
@@ -533,6 +693,7 @@ function Reports({ session }: { session: DashboardSession }) {
     session
   );
   const activeStudents = students?.students.filter((student) => student.active) ?? [];
+  const selectedMeeting = meetingData?.meetings.find((meeting) => meeting.meetingDate === presenceDate);
 
   return (
     <>
@@ -542,6 +703,11 @@ function Reports({ session }: { session: DashboardSession }) {
           <input value={presenceDate} onChange={(event) => setPresenceDate(event.target.value)} type="date" />
           <button onClick={reloadPresence}>Refresh</button>
         </div>
+        <p className="report-context">
+          {selectedMeeting
+            ? `${selectedMeeting.title} is ${selectedMeeting.required ? "a required meeting" : "an optional meeting"}${meetingTimeRange(selectedMeeting) ? `, ${meetingTimeRange(selectedMeeting)}` : ""}.`
+            : "No scheduled meeting is set for this date. Presence still shows scans and manual corrections recorded that day."}
+        </p>
         {presenceError ? <p className="error">{presenceError}</p> : null}
         <div className="grid compact-grid">
           <Metric label="Signed In" value={presence?.counts.signedIn ?? 0} />
@@ -571,19 +737,20 @@ function Reports({ session }: { session: DashboardSession }) {
         {memberReport ? (
           <>
             <div className="grid compact-grid">
-              <Metric label="Attendance" value={formatPercent(memberReport.attendanceRate)} />
-              <Metric label="Present" value={memberReport.presentMeetings} />
-              <Metric label="Missed" value={memberReport.missedMeetings} />
+              <Metric label="Required Attendance" value={formatPercent(memberReport.attendanceRate)} />
+              <Metric label="Required Present" value={memberReport.presentMeetings} />
+              <Metric label="Required Missed" value={memberReport.missedMeetings} />
             </div>
             <h3>{memberReport.firstName} {memberReport.lastName}</h3>
+            <p className="report-context">Optional meetings are excluded from this attendance rate and missed-meeting count.</p>
             <DataTable
               rows={[{
-                totalMeetings: memberReport.totalMeetings,
+                requiredMeetings: memberReport.totalMeetings,
                 presentDates: memberReport.presentDates.join(", "),
                 absentDates: memberReport.absentDates.join(", "),
                 openSessionDates: memberReport.openSessionDates.join(", ")
               }]}
-              columns={["totalMeetings", "presentDates", "absentDates", "openSessionDates"]}
+              columns={["requiredMeetings", "presentDates", "absentDates", "openSessionDates"]}
             />
           </>
         ) : null}
@@ -709,8 +876,64 @@ function localDateInputValue(date = new Date()) {
   return `${year}-${month}-${day}`;
 }
 
+function localDateTimeInputValue(value?: string) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+}
+
 function formatPercent(value: number | null) {
   return value === null ? "N/A" : `${Math.round(value * 100)}%`;
+}
+
+function emptyMeetingForm(): MeetingFormState {
+  return {
+    meetingDate: localDateInputValue(),
+    title: "",
+    required: true,
+    startsAt: "",
+    endsAt: "",
+    notes: ""
+  };
+}
+
+function meetingToFormState(meeting: ScheduledMeeting): MeetingFormState {
+  return {
+    meetingDate: meeting.meetingDate,
+    title: meeting.title,
+    required: meeting.required,
+    startsAt: localDateTimeInputValue(meeting.startsAt),
+    endsAt: localDateTimeInputValue(meeting.endsAt),
+    notes: meeting.notes ?? ""
+  };
+}
+
+function meetingPayload(formState: MeetingFormState) {
+  return {
+    meetingDate: formState.meetingDate,
+    title: formState.title.trim(),
+    required: formState.required,
+    startsAt: formState.startsAt ? new Date(formState.startsAt).toISOString() : undefined,
+    endsAt: formState.endsAt ? new Date(formState.endsAt).toISOString() : undefined,
+    notes: formState.notes.trim() || undefined
+  };
+}
+
+function MeetingRequirementBadge({ required }: { required: boolean }) {
+  return <span className={`status-badge ${required ? "active" : "optional"}`}>{required ? "Required" : "Optional"}</span>;
+}
+
+function meetingTimeRange(meeting: ScheduledMeeting) {
+  if (!meeting.startsAt && !meeting.endsAt) return "";
+  if (meeting.startsAt && meeting.endsAt) return `${formatDateTime(meeting.startsAt)} - ${formatDateTime(meeting.endsAt)}`;
+  if (meeting.startsAt) return `Starts ${formatDateTime(meeting.startsAt)}`;
+  return `Ends ${formatDateTime(meeting.endsAt)}`;
 }
 
 function findHeaderIndex(header: string[], names: string[]) {
