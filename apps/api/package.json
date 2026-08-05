@@ -10,6 +10,7 @@
     "deploy": "npm run check:deploy-config && wrangler deploy",
     "db:migrate:local": "wrangler d1 migrations apply frc-attendance --local",
     "db:migrate": "npm run check:deploy-config && wrangler d1 migrations apply frc-attendance --remote",
+    "smoke:pi-roster-pull": "node scripts/smoke-pi-roster-pull.mjs",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

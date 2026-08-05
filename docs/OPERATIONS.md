@@ -277,3 +277,11 @@ Environment=REMOTE_KIOSK_TOKEN=<raw-kiosk-token>
 ```
 
 Keep `REMOTE_KIOSK_TOKEN` in a Pi-local systemd drop-in, not in source control. The committed bench API service only sets the production URL and kiosk ID.
+
+Run the Pi-local roster pull smoke check from the workstation after roster-pull changes or Pi bench API redeploys:
+
+```powershell
+npm.cmd --workspace @frc-attendance/api run smoke:pi-roster-pull
+```
+
+The check SSHes to `attkiosk@AttKiosk`, reads the bench API service environment on the Pi, calls the production Worker roster export with the Pi-local kiosk token, triggers `POST /admin/roster/pull-production`, and verifies the Pi-local active roster exactly matches production. Override the SSH target with `PI_ROSTER_PULL_SSH_TARGET` only when validating a different Pi.
