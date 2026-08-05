@@ -127,6 +127,7 @@ describe("display state acknowledgements", () => {
 
   it("includes kiosk health in the display state payload", () => {
     const server = new DisplayStateServer();
+    const displayUpdatedAt = server.current().updatedAt;
 
     server.setHealth({
       readerOnline: true,
@@ -141,6 +142,7 @@ describe("display state acknowledgements", () => {
         lastSyncError: "Sync failed"
       }
     });
+    expect(server.current().updatedAt).toBe(displayUpdatedAt);
   });
 
   it("serves kiosk health from the display state endpoint", async () => {

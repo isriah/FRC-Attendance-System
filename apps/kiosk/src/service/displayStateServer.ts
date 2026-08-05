@@ -116,7 +116,6 @@ export class DisplayStateServer {
 
   setHealth(health: KioskDisplayHealth): void {
     this.health = health;
-    this.state = withTimestamp(this.state);
   }
 
   setState(status: KioskStateId, detail?: string): void {

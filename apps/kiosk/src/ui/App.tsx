@@ -51,6 +51,8 @@ function KioskApp() {
         if (next.updatedAt && next.updatedAt !== lastSeenUpdate) {
           lastSeenUpdate = next.updatedAt;
           setState(next);
+        } else {
+          setState((current) => ({ ...current, health: next.health }));
         }
       } catch {
         if (isMounted) setState({ ...baseDisplayState("reader_offline"), detail: "Display state service is not responding" });
