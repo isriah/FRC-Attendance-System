@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { DEFAULT_DUPLICATE_WINDOW_MS, deriveAttendanceSessions, isDuplicateScan, meetingDateForTimestamp, type AttendanceSession, type KioskCommand, type KioskCommandAction, type KioskCommandStatus, type KioskHealthReport, type KioskScanAcknowledgement, type KioskSyncRequest, type ScanEvent } from "@frc-attendance/shared";
+import { DEFAULT_DUPLICATE_WINDOW_MS, deriveAttendanceSessions, isDuplicateScan, meetingDateForTimestamp, requireIsoDate, requireIsoTimestamp, type AttendanceSession, type KioskCommand, type KioskCommandAction, type KioskCommandStatus, type KioskHealthReport, type KioskScanAcknowledgement, type KioskSyncRequest, type ScanEvent, type ScheduledMeeting } from "@frc-attendance/shared";
 import { sha256Hex } from "./auth";
 import { normalizeRosterMembers, type RosterMemberInput } from "./roster";
 
@@ -72,6 +72,20 @@ db.exec(`
   );
 
   CREATE INDEX IF NOT EXISTS kiosk_commands_kiosk_status_idx ON kiosk_commands(kiosk_id, status, requested_at);
+
+  CREATE TABLE IF NOT EXISTS scheduled_meetings (
+    id TEXT PRIMARY KEY,
+    meeting_date TEXT NOT NULL UNIQUE,
+    title TEXT NOT NULL,
+    required INTEGER NOT NULL DEFAULT 1,
+    starts_at TEXT,
+    ends_at TEXT,
+    notes TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS scheduled_meetings_required_date_idx ON scheduled_meetings(required, meeting_date);
 `);
 ensureColumn("kiosks", "name", "TEXT NOT NULL DEFAULT 'Bench kiosk'");
 ensureColumn("kiosks", "location", "TEXT");
@@ -93,6 +107,8 @@ async function seedBenchData() {
     VALUES ('bench-01', 'Bench kiosk', 'Pi bench', ?, 1)
     ON CONFLICT(kiosk_id) DO UPDATE SET token_hash = excluded.token_hash, active = 1
   `).run(await sha256Hex("dev-token"));
+
+  seedSampleMeetings();
 }
 
 await seedBenchData();
@@ -164,6 +180,34 @@ const server = createServer(async (request, response) => {
     if (request.method === "GET" && request.url === "/bench/events") {
       const events = db.prepare("SELECT * FROM scan_events ORDER BY occurred_at DESC LIMIT 50").all();
       sendJson(response, 200, { events });
+      return;
+    }
+
+    if (request.method === "GET" && request.url === "/admin/meetings") {
+      sendJson(response, 200, { meetings: listScheduledMeetings() });
+      return;
+    }
+
+    if (request.method === "POST" && request.url === "/admin/meetings") {
+      const body = await readBody<ScheduledMeetingInput>(request);
+      sendJson(response, 201, createScheduledMeeting(body));
+      return;
+    }
+
+    const adminMeeting = request.url?.match(/^\/admin\/meetings\/([^/]+)$/);
+    if (adminMeeting && request.method === "PUT") {
+      const body = await readBody<ScheduledMeetingInput>(request);
+      const meetingId = adminMeeting[1];
+      if (!meetingId) throw httpError(400, "Scheduled meeting id is required");
+      sendJson(response, 200, updateScheduledMeeting(decodeURIComponent(meetingId), body));
+      return;
+    }
+
+    if (adminMeeting && request.method === "DELETE") {
+      const meetingId = adminMeeting[1];
+      if (!meetingId) throw httpError(400, "Scheduled meeting id is required");
+      deleteScheduledMeeting(decodeURIComponent(meetingId));
+      sendNoContent(response);
       return;
     }
 
@@ -269,6 +313,21 @@ const server = createServer(async (request, response) => {
       return;
     }
 
+    if (request.method === "GET" && request.url === "/admin/reports/sessions") {
+      const sessions = deriveBenchSessions()
+        .sort((left, right) => right.meetingDate.localeCompare(left.meetingDate) || left.studentId.localeCompare(right.studentId))
+        .slice(0, 500)
+        .map((session) => ({
+          student_id: session.studentId,
+          meeting_date: session.meetingDate,
+          check_in_at: session.checkInAt,
+          check_out_at: session.checkOutAt,
+          status: session.status
+        }));
+      sendJson(response, 200, { sessions });
+      return;
+    }
+
     if (request.method === "GET" && request.url?.startsWith("/admin/reports/member")) {
       const url = new URL(request.url, `http://${request.headers.host ?? "localhost"}`);
       sendJson(response, 200, buildMemberAttendanceReport(requireNonEmptyString(url.searchParams.get("studentId") ?? undefined, "studentId")));
@@ -349,6 +408,162 @@ function syncRoster(members: RosterMemberInput[]) {
   transaction();
 
   return { synced: seen.size, deactivatedMissingStudents: normalizedMembers.length > 0 };
+}
+
+function seedSampleMeetings() {
+  const today = meetingDateForTimestamp(new Date().toISOString());
+  const requiredId = `bench-required-${today}`;
+  const optionalId = `bench-optional-${today}`;
+  const now = new Date().toISOString();
+
+  db.prepare(`
+    INSERT INTO scheduled_meetings (id, meeting_date, title, required, notes, created_at, updated_at)
+    VALUES (?, ?, 'Bench required meeting', 1, 'Seeded by the local bench API so zero-scan required meetings appear in reports.', ?, ?)
+    ON CONFLICT(meeting_date) DO NOTHING
+  `).run(requiredId, today, now, now);
+
+  const tomorrow = new Date(`${today}T00:00:00.000Z`);
+  tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+  const optionalDate = tomorrow.toISOString().slice(0, 10);
+  db.prepare(`
+    INSERT INTO scheduled_meetings (id, meeting_date, title, required, notes, created_at, updated_at)
+    VALUES (?, ?, 'Bench optional meeting', 0, 'Seeded optional meeting; it is listed but excluded from attendance totals.', ?, ?)
+    ON CONFLICT(meeting_date) DO NOTHING
+  `).run(optionalId, optionalDate, now, now);
+}
+
+function listScheduledMeetings(): ScheduledMeeting[] {
+  const rows = db.prepare(`
+    SELECT id, meeting_date, title, required, starts_at, ends_at, notes, created_at, updated_at
+    FROM scheduled_meetings
+    ORDER BY meeting_date, starts_at
+  `).all() as ScheduledMeetingRow[];
+  return rows.map(rowToScheduledMeeting);
+}
+
+function createScheduledMeeting(input: ScheduledMeetingInput): ScheduledMeeting {
+  const normalized = normalizeMeetingInput(input);
+  const now = new Date().toISOString();
+  const meeting: ScheduledMeeting = {
+    id: crypto.randomUUID(),
+    meetingDate: normalized.meetingDate,
+    title: normalized.title,
+    required: normalized.required,
+    startsAt: normalized.startsAt,
+    endsAt: normalized.endsAt,
+    notes: normalized.notes,
+    createdAt: now,
+    updatedAt: now
+  };
+
+  try {
+    db.prepare(`
+      INSERT INTO scheduled_meetings (id, meeting_date, title, required, starts_at, ends_at, notes, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      meeting.id,
+      meeting.meetingDate,
+      meeting.title,
+      meeting.required ? 1 : 0,
+      meeting.startsAt ?? null,
+      meeting.endsAt ?? null,
+      meeting.notes ?? null,
+      meeting.createdAt,
+      meeting.updatedAt
+    );
+  } catch (error) {
+    throwUniqueMeetingDateError(error, meeting.meetingDate);
+  }
+
+  return meeting;
+}
+
+function updateScheduledMeeting(meetingId: string, input: ScheduledMeetingInput): ScheduledMeeting {
+  const existing = getScheduledMeetingRow(meetingId);
+  if (!existing) throw httpError(404, "Scheduled meeting not found");
+
+  const normalized = normalizeMeetingInput(input);
+  const updatedAt = new Date().toISOString();
+  try {
+    db.prepare(`
+      UPDATE scheduled_meetings
+      SET meeting_date = ?, title = ?, required = ?, starts_at = ?, ends_at = ?, notes = ?, updated_at = ?
+      WHERE id = ?
+    `).run(
+      normalized.meetingDate,
+      normalized.title,
+      normalized.required ? 1 : 0,
+      normalized.startsAt ?? null,
+      normalized.endsAt ?? null,
+      normalized.notes ?? null,
+      updatedAt,
+      meetingId
+    );
+  } catch (error) {
+    throwUniqueMeetingDateError(error, normalized.meetingDate);
+  }
+
+  const updated = getScheduledMeetingRow(meetingId);
+  if (!updated) throw httpError(404, "Scheduled meeting not found");
+  return rowToScheduledMeeting(updated);
+}
+
+function deleteScheduledMeeting(meetingId: string) {
+  const existing = getScheduledMeetingRow(meetingId);
+  if (!existing) throw httpError(404, "Scheduled meeting not found");
+  db.prepare("DELETE FROM scheduled_meetings WHERE id = ?").run(meetingId);
+}
+
+function normalizeMeetingInput(input: ScheduledMeetingInput): Omit<ScheduledMeeting, "id" | "createdAt" | "updatedAt"> {
+  const meetingDate = requireIsoDate(input.meetingDate, "meetingDate");
+  const title = requireNonEmptyString(input.title, "title");
+  const required = input.required === undefined ? true : requireBoolean(input.required, "required");
+  const startsAt = optionalIsoTimestamp(input.startsAt, "startsAt");
+  const endsAt = optionalIsoTimestamp(input.endsAt, "endsAt");
+  if (startsAt && endsAt && new Date(endsAt).getTime() < new Date(startsAt).getTime()) {
+    throw httpError(400, "endsAt must be after startsAt");
+  }
+
+  return {
+    meetingDate,
+    title,
+    required,
+    startsAt,
+    endsAt,
+    notes: optionalTrimmedString(input.notes)
+  };
+}
+
+function requireBoolean(value: unknown, fieldName: string): boolean {
+  if (typeof value !== "boolean") throw httpError(400, `${fieldName} must be a boolean`);
+  return value;
+}
+
+function optionalIsoTimestamp(value: unknown, fieldName: string): string | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  return requireIsoTimestamp(value, fieldName);
+}
+
+function optionalTrimmedString(value: unknown): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "string") throw httpError(400, "notes must be a string");
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function getScheduledMeetingRow(meetingId: string): ScheduledMeetingRow | undefined {
+  return db.prepare(`
+    SELECT id, meeting_date, title, required, starts_at, ends_at, notes, created_at, updated_at
+    FROM scheduled_meetings
+    WHERE id = ?
+  `).get(requireNonEmptyString(meetingId, "meetingId")) as ScheduledMeetingRow | undefined;
+}
+
+function throwUniqueMeetingDateError(error: unknown, meetingDate: string): never {
+  if (error instanceof Error && /unique|constraint/i.test(error.message)) {
+    throw httpError(409, `Scheduled meeting already exists for ${meetingDate}`);
+  }
+  throw error;
 }
 
 async function fetchProductionRoster(): Promise<{ members: RosterMemberInput[]; rosterSyncedAt: string | null }> {
@@ -783,9 +998,10 @@ function buildMemberAttendanceReport(studentId: string) {
   if (!student) throw httpError(404, "Member not found");
 
   const sessions = deriveBenchSessions();
-  const allDates = [...new Set(sessions.map((session) => session.meetingDate))].sort();
+  const allDates = benchReportMeetingDates(sessions);
+  const allDateSet = new Set(allDates);
   const studentSessions = sessions.filter((session) => session.studentId === studentId);
-  const presentDates = [...new Set(studentSessions.map((session) => session.meetingDate))];
+  const presentDates = [...new Set(studentSessions.map((session) => session.meetingDate))].filter((date) => allDateSet.has(date));
   const presentDateSet = new Set(presentDates);
   const absentDates = allDates.filter((date) => !presentDateSet.has(date));
 
@@ -799,8 +1015,17 @@ function buildMemberAttendanceReport(studentId: string) {
     attendanceRate: allDates.length === 0 ? null : presentDates.length / allDates.length,
     presentDates,
     absentDates,
-    openSessionDates: studentSessions.filter((session) => session.status === "open").map((session) => session.meetingDate)
+    openSessionDates: studentSessions.filter((session) => session.status === "open" && allDateSet.has(session.meetingDate)).map((session) => session.meetingDate)
   };
+}
+
+function benchReportMeetingDates(sessions: AttendanceSession[]): string[] {
+  const hasScheduledMeetings = (db.prepare("SELECT COUNT(*) AS count FROM scheduled_meetings").get() as { count: number }).count > 0;
+  if (hasScheduledMeetings) {
+    const rows = db.prepare("SELECT meeting_date FROM scheduled_meetings WHERE required = 1 ORDER BY meeting_date").all() as Array<{ meeting_date: string }>;
+    return [...new Set(rows.map((row) => row.meeting_date))];
+  }
+  return [...new Set(sessions.map((session) => session.meetingDate))].sort();
 }
 
 function deriveBenchSessions(): AttendanceSession[] {
@@ -872,6 +1097,20 @@ function rowToCommand(row: KioskCommandRow): KioskCommand {
   };
 }
 
+function rowToScheduledMeeting(row: ScheduledMeetingRow): ScheduledMeeting {
+  return {
+    id: row.id,
+    meetingDate: row.meeting_date,
+    title: row.title,
+    required: Boolean(row.required),
+    startsAt: row.starts_at ?? undefined,
+    endsAt: row.ends_at ?? undefined,
+    notes: row.notes ?? undefined,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
 function readBody<T>(request: typeof import("node:http").IncomingMessage.prototype): Promise<T> {
   return new Promise((resolve, reject) => {
     let body = "";
@@ -914,9 +1153,18 @@ function httpError(status: number, message: string) {
   return Object.assign(new Error(message), { status });
 }
 
-function requireNonEmptyString(value: string | undefined, name: string) {
-  if (!value?.trim()) throw httpError(400, `${name} is required`);
+function requireNonEmptyString(value: unknown, name: string) {
+  if (typeof value !== "string" || value.trim().length === 0) throw httpError(400, `${name} is required`);
   return value.trim();
+}
+
+interface ScheduledMeetingInput {
+  meetingDate?: unknown;
+  title?: unknown;
+  required?: unknown;
+  startsAt?: unknown;
+  endsAt?: unknown;
+  notes?: unknown;
 }
 
 interface DbScanEvent {
@@ -941,6 +1189,18 @@ interface KioskCommandRow {
   claimed_at: string | null;
   completed_at: string | null;
   message: string | null;
+}
+
+interface ScheduledMeetingRow {
+  id: string;
+  meeting_date: string;
+  title: string;
+  required: number;
+  starts_at: string | null;
+  ends_at: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 interface KioskDisplayState {
