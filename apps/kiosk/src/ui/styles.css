@@ -11,6 +11,10 @@ body,
   --accent-color: #f2c14e;
   --success-pulse-color: #178f4f;
   --failure-flash-color: #ff2a24;
+  --network-online-color: #33d17a;
+  --network-queued-color: #f2c14e;
+  --network-offline-color: #ff5b57;
+  --network-unknown-color: color-mix(in srgb, var(--on-primary-color), var(--primary-color) 42%);
   --primary-dark: color-mix(in srgb, var(--primary-color), #000000 26%);
   --primary-soft: color-mix(in srgb, var(--primary-color), #ffffff 76%);
   --primary-bg: var(--primary-color);
@@ -48,6 +52,49 @@ body,
 .kiosk-shell-unknown,
 .kiosk-shell-enroll_failure {
   animation: failure-flash 360ms ease-in-out 4;
+}
+
+.network-status {
+  position: fixed;
+  top: 24px;
+  left: 24px;
+  width: 58px;
+  height: 58px;
+  display: grid;
+  place-items: center;
+  color: var(--network-unknown-color);
+}
+
+.network-status svg {
+  width: 42px;
+  height: 42px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 3.2;
+  stroke-linecap: round;
+}
+
+.network-status-dot {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0 3px var(--primary-color);
+}
+
+.network-status-online {
+  color: var(--network-online-color);
+}
+
+.network-status-queued {
+  color: var(--network-queued-color);
+}
+
+.network-status-offline {
+  color: var(--network-offline-color);
 }
 
 .kiosk-brand {

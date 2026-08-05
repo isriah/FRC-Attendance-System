@@ -124,4 +124,22 @@ describe("display state acknowledgements", () => {
     server.setReaderOffline();
     expect(server.current()).toMatchObject(baseDisplayState("reader_offline"));
   });
+
+  it("includes kiosk health in the display state payload", () => {
+    const server = new DisplayStateServer();
+
+    server.setHealth({
+      readerOnline: true,
+      pendingScanCount: 2,
+      lastSyncError: "Sync failed"
+    });
+
+    expect(server.current()).toMatchObject({
+      health: {
+        readerOnline: true,
+        pendingScanCount: 2,
+        lastSyncError: "Sync failed"
+      }
+    });
+  });
 });

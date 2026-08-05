@@ -4,13 +4,22 @@ import { baseDisplayState, type KioskDisplayState, type KioskStateId } from "../
 
 export type { DisplayStatus, KioskDisplayState, KioskStateId } from "../kioskStates";
 
+export interface KioskDisplayHealth {
+  readerOnline?: boolean | null;
+  pendingScanCount: number;
+  lastSyncAt?: string;
+  lastSyncError?: string;
+}
+
 export class DisplayStateServer {
   private state: KioskDisplayState = withTimestamp(baseDisplayState("ready"));
 
+  private health: KioskDisplayHealth = { pendingScanCount: 0 };
+
   private server?: Server;
 
-  current(): KioskDisplayState {
-    return this.state;
+  current(): KioskDisplayState & { health: KioskDisplayHealth } {
+    return { ...this.state, health: this.health };
   }
 
   start(port: number): void {
@@ -98,6 +107,11 @@ export class DisplayStateServer {
 
   setReaderOffline(): void {
     this.set(baseDisplayState("reader_offline"));
+  }
+
+  setHealth(health: KioskDisplayHealth): void {
+    this.health = health;
+    this.state = withTimestamp(this.state);
   }
 
   setState(status: KioskStateId, detail?: string): void {

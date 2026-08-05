@@ -22,6 +22,7 @@ display.start(config.displayStatePort);
 bridge.on("bridge-event", async (event: FingerprintBridgeEvent) => {
   if (event.type === "match") {
     const local = queue.addFingerprintScan(event.studentId);
+    updateDisplayHealth();
     display.setProcessing(`Member ${event.studentId}`);
     console.log(`Queued scan ${local.localEventId} for student ${event.studentId}`);
     try {
@@ -83,8 +84,24 @@ setInterval(() => {
 }, 30_000);
 
 function reportHealth() {
-  sync.reportHealth(health).catch((error) => {
-    console.log(`Health report failed: ${error instanceof Error ? error.message : String(error)}`);
+  updateDisplayHealth();
+  sync.reportHealth(health).then(() => {
+    if (queue.pendingCount() === 0 && health.lastSyncError?.startsWith("Health report failed:")) {
+      health.lastSyncError = undefined;
+      updateDisplayHealth();
+    }
+  }).catch((error) => {
+    const message = error instanceof Error ? error.message : String(error);
+    health.lastSyncError = `Health report failed: ${message}`;
+    updateDisplayHealth();
+    console.log(`Health report failed: ${message}`);
+  });
+}
+
+function updateDisplayHealth() {
+  display.setHealth({
+    ...health,
+    pendingScanCount: queue.pendingCount()
   });
 }
 
