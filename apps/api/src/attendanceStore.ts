@@ -50,11 +50,18 @@ export async function syncKioskEvents(env: Env, kioskId: string, events: KioskSy
       continue;
     }
 
-    const previous = await env.DB.prepare(
-      "SELECT id, kiosk_id, local_event_id, student_id, occurred_at, synced_at, source, status FROM scan_events WHERE student_id = ? AND status = 'accepted' ORDER BY occurred_at DESC LIMIT 1"
-    ).bind(input.studentId).first<Parameters<typeof rowToScanEvent>[0]>();
+    const occurredAtMs = new Date(input.occurredAt).getTime();
+    const duplicateWindowMatch = Number.isNaN(occurredAtMs)
+      ? null
+      : await env.DB.prepare(
+        "SELECT id, kiosk_id, local_event_id, student_id, occurred_at, synced_at, source, status FROM scan_events WHERE student_id = ? AND status = 'accepted' AND occurred_at BETWEEN ? AND ? ORDER BY occurred_at DESC LIMIT 1"
+      ).bind(
+        input.studentId,
+        new Date(occurredAtMs - duplicateWindow).toISOString(),
+        new Date(occurredAtMs + duplicateWindow).toISOString()
+      ).first<Parameters<typeof rowToScanEvent>[0]>();
 
-    if (isDuplicateScan(previous ? rowToScanEvent(previous) : undefined, input, duplicateWindow)) {
+    if (isDuplicateScan(duplicateWindowMatch ? rowToScanEvent(duplicateWindowMatch) : undefined, input, duplicateWindow)) {
       const event = await insertScanEvent(env, kioskId, input, now, "duplicate", "duplicate scan window");
       duplicates.push(event);
       acknowledgementInputs.push({ input, status: "duplicate", reason: "duplicate scan window" });

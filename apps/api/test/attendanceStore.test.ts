@@ -72,6 +72,79 @@ describe("kiosk sync acknowledgements", () => {
     });
   });
 
+  it("flags delayed duplicate scans even after a later accepted scan has synced", async () => {
+    const env = createTestEnv();
+
+    await syncKioskEvents(env, "bench-01", [{
+      localEventId: "bench-arrive",
+      studentId: "100001",
+      occurredAt: "2026-01-02T20:00:00.000Z",
+      source: "fingerprint"
+    }]);
+    await syncKioskEvents(env, "door-02", [{
+      localEventId: "door-leave",
+      studentId: "100001",
+      occurredAt: "2026-01-02T22:00:00.000Z",
+      source: "fingerprint"
+    }]);
+
+    const delayedDuplicate = await syncKioskEvents(env, "pit-01", [{
+      localEventId: "pit-delayed-duplicate",
+      studentId: "100001",
+      occurredAt: "2026-01-02T20:00:30.000Z",
+      source: "fingerprint"
+    }]);
+
+    expect(delayedDuplicate.accepted).toHaveLength(0);
+    expect(delayedDuplicate.duplicates).toHaveLength(1);
+    expect(delayedDuplicate.acknowledgements?.[0]).toMatchObject({
+      localEventId: "pit-delayed-duplicate",
+      studentId: "100001",
+      status: "duplicate",
+      kioskMessage: "Already recorded"
+    });
+  });
+
+  it("keeps sessions unchanged when a delayed duplicate arrives out of order", async () => {
+    const env = createTestEnv();
+
+    await syncKioskEvents(env, "bench-01", [{
+      localEventId: "bench-arrive",
+      studentId: "100001",
+      occurredAt: "2026-01-02T20:00:00.000Z",
+      source: "fingerprint"
+    }]);
+    await syncKioskEvents(env, "door-02", [{
+      localEventId: "door-leave",
+      studentId: "100001",
+      occurredAt: "2026-01-02T22:00:00.000Z",
+      source: "fingerprint"
+    }]);
+
+    await syncKioskEvents(env, "pit-01", [{
+      localEventId: "pit-delayed-duplicate",
+      studentId: "100001",
+      occurredAt: "2026-01-02T20:01:00.000Z",
+      source: "fingerprint"
+    }]);
+
+    const sessions = await env.DB.prepare(
+      "SELECT check_in_at, check_out_at, status, source_event_ids FROM attendance_sessions ORDER BY check_in_at ASC"
+    ).all<{
+      check_in_at: string;
+      check_out_at: string | null;
+      status: string;
+      source_event_ids: string;
+    }>();
+
+    expect(sessions.results).toEqual([{
+      check_in_at: "2026-01-02T20:00:00.000Z",
+      check_out_at: "2026-01-02T22:00:00.000Z",
+      status: "closed",
+      source_event_ids: JSON.stringify(["bench-01:bench-arrive", "door-02:door-leave"])
+    }]);
+  });
+
   it("returns roster issue details for inactive member scans", async () => {
     const env = createTestEnv();
     await env.DB.prepare("INSERT INTO students (student_id, first_name, last_name, active) VALUES (?, ?, ?, 0)")
