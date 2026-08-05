@@ -1,6 +1,14 @@
 import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
-import { buildAttendanceSessionReport, buildMemberAttendanceReport, buildPresenceReport } from "../src/reports";
+import {
+  buildAttendanceSessionReport,
+  buildMeetingAbsenceReport,
+  buildMeetingSummaryReport,
+  buildMemberAttendanceReport,
+  buildPresenceReport,
+  buildRosterAttendanceSummary,
+  reportDateRangeFromSearchParams
+} from "../src/reports";
 import type { Env } from "../src/env";
 
 describe("report builders", () => {
@@ -154,6 +162,158 @@ describe("report builders", () => {
         status: "open"
       }
     ]);
+  });
+
+  it("summarizes scheduled meetings with required absences, optional meetings, open check-ins, and zero scans", async () => {
+    const env = createTestEnv();
+    insertStudent(env, "100001", "Bench", "Student");
+    insertStudent(env, "100002", "Drive", "Captain");
+    insertStudent(env, "100003", "Pit", "Lead");
+    insertMeeting(env, "2026-01-02", 1, "Required Build");
+    insertMeeting(env, "2026-01-03", 0, "Optional Demo");
+    insertMeeting(env, "2026-01-09", 1, "Required Strategy");
+    insertSession(env, "100001", "2026-01-02", "2026-01-02T20:00:00.000Z", null, "open");
+    insertSession(env, "100002", "2026-01-02", "2026-01-02T20:05:00.000Z", "2026-01-02T22:00:00.000Z", "closed");
+    insertSession(env, "100003", "2026-01-03", "2026-01-03T20:00:00.000Z", null, "open");
+
+    const rows = await buildMeetingSummaryReport(env, { startDate: "2026-01-02", endDate: "2026-01-09" });
+
+    expect(rows).toEqual([
+      {
+        meetingDate: "2026-01-09",
+        title: "Required Strategy",
+        required: true,
+        startsAt: undefined,
+        endsAt: undefined,
+        scheduled: true,
+        hasAttendance: false,
+        zeroScan: true,
+        presentCount: 0,
+        absentCount: 3,
+        openCheckIns: 0
+      },
+      {
+        meetingDate: "2026-01-03",
+        title: "Optional Demo",
+        required: false,
+        startsAt: undefined,
+        endsAt: undefined,
+        scheduled: true,
+        hasAttendance: true,
+        zeroScan: false,
+        presentCount: 1,
+        absentCount: 0,
+        openCheckIns: 1
+      },
+      {
+        meetingDate: "2026-01-02",
+        title: "Required Build",
+        required: true,
+        startsAt: undefined,
+        endsAt: undefined,
+        scheduled: true,
+        hasAttendance: true,
+        zeroScan: false,
+        presentCount: 2,
+        absentCount: 1,
+        openCheckIns: 1
+      }
+    ]);
+  });
+
+  it("returns absent active roster rows for a required meeting", async () => {
+    const env = createTestEnv();
+    insertStudent(env, "100001", "Bench", "Student");
+    insertStudent(env, "100002", "Drive", "Captain");
+    insertStudent(env, "100003", "Inactive", "Member", 0);
+    insertMeeting(env, "2026-01-02", 1, "Required Build");
+    insertSession(env, "100001", "2026-01-02", "2026-01-02T20:00:00.000Z", null, "open");
+
+    const report = await buildMeetingAbsenceReport(env, "2026-01-02");
+
+    expect(report).toEqual({
+      meetingDate: "2026-01-02",
+      title: "Required Build",
+      required: true,
+      startsAt: undefined,
+      endsAt: undefined,
+      absentCount: 1,
+      rows: [{ studentId: "100002", firstName: "Drive", lastName: "Captain" }]
+    });
+  });
+
+  it("does not mark absences for optional meetings", async () => {
+    const env = createTestEnv();
+    insertStudent(env, "100001", "Bench", "Student");
+    insertMeeting(env, "2026-01-03", 0, "Optional Demo");
+
+    const report = await buildMeetingAbsenceReport(env, "2026-01-03");
+
+    expect(report.required).toBe(false);
+    expect(report.absentCount).toBe(0);
+    expect(report.rows).toEqual([]);
+  });
+
+  it("filters member attendance and roster summary by report date range", async () => {
+    const env = createTestEnv();
+    insertStudent(env, "100001", "Bench", "Student");
+    insertStudent(env, "100002", "Drive", "Captain");
+    insertMeeting(env, "2026-01-02", 1, "Week 1");
+    insertMeeting(env, "2026-01-09", 1, "Week 2");
+    insertMeeting(env, "2026-01-16", 1, "Week 3");
+    insertSession(env, "100001", "2026-01-02", "2026-01-02T20:00:00.000Z", null, "open");
+    insertSession(env, "100001", "2026-01-09", "2026-01-09T20:00:00.000Z", "2026-01-09T22:00:00.000Z", "closed");
+    insertSession(env, "100002", "2026-01-16", "2026-01-16T20:00:00.000Z", null, "open");
+
+    const memberReport = await buildMemberAttendanceReport(env, "100001", { startDate: "2026-01-09", endDate: "2026-01-16" });
+    const rosterSummary = await buildRosterAttendanceSummary(env, { startDate: "2026-01-09", endDate: "2026-01-16" });
+
+    expect(memberReport).toMatchObject({
+      startDate: "2026-01-09",
+      endDate: "2026-01-16",
+      totalMeetings: 2,
+      presentMeetings: 1,
+      missedMeetings: 1,
+      attendanceRate: 0.5,
+      lastSeenAt: "2026-01-09T20:00:00.000Z",
+      presentDates: ["2026-01-09"],
+      absentDates: ["2026-01-16"],
+      openSessionDates: []
+    });
+    expect(rosterSummary).toEqual([
+      {
+        studentId: "100002",
+        firstName: "Drive",
+        lastName: "Captain",
+        requiredMeetings: 2,
+        presentMeetings: 1,
+        missedMeetings: 1,
+        attendanceRate: 0.5,
+        lastSeenAt: "2026-01-16T20:00:00.000Z",
+        openSessionDates: ["2026-01-16"],
+        openSessionWarning: true
+      },
+      {
+        studentId: "100001",
+        firstName: "Bench",
+        lastName: "Student",
+        requiredMeetings: 2,
+        presentMeetings: 1,
+        missedMeetings: 1,
+        attendanceRate: 0.5,
+        lastSeenAt: "2026-01-09T20:00:00.000Z",
+        openSessionDates: [],
+        openSessionWarning: false
+      }
+    ]);
+  });
+
+  it("validates report date ranges", () => {
+    expect(reportDateRangeFromSearchParams(new URLSearchParams("startDate=2026-01-02&endDate=2026-01-09"))).toEqual({
+      startDate: "2026-01-02",
+      endDate: "2026-01-09"
+    });
+    expect(() => reportDateRangeFromSearchParams(new URLSearchParams("startDate=2026-01-09&endDate=2026-01-02"))).toThrow("startDate must be on or before endDate");
   });
 
   it("marks missing members as not found", async () => {

@@ -771,21 +771,99 @@ function Events({ session }: { session: DashboardSession }) {
 }
 
 function Reports({ session }: { session: DashboardSession }) {
-  const { data, error, reload } = useApi<{ sessions: Array<Record<string, unknown>> }>("/admin/reports/sessions", session);
   const { data: students } = useApi<{ students: Array<{ student_id: string; first_name: string; last_name: string; active: number }> }>("/admin/students", session);
   const { data: meetingData } = useApi<{ meetings: ScheduledMeeting[] }>("/admin/meetings", session);
+  const [reportStartDate, setReportStartDate] = useState("");
+  const [reportEndDate, setReportEndDate] = useState("");
   const [presenceDate, setPresenceDate] = useState(localDateInputValue());
+  const [selectedMeetingDate, setSelectedMeetingDate] = useState("");
   const [selectedMemberId, setSelectedMemberId] = useState("");
+  const reportQuery = reportRangeQuery(reportStartDate, reportEndDate);
+  const { data: meetingSummary, error: meetingSummaryError, reload: reloadMeetingSummary } = useApi<{ meetings: MeetingSummaryReportRow[] }>(`/admin/reports/meetings${reportQuery}`, session);
+  const { data: rosterSummary, error: rosterSummaryError, reload: reloadRosterSummary } = useApi<{ members: RosterAttendanceSummaryRow[] }>(`/admin/reports/roster-attendance${reportQuery}`, session);
+  const { data: sessionRows, error: sessionError, reload: reloadSessions } = useApi<{ sessions: Array<Record<string, unknown>> }>(`/admin/reports/sessions${reportQuery}`, session);
   const { data: presence, error: presenceError, reload: reloadPresence } = useApi<PresenceReport>(`/admin/reports/presence?date=${presenceDate}`, session);
   const { data: memberReport, error: memberError, reload: reloadMember } = useOptionalApi<MemberAttendanceReport>(
-    selectedMemberId ? `/admin/reports/member?studentId=${encodeURIComponent(selectedMemberId)}` : undefined,
+    selectedMemberId ? `/admin/reports/member?studentId=${encodeURIComponent(selectedMemberId)}${reportQuery.replace("?", "&")}` : undefined,
     session
   );
   const activeStudents = students?.students.filter((student) => student.active) ?? [];
+  const meetingRows = meetingSummary?.meetings ?? [];
+  const absenceDate = meetingRows.some((meeting) => meeting.meetingDate === selectedMeetingDate) ? selectedMeetingDate : meetingRows[0]?.meetingDate ?? "";
+  const { data: absences, error: absencesError, reload: reloadAbsences } = useOptionalApi<MeetingAbsenceReport>(
+    absenceDate ? `/admin/reports/meeting-absences?date=${absenceDate}` : undefined,
+    session
+  );
   const selectedMeeting = meetingData?.meetings.find((meeting) => meeting.meetingDate === presenceDate);
 
   return (
     <>
+      <section>
+        <h2>Meeting Attendance</h2>
+        <div className="toolbar wrap">
+          <label>
+            From
+            <input value={reportStartDate} onChange={(event) => setReportStartDate(event.target.value)} type="date" />
+          </label>
+          <label>
+            To
+            <input value={reportEndDate} onChange={(event) => setReportEndDate(event.target.value)} type="date" />
+          </label>
+          <button onClick={() => {
+            reloadMeetingSummary();
+            reloadRosterSummary();
+            reloadSessions();
+            reloadMember();
+            reloadAbsences();
+          }}>Refresh Range</button>
+        </div>
+        <p className="report-context">Required meetings count missed active members. Optional meetings show attendance without missed counts. Scheduled rows marked zero scans had no check-ins or manual corrections.</p>
+        <div className="grid compact-grid">
+          <Metric label="Required Meetings" value={meetingRows.filter((meeting) => meeting.required).length} />
+          <Metric label="Zero-Scan Required" value={meetingRows.filter((meeting) => meeting.required && meeting.zeroScan).length} />
+          <Metric label="Open Check-Ins" value={meetingRows.reduce((sum, meeting) => sum + meeting.openCheckIns, 0)} />
+        </div>
+        <DataTable
+          rows={meetingRows.map((meeting) => ({
+            date: meeting.meetingDate,
+            title: meeting.title ?? "Unscheduled attendance",
+            attendance: meeting.required ? "required" : "optional",
+            time: meetingTimeRange({ startsAt: meeting.startsAt, endsAt: meeting.endsAt }),
+            scheduled: meeting.scheduled ? "yes" : "attendance-only",
+            present: meeting.presentCount,
+            absent: meeting.required ? meeting.absentCount : "",
+            openCheckIns: meeting.openCheckIns,
+            note: meeting.zeroScan ? "zero scans" : ""
+          }))}
+          columns={["date", "title", "attendance", "time", "scheduled", "present", "absent", "openCheckIns", "note"]}
+        />
+        {meetingSummaryError ? <p className="error">{meetingSummaryError}</p> : null}
+      </section>
+
+      <section>
+        <h2>Meeting Absences</h2>
+        <div className="toolbar wrap">
+          <select value={absenceDate} onChange={(event) => setSelectedMeetingDate(event.target.value)}>
+            <option value="">Select meeting</option>
+            {meetingRows.map((meeting) => (
+              <option key={meeting.meetingDate} value={meeting.meetingDate}>
+                {meeting.meetingDate} - {meeting.title ?? "Unscheduled attendance"}
+              </option>
+            ))}
+          </select>
+          <button disabled={!absenceDate} onClick={reloadAbsences}>Refresh Absences</button>
+        </div>
+        <p className="report-context">
+          {absences
+            ? absences.required
+              ? `${absences.absentCount} active ${absences.absentCount === 1 ? "member missed" : "members missed"} ${absences.title ?? absences.meetingDate}.`
+              : "Optional meetings do not create missed-meeting rows."
+            : "Pick a meeting to see the active members who missed it."}
+        </p>
+        {absencesError ? <p className="error">{absencesError}</p> : null}
+        <DataTable rows={absences?.rows ?? []} columns={["studentId", "firstName", "lastName"]} />
+      </section>
+
       <section>
         <h2>Daily Presence</h2>
         <div className="toolbar wrap">
@@ -831,18 +909,39 @@ function Reports({ session }: { session: DashboardSession }) {
               <Metric label="Required Missed" value={memberReport.missedMeetings} />
             </div>
             <h3>{memberReport.firstName} {memberReport.lastName}</h3>
-            <p className="report-context">Optional meetings are excluded from this attendance rate and missed-meeting count.</p>
+            <p className="report-context">Optional meetings are excluded from this attendance rate and missed-meeting count. The range filter above applies here too.</p>
             <DataTable
               rows={[{
                 requiredMeetings: memberReport.totalMeetings,
+                lastSeenAt: memberReport.lastSeenAt ?? "",
                 presentDates: memberReport.presentDates.join(", "),
                 absentDates: memberReport.absentDates.join(", "),
                 openSessionDates: memberReport.openSessionDates.join(", ")
               }]}
-              columns={["requiredMeetings", "presentDates", "absentDates", "openSessionDates"]}
+              columns={["requiredMeetings", "lastSeenAt", "presentDates", "absentDates", "openSessionDates"]}
             />
           </>
         ) : null}
+      </section>
+
+      <section>
+        <h2>Roster Attendance</h2>
+        <p className="report-context">Every active member is listed for the selected range. Open check-ins flag sessions that still need a checkout or mentor review.</p>
+        {rosterSummaryError ? <p className="error">{rosterSummaryError}</p> : null}
+        <DataTable
+          rows={(rosterSummary?.members ?? []).map((member) => ({
+            studentId: member.studentId,
+            firstName: member.firstName,
+            lastName: member.lastName,
+            requiredMeetings: member.requiredMeetings,
+            present: member.presentMeetings,
+            missed: member.missedMeetings,
+            attendance: formatPercent(member.attendanceRate),
+            lastSeenAt: member.lastSeenAt ?? "",
+            openCheckIns: member.openSessionWarning ? member.openSessionDates.join(", ") : ""
+          }))}
+          columns={["studentId", "firstName", "lastName", "requiredMeetings", "present", "missed", "attendance", "lastSeenAt", "openCheckIns"]}
+        />
       </section>
 
       <form className="toolbar" onSubmit={async (event) => {
@@ -855,7 +954,10 @@ function Reports({ session }: { session: DashboardSession }) {
           occurredAt: new Date(form.occurredAt).toISOString()
         }, session);
         formElement.reset();
-        reload();
+        reloadSessions();
+        reloadMeetingSummary();
+        reloadRosterSummary();
+        reloadAbsences();
       }}>
         <input name="studentId" placeholder="Student ID" required />
         <input name="occurredAt" type="datetime-local" required />
@@ -866,16 +968,30 @@ function Reports({ session }: { session: DashboardSession }) {
         <input name="reason" placeholder="Correction reason" required />
         <button>Add manual event</button>
       </form>
-      <Table title="Attendance sessions" error={error} rows={data?.sessions ?? []} columns={["meeting_date", "meeting_title", "required", "has_attendance", "student_id", "check_in_at", "check_out_at", "status"]} />
+      <Table title="Attendance session audit" error={sessionError} rows={sessionRows?.sessions ?? []} columns={["meeting_date", "meeting_title", "required", "has_attendance", "student_id", "check_in_at", "check_out_at", "status"]} />
     </>
   );
 }
 
 function LegacyExport({ session }: { session: DashboardSession }) {
-  const { data, error } = useApi<Record<string, unknown>>("/admin/export/legacy-sheets", session);
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const { data, error, reload } = useApi<Record<string, unknown>>(`/admin/export/legacy-sheets${reportRangeQuery(startDate, endDate)}`, session);
   return (
     <section>
-      <h2>Legacy Google Sheets Export</h2>
+      <h2>Google Sheets Export</h2>
+      <div className="toolbar wrap">
+        <label>
+          From
+          <input value={startDate} onChange={(event) => setStartDate(event.target.value)} type="date" />
+        </label>
+        <label>
+          To
+          <input value={endDate} onChange={(event) => setEndDate(event.target.value)} type="date" />
+        </label>
+        <button onClick={reload}>Refresh Export</button>
+      </div>
+      <p className="report-context">Mentor ranges include MeetingSummary, MeetingAbsences, and RosterAttendance. Legacy login, logout, scheduled meeting, and member summary ranges remain in the same payload.</p>
       {error ? <p className="error">{error}</p> : <pre>{JSON.stringify(data, null, 2)}</pre>}
     </section>
   );
@@ -1113,7 +1229,7 @@ function MeetingRequirementBadge({ required }: { required: boolean }) {
   return <span className={`status-badge ${required ? "active" : "optional"}`}>{required ? "Required" : "Optional"}</span>;
 }
 
-function meetingTimeRange(meeting: ScheduledMeeting) {
+function meetingTimeRange(meeting: Pick<ScheduledMeeting, "startsAt" | "endsAt">) {
   if (!meeting.startsAt && !meeting.endsAt) return "";
   if (meeting.startsAt && meeting.endsAt) return `${formatTime(meeting.startsAt)} - ${formatTime(meeting.endsAt)}`;
   if (meeting.startsAt) return `Starts ${formatTime(meeting.startsAt)}`;
@@ -1136,17 +1252,65 @@ interface PresenceReport {
   rows: Array<Record<string, unknown>>;
 }
 
+interface MeetingSummaryReportRow {
+  meetingDate: string;
+  title: string | null;
+  required: boolean;
+  startsAt?: string;
+  endsAt?: string;
+  scheduled: boolean;
+  hasAttendance: boolean;
+  zeroScan: boolean;
+  presentCount: number;
+  absentCount: number;
+  openCheckIns: number;
+}
+
+interface MeetingAbsenceReport {
+  meetingDate: string;
+  title: string | null;
+  required: boolean;
+  startsAt?: string;
+  endsAt?: string;
+  absentCount: number;
+  rows: Array<Record<string, unknown>>;
+}
+
 interface MemberAttendanceReport {
   studentId: string;
   firstName: string;
   lastName: string;
+  startDate?: string;
+  endDate?: string;
   totalMeetings: number;
   presentMeetings: number;
   missedMeetings: number;
   attendanceRate: number | null;
+  lastSeenAt?: string;
   presentDates: string[];
   absentDates: string[];
   openSessionDates: string[];
+}
+
+interface RosterAttendanceSummaryRow {
+  studentId: string;
+  firstName: string;
+  lastName: string;
+  requiredMeetings: number;
+  presentMeetings: number;
+  missedMeetings: number;
+  attendanceRate: number | null;
+  lastSeenAt?: string;
+  openSessionDates: string[];
+  openSessionWarning: boolean;
+}
+
+function reportRangeQuery(startDate: string, endDate: string) {
+  const params = new URLSearchParams();
+  if (startDate) params.set("startDate", startDate);
+  if (endDate) params.set("endDate", endDate);
+  const query = params.toString();
+  return query ? `?${query}` : "";
 }
 
 function friendlyEnrollmentError(error: unknown) {

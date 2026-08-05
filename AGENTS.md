@@ -85,14 +85,14 @@ npm --workspace <package> run <script>
 - Kiosk scan acknowledgements cover known accepted scans, duplicates, unknown fingerprints, rejected/inactive members, and optional attendance summaries.
 - Dashboard kiosk controls can queue per-kiosk remote commands for active kiosks: restart display, restart kiosk services, or reboot system. Kiosk services poll the API for these commands with their kiosk token and execute only allowlisted local actions.
 - Remote kiosk reboot requires the Pi sudoers rule installed by `sudo bash apps/kiosk/scripts/install-reboot-sudoers.sh`, which permits only `/usr/bin/systemctl reboot` without an interactive password.
-- Dashboard reports currently include daily presence and per-member attendance. Missed-meeting reporting is not feature-complete until scheduled meetings come from a calendar/list source of truth rather than only dates with attendance sessions.
+- Dashboard reports include scheduled-meeting summaries, zero-scan required meetings, per-meeting absence drilldowns, daily presence, per-member attendance, roster-wide attendance summaries, and mentor-facing export ranges.
 - Dashboard is deployed to Cloudflare Pages project `frc-attendance-dashboard` at `https://frc-attendance-dashboard.pages.dev`.
 - The deployed dashboard build is configured with `VITE_API_BASE_URL=https://frc-attendance-api.frc-attendance.workers.dev` and Google OAuth client `180849199739-v04bktp7rfmimgjpvohmq7pinrrpr337.apps.googleusercontent.com`.
 - Automated dashboard smoke checks on 2026-05-28 confirmed the Pages URL serves, Google sign-in renders, API CORS allows dashboard requests, unauthenticated admin API calls are rejected with `401 Missing admin identity`, and credentialed admin pages load after Google sign-in. Interactive Google sign-in works after adding `https://frc-attendance-dashboard.pages.dev` to the Google OAuth client's Authorized JavaScript origins. Dashboard deployment `https://9c9f9dd1.frc-attendance-dashboard.pages.dev` prevents the production app from using a stale email-only local session when Google OAuth is configured. Dashboard deployment `https://c1a584ae.frc-attendance-dashboard.pages.dev` includes per-kiosk remote restart command buttons. Dashboard deployment `https://933d1d20.frc-attendance-dashboard.pages.dev` shows recent queued/running/completed/failed kiosk command status per kiosk.
 - Dashboard source now renders the local email-only login only when `VITE_GOOGLE_CLIENT_ID` is unset. When Google auth is configured, the login screen presents Google sign-in and clearly states that email-only local login is disabled.
 - The bench Raspberry Pi kiosk `bench-01` is registered in remote D1 and the installed user service on `AttKiosk` points at `https://frc-attendance-api.frc-attendance.workers.dev` via a systemd user drop-in. Offline queue replay against remote D1 was verified on 2026-05-28 with local event `remote-replay-1de1a877-fa2c-482f-b388-335758e663de`, which synced as an accepted scan for student `100001`.
 - SSH to the bench Pi must use the kiosk account explicitly: `ssh attkiosk@AttKiosk`. Do not use plain `ssh AttKiosk`, because that defaults to the local workstation username and fails when the local user is not `attkiosk`.
-- Current feature-completion priority is the meeting calendar/list work: add a scheduled meeting source of truth, integrate reports so zero-scan scheduled meetings count correctly, expose dashboard meeting management, keep the bench Pi/local bench API path at parity, then polish report/export workflows for mentors.
+- Current feature-completion priority is production review/deploy of the mentor-ready scheduled-meeting reporting slice, then polish report/export workflows from real mentor feedback.
 
 ## Development Guardrails
 
@@ -108,12 +108,10 @@ npm --workspace <package> run <script>
 
 ## Future Work Priorities
 
-- Make attendance reporting feature-complete around scheduled meetings:
-  1. Add a durable meeting calendar/list source of truth for scheduled team meetings.
-  2. Update report builders so scheduled meetings with zero scans are included in missed-meeting and attendance calculations.
-  3. Add dashboard meeting management for mentors to create, edit, cancel, and review scheduled meetings.
-  4. Keep the bench Pi/local bench API workflow at parity so meeting/report behavior can be validated on hardware before production deploys.
-  5. Polish follow-up report/export flows once scheduled-meeting accounting is reliable.
+- Review and deploy the mentor-ready scheduled-meeting reporting slice, then validate it against production mentor workflows:
+  1. Review scheduled meeting summaries, absence drilldowns, roster attendance, and export ranges with real roster data.
+  2. Deploy the Worker and dashboard after review.
+  3. Polish report/export formatting or Google Sheets integration based on mentor feedback.
 - Polish fingerprint administration by showing current slot mappings, auto-suggesting the next available slot, supporting delete/remap, and confirming before overwriting occupied slots.
 - Improve kiosk messaging with richer API-provided member messages, configurable attendance summary display, and clearer offline acknowledgements.
 - Prepare for multi-kiosk operation with real kiosk token provisioning, per-kiosk status/sync health, enrollment visibility, and delayed sync tests.

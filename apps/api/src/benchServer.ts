@@ -313,19 +313,42 @@ const server = createServer(async (request, response) => {
       return;
     }
 
-    if (request.method === "GET" && request.url === "/admin/reports/sessions") {
-      sendJson(response, 200, { sessions: buildBenchAttendanceSessionReport() });
+    if (request.method === "GET" && request.url?.startsWith("/admin/reports/sessions")) {
+      const url = new URL(request.url, `http://${request.headers.host ?? "localhost"}`);
+      sendJson(response, 200, { sessions: buildBenchAttendanceSessionReport(benchReportDateRangeFromUrl(url)) });
+      return;
+    }
+
+    if (request.method === "GET" && request.url?.startsWith("/admin/reports/meetings")) {
+      const url = new URL(request.url, `http://${request.headers.host ?? "localhost"}`);
+      sendJson(response, 200, { meetings: buildBenchMeetingSummaryReport(benchReportDateRangeFromUrl(url)) });
+      return;
+    }
+
+    if (request.method === "GET" && request.url?.startsWith("/admin/reports/meeting-absences")) {
+      const url = new URL(request.url, `http://${request.headers.host ?? "localhost"}`);
+      sendJson(response, 200, buildBenchMeetingAbsenceReport(requireNonEmptyString(url.searchParams.get("date") ?? undefined, "date")));
+      return;
+    }
+
+    if (request.method === "GET" && request.url?.startsWith("/admin/reports/roster-attendance")) {
+      const url = new URL(request.url, `http://${request.headers.host ?? "localhost"}`);
+      sendJson(response, 200, { members: buildBenchRosterAttendanceSummary(benchReportDateRangeFromUrl(url)) });
       return;
     }
 
     if (request.method === "GET" && request.url?.startsWith("/admin/reports/member")) {
       const url = new URL(request.url, `http://${request.headers.host ?? "localhost"}`);
-      sendJson(response, 200, buildMemberAttendanceReport(requireNonEmptyString(url.searchParams.get("studentId") ?? undefined, "studentId")));
+      sendJson(response, 200, buildMemberAttendanceReport(
+        requireNonEmptyString(url.searchParams.get("studentId") ?? undefined, "studentId"),
+        benchReportDateRangeFromUrl(url)
+      ));
       return;
     }
 
-    if (request.method === "GET" && request.url === "/admin/export/legacy-sheets") {
-      sendJson(response, 200, buildBenchLegacySheetExport());
+    if (request.method === "GET" && request.url?.startsWith("/admin/export/legacy-sheets")) {
+      const url = new URL(request.url, `http://${request.headers.host ?? "localhost"}`);
+      sendJson(response, 200, buildBenchLegacySheetExport(benchReportDateRangeFromUrl(url)));
       return;
     }
 
@@ -1002,40 +1025,52 @@ function buildPresenceReport(date = meetingDateForTimestamp(new Date().toISOStri
   };
 }
 
-function buildMemberAttendanceReport(studentId: string) {
+interface BenchReportDateRange {
+  startDate?: string;
+  endDate?: string;
+}
+
+function buildMemberAttendanceReport(studentId: string, range: BenchReportDateRange = {}) {
   const student = db.prepare("SELECT student_id, first_name, last_name FROM students WHERE student_id = ?").get(studentId) as { student_id: string; first_name: string; last_name: string } | undefined;
   if (!student) throw httpError(404, "Member not found");
 
-  const sessions = deriveBenchSessions();
-  const allDates = benchReportMeetingDates(sessions);
+  const sessions = deriveBenchSessions().filter((session) => isDateInRange(session.meetingDate, range));
+  const allDates = benchReportMeetingDates(range);
   const allDateSet = new Set(allDates);
   const studentSessions = sessions.filter((session) => session.studentId === studentId);
   const presentDates = [...new Set(studentSessions.map((session) => session.meetingDate))].filter((date) => allDateSet.has(date));
   const presentDateSet = new Set(presentDates);
   const absentDates = allDates.filter((date) => !presentDateSet.has(date));
+  const lastSeenAt = studentSessions.reduce<string | undefined>((latest, session) => {
+    if (!latest || session.checkInAt > latest) return session.checkInAt;
+    return latest;
+  }, undefined);
 
   return {
     studentId: student.student_id,
     firstName: student.first_name,
     lastName: student.last_name,
+    startDate: range.startDate,
+    endDate: range.endDate,
     totalMeetings: allDates.length,
     presentMeetings: presentDates.length,
     missedMeetings: absentDates.length,
     attendanceRate: allDates.length === 0 ? null : presentDates.length / allDates.length,
+    lastSeenAt,
     presentDates,
     absentDates,
     openSessionDates: studentSessions.filter((session) => session.status === "open" && allDateSet.has(session.meetingDate)).map((session) => session.meetingDate)
   };
 }
 
-function buildBenchAttendanceSessionReport(limit = 500) {
-  const meetings = db.prepare("SELECT meeting_date, title, required FROM scheduled_meetings ORDER BY meeting_date DESC").all() as Array<{
+function buildBenchAttendanceSessionReport(range: BenchReportDateRange = {}, limit = 500) {
+  const meetings = (db.prepare("SELECT meeting_date, title, required FROM scheduled_meetings ORDER BY meeting_date DESC").all() as Array<{
     meeting_date: string;
     title: string;
     required: number;
-  }>;
+  }>).filter((meeting) => isDateInRange(meeting.meeting_date, range));
   const meetingsByDate = new Map(meetings.map((meeting) => [meeting.meeting_date, meeting]));
-  const sessions = deriveBenchSessions();
+  const sessions = deriveBenchSessions().filter((session) => isDateInRange(session.meetingDate, range));
   const sessionDates = new Set(sessions.map((session) => session.meetingDate));
   const sessionRows = sessions.map((session) => {
     const meeting = meetingsByDate.get(session.meetingDate);
@@ -1068,16 +1103,116 @@ function buildBenchAttendanceSessionReport(limit = 500) {
     .slice(0, limit);
 }
 
-function buildBenchLegacySheetExport() {
-  const sessions = deriveBenchSessions();
-  const meetings = db.prepare("SELECT meeting_date, title, required, starts_at, ends_at FROM scheduled_meetings ORDER BY meeting_date").all() as Array<{
+function buildBenchMeetingSummaryReport(range: BenchReportDateRange = {}, limit = 500) {
+  const meetings = (db.prepare("SELECT meeting_date, title, required, starts_at, ends_at FROM scheduled_meetings ORDER BY meeting_date DESC").all() as Array<{
     meeting_date: string;
     title: string;
     required: number;
     starts_at: string | null;
     ends_at: string | null;
+  }>).filter((meeting) => isDateInRange(meeting.meeting_date, range));
+  const sessions = deriveBenchSessions().filter((session) => isDateInRange(session.meetingDate, range));
+  const meetingsByDate = new Map(meetings.map((meeting) => [meeting.meeting_date, meeting]));
+  const sessionsByDate = sessions.reduce<Map<string, { presentCount: number; openCheckIns: number; presentStudents: Set<string> }>>((groups, session) => {
+    const group = groups.get(session.meetingDate) ?? { presentCount: 0, openCheckIns: 0, presentStudents: new Set<string>() };
+    if (!group.presentStudents.has(session.studentId)) {
+      group.presentStudents.add(session.studentId);
+      group.presentCount += 1;
+    }
+    if (session.status === "open") group.openCheckIns += 1;
+    groups.set(session.meetingDate, group);
+    return groups;
+  }, new Map());
+  const activeCount = (db.prepare("SELECT COUNT(*) AS count FROM students WHERE active = 1").get() as { count: number }).count;
+  const hasScheduledMeetings = benchHasScheduledMeetings();
+  const dates = [...new Set([...meetingsByDate.keys(), ...sessionsByDate.keys()])].sort((left, right) => right.localeCompare(left));
+
+  return dates.map((meetingDate) => {
+    const meeting = meetingsByDate.get(meetingDate);
+    const session = sessionsByDate.get(meetingDate);
+    const scheduled = Boolean(meeting);
+    const required = meeting ? Boolean(meeting.required) : !hasScheduledMeetings;
+    const presentCount = session?.presentCount ?? 0;
+    return {
+      meetingDate,
+      title: meeting?.title ?? null,
+      required,
+      startsAt: meeting?.starts_at ?? undefined,
+      endsAt: meeting?.ends_at ?? undefined,
+      scheduled,
+      hasAttendance: Boolean(session),
+      zeroScan: scheduled && !session,
+      presentCount,
+      absentCount: required ? Math.max(activeCount - presentCount, 0) : 0,
+      openCheckIns: session?.openCheckIns ?? 0
+    };
+  }).slice(0, limit);
+}
+
+function buildBenchMeetingAbsenceReport(meetingDate: string) {
+  const date = requireIsoDate(meetingDate, "date");
+  const meeting = db.prepare("SELECT meeting_date, title, required, starts_at, ends_at FROM scheduled_meetings WHERE meeting_date = ?").get(date) as {
+    meeting_date: string;
+    title: string;
+    required: number;
+    starts_at: string | null;
+    ends_at: string | null;
+  } | undefined;
+  const presentIds = new Set(deriveBenchSessions().filter((session) => session.meetingDate === date).map((session) => session.studentId));
+  const required = meeting ? Boolean(meeting.required) : !benchHasScheduledMeetings() && presentIds.size > 0;
+  const students = db.prepare("SELECT student_id, first_name, last_name FROM students WHERE active = 1 ORDER BY last_name, first_name").all() as Array<{
+    student_id: string;
+    first_name: string;
+    last_name: string;
   }>;
-  const activeStudents = db.prepare("SELECT student_id FROM students WHERE active = 1 ORDER BY student_id").all() as Array<{ student_id: string }>;
+  const rows = required
+    ? students
+      .filter((student) => !presentIds.has(student.student_id))
+      .map((student) => ({ studentId: student.student_id, firstName: student.first_name, lastName: student.last_name }))
+    : [];
+
+  return {
+    meetingDate: date,
+    title: meeting?.title ?? null,
+    required,
+    startsAt: meeting?.starts_at ?? undefined,
+    endsAt: meeting?.ends_at ?? undefined,
+    absentCount: rows.length,
+    rows
+  };
+}
+
+function buildBenchRosterAttendanceSummary(range: BenchReportDateRange = {}) {
+  const activeStudents = db.prepare("SELECT student_id FROM students WHERE active = 1 ORDER BY last_name, first_name").all() as Array<{ student_id: string }>;
+  return activeStudents.map((student) => {
+    const report = buildMemberAttendanceReport(student.student_id, range);
+    return {
+      studentId: report.studentId,
+      firstName: report.firstName,
+      lastName: report.lastName,
+      requiredMeetings: report.totalMeetings,
+      presentMeetings: report.presentMeetings,
+      missedMeetings: report.missedMeetings,
+      attendanceRate: report.attendanceRate,
+      lastSeenAt: report.lastSeenAt,
+      openSessionDates: report.openSessionDates,
+      openSessionWarning: report.openSessionDates.length > 0
+    };
+  });
+}
+
+function buildBenchLegacySheetExport(range: BenchReportDateRange = {}) {
+  const sessions = deriveBenchSessions().filter((session) => isDateInRange(session.meetingDate, range));
+  const meetings = (db.prepare("SELECT meeting_date, title, required, starts_at, ends_at FROM scheduled_meetings ORDER BY meeting_date").all() as Array<{
+    meeting_date: string;
+    title: string;
+    required: number;
+    starts_at: string | null;
+    ends_at: string | null;
+  }>).filter((meeting) => isDateInRange(meeting.meeting_date, range));
+  const meetingSummary = buildBenchMeetingSummaryReport(range);
+  const rosterAttendance = buildBenchRosterAttendanceSummary(range);
+  const requiredMeetingAbsences = meetingSummary.filter((meeting) => meeting.required).map((meeting) => buildBenchMeetingAbsenceReport(meeting.meetingDate));
   const sessionCountsByDate = sessions.reduce<Map<string, number>>((counts, session) => {
     counts.set(session.meetingDate, (counts.get(session.meetingDate) ?? 0) + 1);
     return counts;
@@ -1086,6 +1221,36 @@ function buildBenchLegacySheetExport() {
   return {
     generatedAt: new Date().toISOString(),
     ranges: {
+      MeetingSummary: meetingSummary.map((meeting) => [
+        formatLegacyDate(meeting.meetingDate),
+        meeting.title ?? "Unscheduled attendance",
+        meeting.required ? "required" : "optional",
+        meeting.startsAt ? formatLegacyTime(meeting.startsAt) : "",
+        meeting.endsAt ? formatLegacyTime(meeting.endsAt) : "",
+        meeting.scheduled ? "scheduled" : "attendance-only",
+        meeting.presentCount,
+        meeting.required ? meeting.absentCount : "",
+        meeting.openCheckIns,
+        meeting.zeroScan ? "zero scans" : ""
+      ]),
+      MeetingAbsences: requiredMeetingAbsences.flatMap((meeting) => meeting.rows.map((student) => [
+        formatLegacyDate(meeting.meetingDate),
+        meeting.title ?? "Required attendance",
+        student.studentId,
+        student.firstName,
+        student.lastName
+      ])),
+      RosterAttendance: rosterAttendance.map((report) => [
+        report.studentId,
+        report.firstName,
+        report.lastName,
+        report.requiredMeetings,
+        report.presentMeetings,
+        report.missedMeetings,
+        report.attendanceRate === null ? "" : Math.round(report.attendanceRate * 1000) / 1000,
+        report.lastSeenAt ? formatLegacyDate(report.lastSeenAt.slice(0, 10)) : "",
+        report.openSessionWarning ? "open check-in" : ""
+      ]),
       AttendanceLogIn: sessions.map((session) => [
         session.studentId,
         formatLegacyDate(session.meetingDate),
@@ -1106,31 +1271,50 @@ function buildBenchLegacySheetExport() {
         meeting.ends_at ? formatLegacyTime(meeting.ends_at) : "",
         sessionCountsByDate.get(meeting.meeting_date) ?? 0
       ]),
-      MemberAttendanceSummary: activeStudents.map((student) => {
-        const report = buildMemberAttendanceReport(student.student_id);
-        return [
-          report.studentId,
-          report.firstName,
-          report.lastName,
-          report.totalMeetings,
-          report.presentMeetings,
-          report.missedMeetings,
-          report.attendanceRate === null ? "" : Math.round(report.attendanceRate * 1000) / 1000,
-          report.presentDates.map(formatLegacyDate).join(", "),
-          report.absentDates.map(formatLegacyDate).join(", ")
-        ];
-      })
+      MemberAttendanceSummary: rosterAttendance.map((report) => [
+        report.studentId,
+        report.firstName,
+        report.lastName,
+        report.requiredMeetings,
+        report.presentMeetings,
+        report.missedMeetings,
+        report.attendanceRate === null ? "" : Math.round(report.attendanceRate * 1000) / 1000,
+        report.lastSeenAt ? formatLegacyDate(report.lastSeenAt.slice(0, 10)) : "",
+        report.openSessionWarning ? "open check-in" : ""
+      ])
     }
   };
 }
 
-function benchReportMeetingDates(sessions: AttendanceSession[]): string[] {
-  const hasScheduledMeetings = (db.prepare("SELECT COUNT(*) AS count FROM scheduled_meetings").get() as { count: number }).count > 0;
-  if (hasScheduledMeetings) {
-    const rows = db.prepare("SELECT meeting_date FROM scheduled_meetings WHERE required = 1 ORDER BY meeting_date").all() as Array<{ meeting_date: string }>;
+function benchReportMeetingDates(range: BenchReportDateRange): string[] {
+  if (benchHasScheduledMeetings()) {
+    const rows = (db.prepare("SELECT meeting_date FROM scheduled_meetings WHERE required = 1 ORDER BY meeting_date").all() as Array<{ meeting_date: string }>)
+      .filter((row) => isDateInRange(row.meeting_date, range));
     return [...new Set(rows.map((row) => row.meeting_date))];
   }
-  return [...new Set(sessions.map((session) => session.meetingDate))].sort();
+  return [...new Set(deriveBenchSessions().filter((session) => isDateInRange(session.meetingDate, range)).map((session) => session.meetingDate))].sort();
+}
+
+function benchHasScheduledMeetings(): boolean {
+  return (db.prepare("SELECT COUNT(*) AS count FROM scheduled_meetings").get() as { count: number }).count > 0;
+}
+
+function benchReportDateRangeFromUrl(url: URL): BenchReportDateRange {
+  const startDate = optionalBenchIsoDate(url.searchParams.get("startDate"), "startDate");
+  const endDate = optionalBenchIsoDate(url.searchParams.get("endDate"), "endDate");
+  if (startDate && endDate && startDate > endDate) throw httpError(400, "startDate must be on or before endDate");
+  return { startDate, endDate };
+}
+
+function optionalBenchIsoDate(value: string | null, fieldName: string): string | undefined {
+  if (value === null || value === "") return undefined;
+  return requireIsoDate(value, fieldName);
+}
+
+function isDateInRange(meetingDate: string, range: BenchReportDateRange): boolean {
+  if (range.startDate && meetingDate < range.startDate) return false;
+  if (range.endDate && meetingDate > range.endDate) return false;
+  return true;
 }
 
 function deriveBenchSessions(): AttendanceSession[] {

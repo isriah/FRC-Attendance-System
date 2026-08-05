@@ -1,16 +1,30 @@
 import type { Env } from "./env";
-import { buildMemberAttendanceReport } from "./reports";
+import { buildMeetingAbsenceReport, buildMeetingSummaryReport, buildRosterAttendanceSummary, type ReportDateRange } from "./reports";
 
-export async function buildLegacySheetExport(env: Env) {
+export async function buildLegacySheetExport(env: Env, range: ReportDateRange = {}) {
   const sessions = await env.DB.prepare(
-    "SELECT student_id, meeting_date, check_in_at, check_out_at FROM attendance_sessions ORDER BY student_id, meeting_date"
-  ).all<{ student_id: string; meeting_date: string; check_in_at: string; check_out_at: string | null }>();
+    `
+      SELECT student_id, meeting_date, check_in_at, check_out_at
+      FROM attendance_sessions
+      ${whereDateRange("meeting_date", range)}
+      ORDER BY student_id, meeting_date
+    `
+  ).bind(...dateRangeParams(range)).all<{ student_id: string; meeting_date: string; check_in_at: string; check_out_at: string | null }>();
   const meetings = await env.DB.prepare(
-    "SELECT meeting_date, title, required, starts_at, ends_at FROM scheduled_meetings ORDER BY meeting_date"
-  ).all<{ meeting_date: string; title: string; required: number; starts_at: string | null; ends_at: string | null }>();
-  const activeStudents = await env.DB.prepare(
-    "SELECT student_id FROM students WHERE active = 1 ORDER BY student_id"
-  ).all<{ student_id: string }>();
+    `
+      SELECT meeting_date, title, required, starts_at, ends_at
+      FROM scheduled_meetings
+      ${whereDateRange("meeting_date", range)}
+      ORDER BY meeting_date
+    `
+  ).bind(...dateRangeParams(range)).all<{ meeting_date: string; title: string; required: number; starts_at: string | null; ends_at: string | null }>();
+  const [meetingSummary, rosterAttendance] = await Promise.all([
+    buildMeetingSummaryReport(env, range),
+    buildRosterAttendanceSummary(env, range)
+  ]);
+  const requiredMeetingAbsences = await Promise.all(
+    meetingSummary.filter((meeting) => meeting.required).map((meeting) => buildMeetingAbsenceReport(env, meeting.meetingDate))
+  );
 
   const logInRows = sessions.results.map((session) => [
     session.student_id,
@@ -36,30 +50,53 @@ export async function buildLegacySheetExport(env: Env) {
     meeting.ends_at ? formatLegacyTime(meeting.ends_at) : "",
     sessionCountsByDate.get(meeting.meeting_date) ?? 0
   ]);
-  const memberSummaryRows = await Promise.all(activeStudents.results.map(async (student) => {
-    const report = await buildMemberAttendanceReport(env, student.student_id);
-    return [
-      report.studentId,
-      report.firstName,
-      report.lastName,
-      report.totalMeetings,
-      report.presentMeetings,
-      report.missedMeetings,
-      report.attendanceRate === null ? "" : Math.round(report.attendanceRate * 1000) / 1000,
-      report.presentDates.map(formatLegacyDate).join(", "),
-      report.absentDates.map(formatLegacyDate).join(", ")
-    ];
-  }));
+  const rosterAttendanceRows = rosterAttendance.map((report) => [
+    report.studentId,
+    report.firstName,
+    report.lastName,
+    report.requiredMeetings,
+    report.presentMeetings,
+    report.missedMeetings,
+    formatRate(report.attendanceRate),
+    report.lastSeenAt ? formatLegacyDate(report.lastSeenAt.slice(0, 10)) : "",
+    report.openSessionWarning ? "open check-in" : ""
+  ]);
+  const meetingSummaryRows = meetingSummary.map((meeting) => [
+    formatLegacyDate(meeting.meetingDate),
+    meeting.title ?? "Unscheduled attendance",
+    meeting.required ? "required" : "optional",
+    meeting.startsAt ? formatLegacyTime(meeting.startsAt) : "",
+    meeting.endsAt ? formatLegacyTime(meeting.endsAt) : "",
+    meeting.scheduled ? "scheduled" : "attendance-only",
+    meeting.presentCount,
+    meeting.required ? meeting.absentCount : "",
+    meeting.openCheckIns,
+    meeting.zeroScan ? "zero scans" : ""
+  ]);
+  const meetingAbsenceRows = requiredMeetingAbsences.flatMap((meeting) => meeting.rows.map((student) => [
+    formatLegacyDate(meeting.meetingDate),
+    meeting.title ?? "Required attendance",
+    student.studentId,
+    student.firstName,
+    student.lastName
+  ]));
 
   return {
     generatedAt: new Date().toISOString(),
     ranges: {
+      MeetingSummary: meetingSummaryRows,
+      MeetingAbsences: meetingAbsenceRows,
+      RosterAttendance: rosterAttendanceRows,
       AttendanceLogIn: logInRows,
       AttendanceLogOut: logOutRows,
       ScheduledMeetings: meetingRows,
-      MemberAttendanceSummary: memberSummaryRows
+      MemberAttendanceSummary: rosterAttendanceRows
     }
   };
+}
+
+function formatRate(rate: number | null): number | "" {
+  return rate === null ? "" : Math.round(rate * 1000) / 1000;
 }
 
 function formatLegacyDate(meetingDate: string): string {
@@ -74,4 +111,15 @@ function formatLegacyTime(iso: string): string {
     hour12: true,
     timeZone: "America/New_York"
   }).format(new Date(iso));
+}
+
+function whereDateRange(column: string, range: ReportDateRange): string {
+  const clauses: string[] = [];
+  if (range.startDate) clauses.push(`${column} >= ?`);
+  if (range.endDate) clauses.push(`${column} <= ?`);
+  return clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+}
+
+function dateRangeParams(range: ReportDateRange): string[] {
+  return [range.startDate, range.endDate].filter((value): value is string => Boolean(value));
 }

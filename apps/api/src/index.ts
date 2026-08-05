@@ -6,7 +6,7 @@ import { buildLegacySheetExport } from "./export";
 import { errorResponse, json, noContent, optionsResponse, readJson } from "./http";
 import { claimPendingKioskCommands, completeKioskCommand, createKioskCommand, listRecentKioskCommands, requireKioskCommandAction } from "./kioskCommands";
 import { createScheduledMeeting, deleteScheduledMeeting, listScheduledMeetings, updateScheduledMeeting, type ScheduledMeetingInput } from "./meetings";
-import { buildAttendanceSessionReport, buildMemberAttendanceReport, buildPresenceReport } from "./reports";
+import { buildAttendanceSessionReport, buildMeetingAbsenceReport, buildMeetingSummaryReport, buildMemberAttendanceReport, buildPresenceReport, buildRosterAttendanceSummary, reportDateRangeFromSearchParams } from "./reports";
 import { listActiveRoster, syncRoster, type RosterMemberInput } from "./roster";
 
 export default {
@@ -156,7 +156,22 @@ export default {
 
       if (route === "GET /admin/reports/sessions") {
         await requireAdmin(request, env);
-        return json({ sessions: await buildAttendanceSessionReport(env) });
+        return json({ sessions: await buildAttendanceSessionReport(env, reportDateRangeFromSearchParams(url.searchParams)) });
+      }
+
+      if (route === "GET /admin/reports/meetings") {
+        await requireAdmin(request, env);
+        return json({ meetings: await buildMeetingSummaryReport(env, reportDateRangeFromSearchParams(url.searchParams)) });
+      }
+
+      if (route === "GET /admin/reports/meeting-absences") {
+        await requireAdmin(request, env);
+        return json(await buildMeetingAbsenceReport(env, requireNonEmptyString(url.searchParams.get("date") ?? undefined, "date")));
+      }
+
+      if (route === "GET /admin/reports/roster-attendance") {
+        await requireAdmin(request, env);
+        return json({ members: await buildRosterAttendanceSummary(env, reportDateRangeFromSearchParams(url.searchParams)) });
       }
 
       if (route === "GET /admin/reports/presence") {
@@ -166,12 +181,16 @@ export default {
 
       if (route === "GET /admin/reports/member") {
         await requireAdmin(request, env);
-        return json(await buildMemberAttendanceReport(env, requireNonEmptyString(url.searchParams.get("studentId") ?? undefined, "studentId")));
+        return json(await buildMemberAttendanceReport(
+          env,
+          requireNonEmptyString(url.searchParams.get("studentId") ?? undefined, "studentId"),
+          reportDateRangeFromSearchParams(url.searchParams)
+        ));
       }
 
       if (route === "GET /admin/export/legacy-sheets") {
         await requireAdmin(request, env);
-        return json(await buildLegacySheetExport(env));
+        return json(await buildLegacySheetExport(env, reportDateRangeFromSearchParams(url.searchParams)));
       }
 
       return json({ error: "Not found" }, { status: 404 });

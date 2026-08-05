@@ -16,7 +16,7 @@ describe("legacy export", () => {
     expect(result.ranges.AttendanceLogOut).toHaveLength(1);
   });
 
-  it("exports scheduled meetings and required attendance summaries without fake log rows", async () => {
+  it("exports mentor-ready meeting, absence, and roster attendance ranges without fake log rows", async () => {
     const env = createTestEnv();
     insertStudent(env, "100001", "Bench", "Student");
     insertStudent(env, "100002", "Drive", "Captain");
@@ -27,13 +27,43 @@ describe("legacy export", () => {
     const result = await buildLegacySheetExport(env);
 
     expect(result.ranges.AttendanceLogIn).toHaveLength(1);
+    expect(result.ranges.MeetingSummary).toEqual([
+      ["1/3/2026", "Optional Demo", "optional", "", "", "scheduled", 0, "", 0, "zero scans"],
+      ["1/2/2026", "Build Night", "required", "", "", "scheduled", 1, 1, 1, ""]
+    ]);
+    expect(result.ranges.MeetingAbsences).toEqual([
+      ["1/2/2026", "Build Night", "100002", "Drive", "Captain"]
+    ]);
+    expect(result.ranges.RosterAttendance).toEqual([
+      ["100002", "Drive", "Captain", 1, 0, 1, 0, "", ""],
+      ["100001", "Bench", "Student", 1, 1, 0, 1, "1/2/2026", "open check-in"]
+    ]);
     expect(result.ranges.ScheduledMeetings).toEqual([
       ["1/2/2026", "Build Night", "required", "", "", 1],
       ["1/3/2026", "Optional Demo", "optional", "", "", 0]
     ]);
     expect(result.ranges.MemberAttendanceSummary).toEqual([
-      ["100001", "Bench", "Student", 1, 1, 0, 1, "1/2/2026", ""],
-      ["100002", "Drive", "Captain", 1, 0, 1, 0, "", "1/2/2026"]
+      ["100002", "Drive", "Captain", 1, 0, 1, 0, "", ""],
+      ["100001", "Bench", "Student", 1, 1, 0, 1, "1/2/2026", "open check-in"]
+    ]);
+  });
+
+  it("filters export ranges by date range", async () => {
+    const env = createTestEnv();
+    insertStudent(env, "100001", "Bench", "Student");
+    insertMeeting(env, "2026-01-02", "Week 1", 1);
+    insertMeeting(env, "2026-01-09", "Week 2", 1);
+    insertSession(env, "100001", "2026-01-02", "2026-01-02T20:00:00.000Z", null, "open");
+    insertSession(env, "100001", "2026-01-09", "2026-01-09T20:00:00.000Z", null, "open");
+
+    const result = await buildLegacySheetExport(env, { startDate: "2026-01-09", endDate: "2026-01-09" });
+
+    expect(result.ranges.AttendanceLogIn).toEqual([["100001", "1/9/2026", "3:00 PM"]]);
+    expect(result.ranges.MeetingSummary).toEqual([
+      ["1/9/2026", "Week 2", "required", "", "", "scheduled", 1, 0, 1, ""]
+    ]);
+    expect(result.ranges.RosterAttendance).toEqual([
+      ["100001", "Bench", "Student", 1, 1, 0, 1, "1/9/2026", "open check-in"]
     ]);
   });
 });
