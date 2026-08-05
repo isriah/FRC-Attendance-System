@@ -95,6 +95,94 @@ describe("kiosk sync acknowledgements", () => {
       message: "Member is not active in the roster."
     });
   });
+
+  it("rebuilds sessions by scan time when kiosks sync delayed events out of order", async () => {
+    const env = createTestEnv();
+
+    await syncKioskEvents(env, "pit-01", [{
+      localEventId: "pit-late-checkout",
+      studentId: "100001",
+      occurredAt: "2026-01-02T22:00:00.000Z",
+      source: "fingerprint"
+    }]);
+
+    await syncKioskEvents(env, "bench-01", [{
+      localEventId: "bench-early-checkin",
+      studentId: "100001",
+      occurredAt: "2026-01-02T20:00:00.000Z",
+      source: "fingerprint"
+    }]);
+
+    const sessions = await env.DB.prepare(
+      "SELECT student_id, meeting_date, check_in_at, check_out_at, status, source_event_ids FROM attendance_sessions ORDER BY check_in_at ASC"
+    ).all<{
+      student_id: string;
+      meeting_date: string;
+      check_in_at: string;
+      check_out_at: string | null;
+      status: string;
+      source_event_ids: string;
+    }>();
+
+    expect(sessions.results).toEqual([{
+      student_id: "100001",
+      meeting_date: "2026-01-02",
+      check_in_at: "2026-01-02T20:00:00.000Z",
+      check_out_at: "2026-01-02T22:00:00.000Z",
+      status: "closed",
+      source_event_ids: JSON.stringify(["bench-01:bench-early-checkin", "pit-01:pit-late-checkout"])
+    }]);
+  });
+
+  it("keeps delayed multi-kiosk scans in chronological session pairs", async () => {
+    const env = createTestEnv();
+
+    await syncKioskEvents(env, "door-02", [{
+      localEventId: "door-return",
+      studentId: "100001",
+      occurredAt: "2026-01-02T22:30:00.000Z",
+      source: "fingerprint"
+    }]);
+
+    await syncKioskEvents(env, "bench-01", [
+      {
+        localEventId: "bench-arrive",
+        studentId: "100001",
+        occurredAt: "2026-01-02T20:00:00.000Z",
+        source: "fingerprint"
+      },
+      {
+        localEventId: "bench-leave",
+        studentId: "100001",
+        occurredAt: "2026-01-02T21:00:00.000Z",
+        source: "fingerprint"
+      }
+    ]);
+
+    const sessions = await env.DB.prepare(
+      "SELECT check_in_at, check_out_at, status, source_event_ids FROM attendance_sessions ORDER BY check_in_at ASC"
+    ).all<{
+      check_in_at: string;
+      check_out_at: string | null;
+      status: string;
+      source_event_ids: string;
+    }>();
+
+    expect(sessions.results).toEqual([
+      {
+        check_in_at: "2026-01-02T20:00:00.000Z",
+        check_out_at: "2026-01-02T21:00:00.000Z",
+        status: "closed",
+        source_event_ids: JSON.stringify(["bench-01:bench-arrive", "bench-01:bench-leave"])
+      },
+      {
+        check_in_at: "2026-01-02T22:30:00.000Z",
+        check_out_at: null,
+        status: "open",
+        source_event_ids: JSON.stringify(["door-02:door-return"])
+      }
+    ]);
+  });
 });
 
 function createTestEnv(): Env {
