@@ -23,7 +23,7 @@ nvm install "$NODE_VERSION"
 nvm alias default "$NODE_VERSION"
 nvm use "$NODE_VERSION" >/dev/null
 
-npm install
+npm ci
 npm rebuild better-sqlite3
 
 python3 -m pip install pyserial adafruit-circuitpython-fingerprint --break-system-packages
