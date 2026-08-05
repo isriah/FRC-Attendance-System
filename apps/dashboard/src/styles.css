@@ -51,7 +51,7 @@ button:hover {
 
 .dashboard {
   display: grid;
-  grid-template-columns: 240px 1fr;
+  grid-template-columns: 240px minmax(0, 1fr);
   min-height: 100vh;
 }
 
@@ -76,6 +76,7 @@ h3 {
 
 .content {
   padding: 24px;
+  min-width: 0;
 }
 
 header,
@@ -97,6 +98,7 @@ section,
   border-radius: 8px;
   padding: 18px;
   box-sizing: border-box;
+  min-width: 0;
 }
 
 .grid {
@@ -126,6 +128,8 @@ textarea {
   border-radius: 6px;
   padding: 10px 12px;
   background: var(--surface-bg);
+  box-sizing: border-box;
+  min-width: 0;
 }
 
 textarea {
@@ -169,16 +173,16 @@ textarea {
 }
 
 .field-label input {
-  min-width: 120px;
+  width: 100%;
 }
 
 .wide-field input {
-  min-width: 260px;
+  width: 100%;
 }
 
 .meeting-form {
   display: grid;
-  grid-template-columns: minmax(160px, 0.8fr) minmax(260px, 1.4fr) auto minmax(220px, 1fr) minmax(220px, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(min(190px, 100%), 1fr));
   gap: 12px;
   align-items: end;
   margin-bottom: 14px;
@@ -206,13 +210,14 @@ textarea {
 .recurrence-options {
   display: grid;
   grid-column: 1 / -1;
-  grid-template-columns: minmax(150px, 0.7fr) minmax(150px, 0.7fr) minmax(260px, 1.6fr);
+  grid-template-columns: repeat(auto-fit, minmax(min(190px, 100%), 1fr));
   gap: 12px;
   align-items: end;
 }
 
 .form-actions {
   grid-column: 1 / -1;
+  flex-wrap: wrap;
 }
 
 .weekday-picker {
@@ -272,6 +277,15 @@ textarea {
 
 .section-heading h2 {
   margin: 0;
+}
+
+.meeting-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.meeting-table {
+  min-width: 760px;
 }
 
 .report-context {

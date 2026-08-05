@@ -605,30 +605,32 @@ function Meetings({ session }: { session: DashboardSession }) {
         </div>
         {meetings.length === 0 ? <p className="empty-state">No scheduled meetings yet.</p> : null}
         {meetings.length > 0 ? (
-          <table>
-            <thead>
-              <tr>
-                {["date", "title", "attendance", "time", "notes", "actions"].map((column) => <th key={column}>{column}</th>)}
-              </tr>
-            </thead>
-            <tbody>
-              {meetings.map((meeting) => (
-                <tr key={meeting.id}>
-                  <td>{meeting.meetingDate}</td>
-                  <td>{meeting.title}</td>
-                  <td><MeetingRequirementBadge required={meeting.required} /></td>
-                  <td>{meetingTimeRange(meeting)}</td>
-                  <td>{meeting.notes ?? ""}</td>
-                  <td>
-                    <div className="kiosk-actions">
-                      <button type="button" onClick={() => startEditing(meeting)} disabled={saving}>Edit</button>
-                      <button type="button" onClick={() => deleteMeeting(meeting)} disabled={saving}>Delete</button>
-                    </div>
-                  </td>
+          <div className="meeting-table-wrap">
+            <table className="meeting-table">
+              <thead>
+                <tr>
+                  {["date", "title", "attendance", "time", "notes", "actions"].map((column) => <th key={column}>{column}</th>)}
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {meetings.map((meeting) => (
+                  <tr key={meeting.id}>
+                    <td>{meeting.meetingDate}</td>
+                    <td>{meeting.title}</td>
+                    <td><MeetingRequirementBadge required={meeting.required} /></td>
+                    <td>{meetingTimeRange(meeting)}</td>
+                    <td>{meeting.notes ?? ""}</td>
+                    <td>
+                      <div className="kiosk-actions">
+                        <button type="button" onClick={() => startEditing(meeting)} disabled={saving}>Edit</button>
+                        <button type="button" onClick={() => deleteMeeting(meeting)} disabled={saving}>Delete</button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         ) : null}
       </section>
     </>
