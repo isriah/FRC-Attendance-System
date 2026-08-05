@@ -5,9 +5,13 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_DUPLICATE_WINDOW_MS, deriveAttendanceSessions, isDuplicateScan, meetingDateForTimestamp, type AttendanceSession, type KioskCommand, type KioskCommandAction, type KioskCommandStatus, type KioskHealthReport, type KioskScanAcknowledgement, type KioskSyncRequest, type ScanEvent } from "@frc-attendance/shared";
 import { sha256Hex } from "./auth";
+import { normalizeRosterMembers, type RosterMemberInput } from "./roster";
 
 const port = Number(process.env.PORT ?? "8787");
 const dbPath = process.env.BENCH_DB_PATH ?? "./bench-api.sqlite";
+const remoteApiBaseUrl = process.env.REMOTE_API_BASE_URL?.replace(/\/$/, "");
+const remoteKioskId = process.env.REMOTE_KIOSK_ID ?? process.env.KIOSK_ID;
+const remoteKioskToken = process.env.REMOTE_KIOSK_TOKEN ?? process.env.KIOSK_TOKEN;
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const localEnrollmentDbPath = process.env.KIOSK_DB_PATH ?? resolve(repoRoot, "apps/kiosk/kiosk-cache.sqlite");
 let enrollmentInProgress = false;
@@ -196,9 +200,21 @@ const server = createServer(async (request, response) => {
     }
 
     if (request.method === "POST" && request.url === "/admin/roster/sync") {
-      const body = await readBody<{ members: Array<{ memberId: string; firstName: string; lastName: string }> }>(request);
+      const body = await readBody<{ members: RosterMemberInput[] }>(request);
       const result = syncRoster(body.members);
       sendJson(response, 200, result);
+      return;
+    }
+
+    if (request.method === "POST" && request.url === "/admin/roster/pull-production") {
+      const roster = await fetchProductionRoster();
+      const result = syncRoster(roster.members);
+      sendJson(response, 200, {
+        ...result,
+        source: remoteApiBaseUrl,
+        rosterSyncedAt: roster.rosterSyncedAt,
+        pulledAt: new Date().toISOString()
+      });
       return;
     }
 
@@ -308,7 +324,8 @@ function ensureColumn(table: string, column: string, definition: string) {
   db.prepare(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`).run();
 }
 
-function syncRoster(members: Array<{ memberId: string; firstName: string; lastName: string }>) {
+function syncRoster(members: RosterMemberInput[]) {
+  const normalizedMembers = normalizeRosterMembers(members);
   const seen = new Set<string>();
   const upsert = db.prepare(`
     INSERT INTO students (student_id, first_name, last_name, active)
@@ -320,18 +337,38 @@ function syncRoster(members: Array<{ memberId: string; firstName: string; lastNa
   `);
 
   const transaction = db.transaction(() => {
-    for (const member of members) {
+    for (const member of normalizedMembers) {
       seen.add(member.memberId);
       upsert.run(member.memberId, member.firstName, member.lastName);
     }
-    if (members.length > 0) {
-      const deactivateMissing = db.prepare(`UPDATE students SET active = 0 WHERE student_id NOT IN (${members.map(() => "?").join(",")})`);
-      deactivateMissing.run(...members.map((member) => member.memberId));
+    if (normalizedMembers.length > 0) {
+      const deactivateMissing = db.prepare(`UPDATE students SET active = 0 WHERE student_id NOT IN (${normalizedMembers.map(() => "?").join(",")})`);
+      deactivateMissing.run(...normalizedMembers.map((member) => member.memberId));
     }
   });
   transaction();
 
-  return { synced: seen.size, deactivatedMissingStudents: members.length > 0 };
+  return { synced: seen.size, deactivatedMissingStudents: normalizedMembers.length > 0 };
+}
+
+async function fetchProductionRoster(): Promise<{ members: RosterMemberInput[]; rosterSyncedAt: string | null }> {
+  if (!remoteApiBaseUrl) throw httpError(400, "REMOTE_API_BASE_URL is not configured for this bench API");
+  if (!remoteKioskId) throw httpError(400, "REMOTE_KIOSK_ID or KIOSK_ID is required to pull the production roster");
+  if (!remoteKioskToken) throw httpError(400, "REMOTE_KIOSK_TOKEN or KIOSK_TOKEN is required to pull the production roster");
+
+  const response = await fetch(`${remoteApiBaseUrl}/kiosk/roster?kioskId=${encodeURIComponent(remoteKioskId)}`, {
+    headers: { authorization: `Bearer ${remoteKioskToken}` }
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw httpError(response.status, `Production roster pull failed: ${text}`);
+  }
+
+  const body = await response.json() as { members?: RosterMemberInput[]; rosterSyncedAt?: string | null };
+  return {
+    members: normalizeRosterMembers(body.members),
+    rosterSyncedAt: body.rosterSyncedAt ?? null
+  };
 }
 
 function createKioskCommand(kioskId: string, action: KioskCommandAction): KioskCommand {

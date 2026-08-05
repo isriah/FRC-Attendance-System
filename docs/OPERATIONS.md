@@ -261,3 +261,15 @@ Set `FINGERPRINT_SIMULATE=true` to run without hardware. Repeated matches for th
 The member Google Sheet remains authoritative for active members and stable Member IDs. The API currently accepts normalized roster rows at `POST /admin/roster/sync` with `memberId`, `firstName`, and `lastName`; the next implementation step is wiring this endpoint to a Google Sheets reader or an Apps Script push.
 
 Removed roster entries are deactivated in D1 rather than deleted.
+
+The production Worker also exposes active roster rows to authenticated kiosks at `GET /kiosk/roster`. This uses the kiosk bearer token, so the Pi can refresh its local bench SQLite roster without mentor D1 edits or copying data out of Cloudflare manually.
+
+The Pi-local bench API exposes `POST /admin/roster/pull-production`. The local dashboard shows this as `Pull production roster` and replaces the local active roster with the Worker roster while preserving old rows as inactive. Configure the bench API with:
+
+```ini
+Environment=REMOTE_API_BASE_URL=https://frc-attendance-api.frc-attendance.workers.dev
+Environment=REMOTE_KIOSK_ID=bench-01
+Environment=REMOTE_KIOSK_TOKEN=<raw-kiosk-token>
+```
+
+Keep `REMOTE_KIOSK_TOKEN` in a Pi-local systemd drop-in, not in source control. The committed bench API service only sets the production URL and kiosk ID.

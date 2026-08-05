@@ -7,6 +7,7 @@ export interface RosterMemberInput {
 }
 
 export async function syncRoster(env: Env, members: RosterMemberInput[]) {
+  const normalizedMembers = normalizeRosterMembers(members);
   const startedAt = new Date().toISOString();
   const syncId = crypto.randomUUID();
   await env.DB.prepare("INSERT INTO sync_log (id, kind, status, started_at) VALUES (?, 'roster', 'running', ?)").bind(syncId, startedAt).run();
@@ -15,7 +16,7 @@ export async function syncRoster(env: Env, members: RosterMemberInput[]) {
   const statements: D1PreparedStatement[] = [];
   const syncedAt = new Date().toISOString();
 
-  for (const member of members) {
+  for (const member of normalizedMembers) {
     seen.add(member.memberId);
     const rosterHash = await hashRosterRow(member);
     statements.push(
@@ -32,14 +33,53 @@ export async function syncRoster(env: Env, members: RosterMemberInput[]) {
   }
 
   await env.DB.prepare("UPDATE sync_log SET status = 'success', message = ?, finished_at = ? WHERE id = ?")
-    .bind(`Synced ${members.length} roster members`, new Date().toISOString(), syncId)
+    .bind(`Synced ${normalizedMembers.length} roster members`, new Date().toISOString(), syncId)
     .run();
 
-  return { synced: members.length, deactivatedMissingStudents: seen.size > 0 };
+  return { synced: normalizedMembers.length, deactivatedMissingStudents: seen.size > 0 };
+}
+
+export async function listActiveRoster(env: Env) {
+  const rows = await env.DB.prepare(
+    "SELECT student_id, first_name, last_name, roster_synced_at FROM students WHERE active = 1 ORDER BY last_name, first_name"
+  ).all<{ student_id: string; first_name: string; last_name: string; roster_synced_at: string | null }>();
+
+  return {
+    members: rows.results.map((row) => ({
+      memberId: row.student_id,
+      firstName: row.first_name,
+      lastName: row.last_name
+    })),
+    rosterSyncedAt: rows.results.reduce<string | null>((latest, row) => {
+      if (!row.roster_synced_at) return latest;
+      return !latest || row.roster_synced_at > latest ? row.roster_synced_at : latest;
+    }, null)
+  };
+}
+
+export function normalizeRosterMembers(members: RosterMemberInput[] | undefined): RosterMemberInput[] {
+  if (!Array.isArray(members)) throw Object.assign(new Error("members must be an array"), { status: 400 });
+  if (members.length === 0) throw Object.assign(new Error("Roster sync requires at least one member"), { status: 400 });
+
+  const seen = new Set<string>();
+  return members.map((member, index) => {
+    const memberId = requireRosterString(member?.memberId, `members[${index}].memberId`);
+    const firstName = requireRosterString(member?.firstName, `members[${index}].firstName`);
+    const lastName = requireRosterString(member?.lastName, `members[${index}].lastName`);
+    if (seen.has(memberId)) throw Object.assign(new Error(`Duplicate roster memberId: ${memberId}`), { status: 400 });
+    seen.add(memberId);
+    return { memberId, firstName, lastName };
+  });
 }
 
 async function hashRosterRow(member: RosterMemberInput): Promise<string> {
   const bytes = new TextEncoder().encode(`${member.memberId}|${member.firstName}|${member.lastName}`);
   const digest = await crypto.subtle.digest("SHA-256", bytes);
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function requireRosterString(value: string | undefined, name: string) {
+  const trimmed = value?.trim();
+  if (!trimmed) throw Object.assign(new Error(`${name} is required`), { status: 400 });
+  return trimmed;
 }

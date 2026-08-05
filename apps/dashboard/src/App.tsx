@@ -46,6 +46,7 @@ interface FingerprintEnrollment {
 const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
 const googleAuthEnabled = Boolean(googleClientId);
 const fingerprintEnrollmentAvailable = !apiBaseUrl.includes("workers.dev");
+const productionRosterPullAvailable = fingerprintEnrollmentAvailable;
 
 function App() {
   const [session, setSession] = useState<DashboardSession>(readStoredSession);
@@ -180,6 +181,7 @@ function Roster({ session }: { session: DashboardSession }) {
   );
   const [importText, setImportText] = useState("memberId,firstName,lastName\n100001,Bench,Student");
   const [importMessage, setImportMessage] = useState<string>();
+  const [pullingRoster, setPullingRoster] = useState(false);
   const [enrollMemberId, setEnrollMemberId] = useState("");
   const [enrollSlot, setEnrollSlot] = useState("");
   const [enrollFingerLabel, setEnrollFingerLabel] = useState("right-index");
@@ -278,6 +280,22 @@ function Roster({ session }: { session: DashboardSession }) {
           <textarea value={importText} onChange={(event) => setImportText(event.target.value)} rows={8} />
           <div className="toolbar compact">
             <button>Sync roster</button>
+            {productionRosterPullAvailable ? (
+              <button type="button" disabled={pullingRoster} onClick={async () => {
+                setPullingRoster(true);
+                try {
+                  const result = await apiPost<{ synced: number; rosterSyncedAt?: string | null }>("/admin/roster/pull-production", {}, session);
+                  setImportMessage(`Pulled ${result.synced} production members${result.rosterSyncedAt ? ` synced ${formatDateTime(result.rosterSyncedAt)}` : ""}`);
+                  reload();
+                } catch (error) {
+                  setImportMessage(friendlyDashboardError(error));
+                } finally {
+                  setPullingRoster(false);
+                }
+              }}>
+                {pullingRoster ? "Pulling..." : "Pull production roster"}
+              </button>
+            ) : null}
             {importMessage ? <span>{importMessage}</span> : null}
           </div>
         </form>

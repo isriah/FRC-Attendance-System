@@ -6,7 +6,7 @@ import { buildLegacySheetExport } from "./export";
 import { errorResponse, json, noContent, optionsResponse, readJson } from "./http";
 import { claimPendingKioskCommands, completeKioskCommand, createKioskCommand, listRecentKioskCommands, requireKioskCommandAction } from "./kioskCommands";
 import { buildMemberAttendanceReport, buildPresenceReport } from "./reports";
-import { syncRoster, type RosterMemberInput } from "./roster";
+import { listActiveRoster, syncRoster, type RosterMemberInput } from "./roster";
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -23,6 +23,11 @@ export default {
         const body = await readJson<KioskSyncRequest>(request);
         if (body.kioskId !== kioskId) throw Object.assign(new Error("Kiosk token does not match kioskId"), { status: 403 });
         return json(await syncKioskEvents(env, kioskId, body.events));
+      }
+
+      if (route === "GET /kiosk/roster") {
+        await requireKiosk(request, env);
+        return json(await listActiveRoster(env));
       }
 
       if (route === "POST /kiosk/health") {

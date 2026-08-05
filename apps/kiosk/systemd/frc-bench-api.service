@@ -8,6 +8,8 @@ Type=simple
 WorkingDirectory=%h/FRC-Attendance-System
 Environment=PORT=8787
 Environment=BENCH_DB_PATH=%h/FRC-Attendance-System/apps/api/bench-api.sqlite
+Environment=REMOTE_API_BASE_URL=https://frc-attendance-api.frc-attendance.workers.dev
+Environment=REMOTE_KIOSK_ID=bench-01
 ExecStart=/bin/bash -lc 'source %h/.nvm/nvm.sh; nvm use 22 >/dev/null; npm --workspace @frc-attendance/api run dev:bench'
 Restart=always
 RestartSec=5
