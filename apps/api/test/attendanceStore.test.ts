@@ -367,6 +367,84 @@ describe("kiosk sync acknowledgements", () => {
     ]);
   });
 
+  it("orders interleaved delayed multi-student kiosk queues by each student's scan time", async () => {
+    const env = createTestEnv();
+
+    await syncKioskEvents(env, "door-02", [
+      {
+        localEventId: "door-bench-student-out",
+        studentId: "100001",
+        occurredAt: "2026-01-02T22:00:00.000Z",
+        source: "fingerprint"
+      },
+      {
+        localEventId: "door-second-student-out",
+        studentId: "100003",
+        occurredAt: "2026-01-02T22:15:00.000Z",
+        source: "fingerprint"
+      }
+    ]);
+
+    const delayedReplay = await syncKioskEvents(env, "bench-01", [
+      {
+        localEventId: "bench-bench-student-in",
+        studentId: "100001",
+        occurredAt: "2026-01-02T20:00:00.000Z",
+        source: "fingerprint"
+      },
+      {
+        localEventId: "bench-second-student-in",
+        studentId: "100003",
+        occurredAt: "2026-01-02T20:10:00.000Z",
+        source: "fingerprint"
+      }
+    ]);
+
+    expect(delayedReplay.acknowledgements).toEqual([
+      expect.objectContaining({
+        localEventId: "bench-bench-student-in",
+        studentId: "100001",
+        status: "accepted",
+        action: "check_in",
+        kioskMessage: "Welcome, Bench Student"
+      }),
+      expect.objectContaining({
+        localEventId: "bench-second-student-in",
+        studentId: "100003",
+        status: "accepted",
+        action: "check_in",
+        kioskMessage: "Welcome, Second Student"
+      })
+    ]);
+
+    const sessions = await env.DB.prepare(
+      "SELECT student_id, check_in_at, check_out_at, status, source_event_ids FROM attendance_sessions ORDER BY student_id ASC, check_in_at ASC"
+    ).all<{
+      student_id: string;
+      check_in_at: string;
+      check_out_at: string | null;
+      status: string;
+      source_event_ids: string;
+    }>();
+
+    expect(sessions.results).toEqual([
+      {
+        student_id: "100001",
+        check_in_at: "2026-01-02T20:00:00.000Z",
+        check_out_at: "2026-01-02T22:00:00.000Z",
+        status: "closed",
+        source_event_ids: JSON.stringify(["bench-01:bench-bench-student-in", "door-02:door-bench-student-out"])
+      },
+      {
+        student_id: "100003",
+        check_in_at: "2026-01-02T20:10:00.000Z",
+        check_out_at: "2026-01-02T22:15:00.000Z",
+        status: "closed",
+        source_event_ids: JSON.stringify(["bench-01:bench-second-student-in", "door-02:door-second-student-out"])
+      }
+    ]);
+  });
+
   it("acknowledges a delayed earlier scan by its chronological action", async () => {
     const env = createTestEnv();
 
