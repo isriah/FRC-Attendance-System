@@ -91,6 +91,7 @@ npm --workspace <package> run <script>
 - Automated dashboard smoke checks on 2026-05-28 confirmed the Pages URL serves, Google sign-in renders, API CORS allows dashboard requests, unauthenticated admin API calls are rejected with `401 Missing admin identity`, and credentialed admin pages load after Google sign-in. Interactive Google sign-in works after adding `https://frc-attendance-dashboard.pages.dev` to the Google OAuth client's Authorized JavaScript origins. Dashboard deployment `https://9c9f9dd1.frc-attendance-dashboard.pages.dev` prevents the production app from using a stale email-only local session when Google OAuth is configured. Dashboard deployment `https://c1a584ae.frc-attendance-dashboard.pages.dev` includes per-kiosk remote restart command buttons. Dashboard deployment `https://933d1d20.frc-attendance-dashboard.pages.dev` shows recent queued/running/completed/failed kiosk command status per kiosk.
 - Dashboard source now renders the local email-only login only when `VITE_GOOGLE_CLIENT_ID` is unset. When Google auth is configured, the login screen presents Google sign-in and clearly states that email-only local login is disabled.
 - The bench Raspberry Pi kiosk `bench-01` is registered in remote D1 and the installed user service on `AttKiosk` points at `https://frc-attendance-api.frc-attendance.workers.dev` via a systemd user drop-in. Offline queue replay against remote D1 was verified on 2026-05-28 with local event `remote-replay-1de1a877-fa2c-482f-b388-335758e663de`, which synced as an accepted scan for student `100001`.
+- SSH to the bench Pi must use the kiosk account explicitly: `ssh attkiosk@AttKiosk`. Do not use plain `ssh AttKiosk`, because that defaults to the local workstation username and fails when the local user is not `attkiosk`.
 - Missed-meeting reporting is incomplete until a real meeting calendar or other meeting source of truth exists. Current missed-meeting calculations can only reason from dates where at least one attendance session exists.
 
 ## Development Guardrails
@@ -119,8 +120,8 @@ npm --workspace <package> run <script>
 - For code changes, run targeted tests and typechecks for the changed workspace first.
 - Run root `npm.cmd run typecheck` when TypeScript contracts or shared code change.
 - Run root `npm.cmd run build` when frontend, package, deployment, or build behavior changes.
-- When Raspberry Pi validation is needed, SSH directly into the Pi and run the checks there instead of asking the user to run commands manually.
-- When a verified change affects Raspberry Pi kiosk behavior, SSH into the affected Pi, pull the new code, and restart any user services needed for the change to appear, such as `frc-kiosk-ui`, `frc-kiosk-service`, `frc-bench-api`, or `frc-dashboard-ui`.
+- When Raspberry Pi validation is needed, SSH directly into the Pi as `attkiosk@AttKiosk` and run the checks there instead of asking the user to run commands manually.
+- When a verified change affects Raspberry Pi kiosk behavior, SSH into the affected Pi as `attkiosk@AttKiosk`, pull the new code, and restart any user services needed for the change to appear, such as `frc-kiosk-ui`, `frc-kiosk-service`, `frc-bench-api`, or `frc-dashboard-ui`.
 - Keep commits focused. Agents should create a Git commit after each completed, verified discrete unit unless the user explicitly asks not to commit.
 - Before committing, inspect `git status --short`, stage only files related to the completed unit, and do not stage unrelated user changes.
 - Use concise commit messages that describe the shipped behavior, not the process. Push completed, tested, and verified code at the end of sessions unless the user explicitly asks not to push.

@@ -173,6 +173,7 @@ For local development only, if no Google client ID is configured, the dashboard 
 Current bench Pi production API validation:
 
 - Hostname: `AttKiosk`
+- SSH target: `attkiosk@AttKiosk`. Use the account-qualified target; plain `ssh AttKiosk` uses the local workstation username and can fail even when the key is authorized for `attkiosk`.
 - Kiosk ID: `bench-01`
 - API base URL: `https://frc-attendance-api.frc-attendance.workers.dev`
 - The raw kiosk token remains only on the Pi. Remote D1 stores only its SHA-256 hash.
@@ -210,6 +211,7 @@ This installs and starts:
 Useful commands:
 
 ```bash
+ssh attkiosk@AttKiosk
 systemctl --user status frc-bench-api frc-kiosk-service frc-kiosk-ui
 journalctl --user -u frc-kiosk-service -f
 systemctl --user restart frc-kiosk-service

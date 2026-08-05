@@ -13,7 +13,16 @@ Use Raspberry Pi Imager:
 For the current bench kiosk:
 
 - user: `attkiosk`
+- SSH target: `attkiosk@AttKiosk`
 - repo path: `~/FRC-Attendance-System`
+
+Always include the user when connecting from the Windows workstation:
+
+```powershell
+ssh attkiosk@AttKiosk
+```
+
+Plain `ssh AttKiosk` defaults to the local Windows username, which is not the Pi account.
 
 ## 2. Configure Display
 
@@ -221,6 +230,14 @@ systemctl --user restart frc-kiosk-service
 ```
 
 ## 11. Update Existing Kiosk
+
+From the Windows workstation, connect as:
+
+```powershell
+ssh attkiosk@AttKiosk
+```
+
+Then run on the Pi:
 
 ```bash
 cd ~/FRC-Attendance-System

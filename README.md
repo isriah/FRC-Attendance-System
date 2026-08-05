@@ -2,3 +2,5 @@
 RoboLancers Attendance
 
 For repeatable Raspberry Pi kiosk setup, see [docs/PI-SETUP.md](docs/PI-SETUP.md).
+
+Current bench Pi SSH target: `attkiosk@AttKiosk`.
