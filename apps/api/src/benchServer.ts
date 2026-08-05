@@ -314,23 +314,18 @@ const server = createServer(async (request, response) => {
     }
 
     if (request.method === "GET" && request.url === "/admin/reports/sessions") {
-      const sessions = deriveBenchSessions()
-        .sort((left, right) => right.meetingDate.localeCompare(left.meetingDate) || left.studentId.localeCompare(right.studentId))
-        .slice(0, 500)
-        .map((session) => ({
-          student_id: session.studentId,
-          meeting_date: session.meetingDate,
-          check_in_at: session.checkInAt,
-          check_out_at: session.checkOutAt,
-          status: session.status
-        }));
-      sendJson(response, 200, { sessions });
+      sendJson(response, 200, { sessions: buildBenchAttendanceSessionReport() });
       return;
     }
 
     if (request.method === "GET" && request.url?.startsWith("/admin/reports/member")) {
       const url = new URL(request.url, `http://${request.headers.host ?? "localhost"}`);
       sendJson(response, 200, buildMemberAttendanceReport(requireNonEmptyString(url.searchParams.get("studentId") ?? undefined, "studentId")));
+      return;
+    }
+
+    if (request.method === "GET" && request.url === "/admin/export/legacy-sheets") {
+      sendJson(response, 200, buildBenchLegacySheetExport());
       return;
     }
 
@@ -965,6 +960,20 @@ function formatKioskTime(occurredAt: string): string {
   }).format(new Date(occurredAt));
 }
 
+function formatLegacyDate(meetingDate: string): string {
+  const [year, month, day] = meetingDate.split("-");
+  return `${Number(month)}/${Number(day)}/${year}`;
+}
+
+function formatLegacyTime(iso: string): string {
+  return new Intl.DateTimeFormat("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+    timeZone: "America/New_York"
+  }).format(new Date(iso));
+}
+
 function buildPresenceReport(date = meetingDateForTimestamp(new Date().toISOString())) {
   const students = db.prepare(
     "SELECT student_id, first_name, last_name FROM students WHERE active = 1 ORDER BY last_name, first_name"
@@ -1016,6 +1025,102 @@ function buildMemberAttendanceReport(studentId: string) {
     presentDates,
     absentDates,
     openSessionDates: studentSessions.filter((session) => session.status === "open" && allDateSet.has(session.meetingDate)).map((session) => session.meetingDate)
+  };
+}
+
+function buildBenchAttendanceSessionReport(limit = 500) {
+  const meetings = db.prepare("SELECT meeting_date, title, required FROM scheduled_meetings ORDER BY meeting_date DESC").all() as Array<{
+    meeting_date: string;
+    title: string;
+    required: number;
+  }>;
+  const meetingsByDate = new Map(meetings.map((meeting) => [meeting.meeting_date, meeting]));
+  const sessions = deriveBenchSessions();
+  const sessionDates = new Set(sessions.map((session) => session.meetingDate));
+  const sessionRows = sessions.map((session) => {
+    const meeting = meetingsByDate.get(session.meetingDate);
+    return {
+      student_id: session.studentId,
+      meeting_date: session.meetingDate,
+      meeting_title: meeting?.title ?? null,
+      required: meeting?.required ?? 1,
+      has_attendance: 1,
+      check_in_at: session.checkInAt,
+      check_out_at: session.checkOutAt,
+      status: session.status
+    };
+  });
+  const zeroScanRows = meetings
+    .filter((meeting) => !sessionDates.has(meeting.meeting_date))
+    .map((meeting) => ({
+      student_id: null,
+      meeting_date: meeting.meeting_date,
+      meeting_title: meeting.title,
+      required: meeting.required,
+      has_attendance: 0,
+      check_in_at: null,
+      check_out_at: null,
+      status: "scheduled"
+    }));
+
+  return [...sessionRows, ...zeroScanRows]
+    .sort((left, right) => right.meeting_date.localeCompare(left.meeting_date) || String(left.student_id ?? "").localeCompare(String(right.student_id ?? "")))
+    .slice(0, limit);
+}
+
+function buildBenchLegacySheetExport() {
+  const sessions = deriveBenchSessions();
+  const meetings = db.prepare("SELECT meeting_date, title, required, starts_at, ends_at FROM scheduled_meetings ORDER BY meeting_date").all() as Array<{
+    meeting_date: string;
+    title: string;
+    required: number;
+    starts_at: string | null;
+    ends_at: string | null;
+  }>;
+  const activeStudents = db.prepare("SELECT student_id FROM students WHERE active = 1 ORDER BY student_id").all() as Array<{ student_id: string }>;
+  const sessionCountsByDate = sessions.reduce<Map<string, number>>((counts, session) => {
+    counts.set(session.meetingDate, (counts.get(session.meetingDate) ?? 0) + 1);
+    return counts;
+  }, new Map());
+
+  return {
+    generatedAt: new Date().toISOString(),
+    ranges: {
+      AttendanceLogIn: sessions.map((session) => [
+        session.studentId,
+        formatLegacyDate(session.meetingDate),
+        formatLegacyTime(session.checkInAt)
+      ]),
+      AttendanceLogOut: sessions
+        .filter((session) => Boolean(session.checkOutAt))
+        .map((session) => [
+          session.studentId,
+          formatLegacyDate(session.meetingDate),
+          formatLegacyTime(session.checkOutAt as string)
+        ]),
+      ScheduledMeetings: meetings.map((meeting) => [
+        formatLegacyDate(meeting.meeting_date),
+        meeting.title,
+        meeting.required ? "required" : "optional",
+        meeting.starts_at ? formatLegacyTime(meeting.starts_at) : "",
+        meeting.ends_at ? formatLegacyTime(meeting.ends_at) : "",
+        sessionCountsByDate.get(meeting.meeting_date) ?? 0
+      ]),
+      MemberAttendanceSummary: activeStudents.map((student) => {
+        const report = buildMemberAttendanceReport(student.student_id);
+        return [
+          report.studentId,
+          report.firstName,
+          report.lastName,
+          report.totalMeetings,
+          report.presentMeetings,
+          report.missedMeetings,
+          report.attendanceRate === null ? "" : Math.round(report.attendanceRate * 1000) / 1000,
+          report.presentDates.map(formatLegacyDate).join(", "),
+          report.absentDates.map(formatLegacyDate).join(", ")
+        ];
+      })
+    }
   };
 }
 
@@ -1144,7 +1249,7 @@ function sendNoContent(response: typeof import("node:http").ServerResponse.proto
 function corsHeaders() {
   return {
     "access-control-allow-origin": "*",
-    "access-control-allow-methods": "GET,POST,OPTIONS",
+    "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS",
     "access-control-allow-headers": "authorization,content-type,x-admin-email"
   };
 }
