@@ -36,7 +36,7 @@ export class DisplayStateServer {
           "content-type": "application/json; charset=utf-8",
           ...corsHeaders()
         });
-        response.end(JSON.stringify(this.state));
+        response.end(JSON.stringify(this.current()));
         return;
       }
 
@@ -50,6 +50,11 @@ export class DisplayStateServer {
     this.server.listen(port, "0.0.0.0", () => {
       console.log(`Kiosk display state server listening on http://localhost:${port}`);
     });
+  }
+
+  stop(): void {
+    this.server?.close();
+    this.server = undefined;
   }
 
   setProcessing(detail?: string): void {

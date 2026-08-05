@@ -142,4 +142,29 @@ describe("display state acknowledgements", () => {
       }
     });
   });
+
+  it("serves kiosk health from the display state endpoint", async () => {
+    const server = new DisplayStateServer();
+    const port = 18988;
+
+    server.setHealth({
+      readerOnline: false,
+      pendingScanCount: 1,
+      lastSyncError: "offline"
+    });
+    server.start(port);
+
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/kiosk/display-state`);
+      expect(await response.json()).toMatchObject({
+        health: {
+          readerOnline: false,
+          pendingScanCount: 1,
+          lastSyncError: "offline"
+        }
+      });
+    } finally {
+      server.stop();
+    }
+  });
 });
