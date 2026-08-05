@@ -14,7 +14,7 @@ Current production dashboard:
 
 - Cloudflare Pages project: `frc-attendance-dashboard`
 - Pages URL: `https://frc-attendance-dashboard.pages.dev`
-- Latest verified deployment: `https://b279a659.frc-attendance-dashboard.pages.dev`
+- Latest verified deployment: `https://7ee08968.frc-attendance-dashboard.pages.dev`
 - API base URL baked into the uploaded Vite build: `https://frc-attendance-api.frc-attendance.workers.dev`
 - Google OAuth client ID baked into the uploaded Vite build: `180849199739-v04bktp7rfmimgjpvohmq7pinrrpr337.apps.googleusercontent.com`
 
@@ -138,6 +138,8 @@ Deployment `https://c1a584ae.frc-attendance-dashboard.pages.dev` adds per-kiosk 
 Deployment `https://933d1d20.frc-attendance-dashboard.pages.dev` shows recent queued/running/completed/failed kiosk command results per kiosk. The associated Worker deployment exposes `GET /admin/kiosk-commands` for credentialed dashboard command-history reads.
 
 Deployment `https://b279a659.frc-attendance-dashboard.pages.dev` shows kiosk sync health from `POST /kiosk/health`, including reader online/offline state, pending local scan count, latest successful sync time, and latest sync error. The associated Worker deployment applied D1 migration `0003_kiosk_health.sql`.
+
+Deployment `https://7ee08968.frc-attendance-dashboard.pages.dev` adds a Pi-local roster action that pulls the active production Worker roster into the local bench SQLite roster. The associated Worker deployment exposes authenticated kiosk roster export at `GET /kiosk/roster`.
 
 The dashboard login UI follows the same boundary: when `VITE_GOOGLE_CLIENT_ID` is configured, it shows Google sign-in and a production notice that email-only local login is disabled. The email-only form is rendered only for local development builds with no Google client ID.
 
