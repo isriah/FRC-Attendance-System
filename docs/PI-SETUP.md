@@ -250,3 +250,14 @@ bash apps/kiosk/scripts/install-user-services.sh
 bash apps/kiosk/scripts/install-browser-autostart.sh
 systemctl --user restart frc-bench-api frc-kiosk-service frc-kiosk-ui frc-dashboard-ui
 ```
+
+Use `npm ci` rather than `npm install` on the Pi. `npm install` can rewrite
+`package-lock.json` when the Pi's npm/platform metadata differs from the
+development machine, which leaves the kiosk checkout dirty. If the Pi shows
+`package-lock.json` as modified after an install-only operation, restore it,
+rerun `npm ci`, rebuild `better-sqlite3`, and confirm `git status --short`
+is clean. The repository should also report zero tracked dependency files:
+
+```bash
+git ls-files "*node_modules*" | wc -l
+```

@@ -8,7 +8,7 @@
 - Current scope: scheduled meetings are implemented across the API, dashboard, shared report logic, local bench API parity, report/export behavior, recurring meeting creation, and bench meeting parity smoke coverage.
 - Deployment status: remote D1 migration `0004_scheduled_meetings.sql` applied; Worker deployed as version `c83e53b6-eca7-4b9d-a904-3b746db7a311`; dashboard deployed to `https://d3404d23.frc-attendance-dashboard.pages.dev`.
 - Verification status: main workspace passed API tests, shared tests, root tests, root typecheck, root build, and the full production smoke checklist including Pi-local roster pull.
-- Preserve: the bench Pi has an unrelated dirty `package-lock.json`; do not touch the Pi or overwrite that file without explicit approval.
+- Pi dependency note: the prior dirty `package-lock.json` issue was fixed by using `npm ci` for Pi installs and removing accidentally tracked workspace `node_modules` files from Git. Future Pi updates should keep `git status --short` clean and `git ls-files "*node_modules*" | wc -l` at `0`.
 
 Remaining deployment checklist:
 
