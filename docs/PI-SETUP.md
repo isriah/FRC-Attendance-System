@@ -244,7 +244,7 @@ cd ~/FRC-Attendance-System
 git pull
 source ~/.nvm/nvm.sh
 nvm use 22
-npm install
+npm ci
 npm rebuild better-sqlite3
 bash apps/kiosk/scripts/install-user-services.sh
 bash apps/kiosk/scripts/install-browser-autostart.sh
