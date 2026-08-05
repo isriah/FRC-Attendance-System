@@ -5,7 +5,7 @@
 Current production API:
 
 - Worker URL: `https://frc-attendance-api.frc-attendance.workers.dev`
-- Latest deployed Worker version: `0a95704d-411d-423d-b3fd-a188ab06ea1c`
+- Latest deployed Worker version: `c83e53b6-eca7-4b9d-a904-3b746db7a311`
 - D1 database: `frc-attendance`
 - D1 database ID: `c02c0ca8-033b-435f-ae21-2d8f3b203b22`
 - Applied remote migrations: `0001_initial.sql` through `0004_scheduled_meetings.sql`
@@ -16,7 +16,7 @@ Current production dashboard:
 
 - Cloudflare Pages project: `frc-attendance-dashboard`
 - Pages URL: `https://frc-attendance-dashboard.pages.dev`
-- Latest verified deployment: `https://47a22129.frc-attendance-dashboard.pages.dev`
+- Latest verified deployment: `https://77d95a08.frc-attendance-dashboard.pages.dev`
 - API base URL baked into the uploaded Vite build: `https://frc-attendance-api.frc-attendance.workers.dev`
 - Google OAuth client ID baked into the uploaded Vite build: `180849199739-v04bktp7rfmimgjpvohmq7pinrrpr337.apps.googleusercontent.com`
 
@@ -154,6 +154,8 @@ Deployment `https://b279a659.frc-attendance-dashboard.pages.dev` shows kiosk syn
 Deployment `https://7ee08968.frc-attendance-dashboard.pages.dev` adds a Pi-local roster action that pulls the active production Worker roster into the local bench SQLite roster. The associated Worker deployment exposes authenticated kiosk roster export at `GET /kiosk/roster`.
 
 Deployment `https://47a22129.frc-attendance-dashboard.pages.dev` adds scheduled meeting management, recurring meeting creation, required/optional meeting reporting, scheduled meeting export data, and local bench API parity. Worker version `0a95704d-411d-423d-b3fd-a188ab06ea1c` applied remote D1 migration `0004_scheduled_meetings.sql`. The full predeploy smoke check passed on 2026-08-05, including Pi-local roster pull for `bench-01` with `synced: 4`.
+
+Deployment `https://77d95a08.frc-attendance-dashboard.pages.dev` keeps meetings date-based with time-only start/end fields, defaults new meetings to `Regular Meeting` from 3:00 PM to 5:30 PM, hides notes during meeting creation, and keeps notes editable later. Worker version `c83e53b6-eca7-4b9d-a904-3b746db7a311` rejects direct API requests whose start/end timestamps fall outside the meeting date. Production Worker/dashboard smoke passed on 2026-08-05 with Pi skipped.
 
 The dashboard login UI follows the same boundary: when `VITE_GOOGLE_CLIENT_ID` is configured, it shows Google sign-in and a production notice that email-only local login is disabled. The email-only form is rendered only for local development builds with no Google client ID.
 
