@@ -153,6 +153,8 @@ Deployment `https://b279a659.frc-attendance-dashboard.pages.dev` shows kiosk syn
 
 Deployment `https://7ee08968.frc-attendance-dashboard.pages.dev` adds a Pi-local roster action that pulls the active production Worker roster into the local bench SQLite roster. The associated Worker deployment exposes authenticated kiosk roster export at `GET /kiosk/roster`.
 
+Deployment `https://47a22129.frc-attendance-dashboard.pages.dev` adds scheduled meeting management, recurring meeting creation, required/optional meeting reporting, scheduled meeting export data, and local bench API parity. Worker version `0a95704d-411d-423d-b3fd-a188ab06ea1c` applied remote D1 migration `0004_scheduled_meetings.sql`. The full predeploy smoke check passed on 2026-08-05, including Pi-local roster pull for `bench-01` with `synced: 4`.
+
 The dashboard login UI follows the same boundary: when `VITE_GOOGLE_CLIENT_ID` is configured, it shows Google sign-in and a production notice that email-only local login is disabled. The email-only form is rendered only for local development builds with no Google client ID.
 
 For local development only, if no Google client ID is configured, the dashboard can send an `x-admin-email` header and the API will still enforce the configured allowlist.
