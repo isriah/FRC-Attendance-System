@@ -4,13 +4,22 @@ import { baseDisplayState, type KioskDisplayState, type KioskStateId } from "../
 
 export type { DisplayStatus, KioskDisplayState, KioskStateId } from "../kioskStates";
 
+export interface KioskDisplayHealth {
+  readerOnline?: boolean | null;
+  pendingScanCount: number;
+  lastSyncAt?: string;
+  lastSyncError?: string;
+}
+
 export class DisplayStateServer {
   private state: KioskDisplayState = withTimestamp(baseDisplayState("ready"));
 
+  private health: KioskDisplayHealth = { pendingScanCount: 0 };
+
   private server?: Server;
 
-  current(): KioskDisplayState {
-    return this.state;
+  current(): KioskDisplayState & { health: KioskDisplayHealth } {
+    return { ...this.state, health: this.health };
   }
 
   start(port: number): void {
@@ -27,7 +36,7 @@ export class DisplayStateServer {
           "content-type": "application/json; charset=utf-8",
           ...corsHeaders()
         });
-        response.end(JSON.stringify(this.state));
+        response.end(JSON.stringify(this.current()));
         return;
       }
 
@@ -41,6 +50,11 @@ export class DisplayStateServer {
     this.server.listen(port, "0.0.0.0", () => {
       console.log(`Kiosk display state server listening on http://localhost:${port}`);
     });
+  }
+
+  stop(): void {
+    this.server?.close();
+    this.server = undefined;
   }
 
   setProcessing(detail?: string): void {
@@ -98,6 +112,10 @@ export class DisplayStateServer {
 
   setReaderOffline(): void {
     this.set(baseDisplayState("reader_offline"));
+  }
+
+  setHealth(health: KioskDisplayHealth): void {
+    this.health = health;
   }
 
   setState(status: KioskStateId, detail?: string): void {

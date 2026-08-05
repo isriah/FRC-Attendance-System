@@ -8,6 +8,14 @@ interface KioskDisplayState {
   message: string;
   detail: string;
   updatedAt?: string;
+  health?: KioskDisplayHealth;
+}
+
+interface KioskDisplayHealth {
+  readerOnline?: boolean | null;
+  pendingScanCount: number;
+  lastSyncAt?: string;
+  lastSyncError?: string;
 }
 
 const readyState: KioskDisplayState = baseDisplayState("ready");
@@ -15,7 +23,7 @@ const readyState: KioskDisplayState = baseDisplayState("ready");
 const kioskBrand = {
   title: import.meta.env.VITE_KIOSK_TITLE ?? "FRC Attendance",
   subtitle: import.meta.env.VITE_KIOSK_SUBTITLE ?? "RoboLancers 321",
-  primaryColor: import.meta.env.VITE_KIOSK_PRIMARY_COLOR ?? "#1d7a8c",
+  primaryColor: import.meta.env.VITE_KIOSK_PRIMARY_COLOR ?? "#B80100",
   accentColor: import.meta.env.VITE_KIOSK_ACCENT_COLOR ?? "#f2c14e"
 };
 
@@ -43,6 +51,8 @@ function KioskApp() {
         if (next.updatedAt && next.updatedAt !== lastSeenUpdate) {
           lastSeenUpdate = next.updatedAt;
           setState(next);
+        } else {
+          setState((current) => ({ ...current, health: next.health }));
         }
       } catch {
         if (isMounted) setState({ ...baseDisplayState("reader_offline"), detail: "Display state service is not responding" });
@@ -64,12 +74,15 @@ function KioskApp() {
 
   useEffect(() => {
     if (state.status === "ready" || state.status === "reader_offline") return;
-    const timer = window.setTimeout(() => setState(readyState), 5000);
+    const timer = window.setTimeout(() => setState((current) => ({ ...readyState, health: current.health })), 5000);
     return () => window.clearTimeout(timer);
-  }, [state.updatedAt, state.status]);
+  }, [state.status, state.updatedAt]);
+
+  const networkStatus = networkStatusFor(state.health, lastRefreshAt);
 
   return (
-    <main className="kiosk-shell">
+    <main className={`kiosk-shell kiosk-shell-${state.status}`}>
+      <NetworkStatusIcon status={networkStatus} />
       <header className="kiosk-brand">
         <span>{kioskBrand.title}</span>
         <strong>{kioskBrand.subtitle}</strong>
@@ -85,6 +98,32 @@ function KioskApp() {
       </footer>
     </main>
   );
+}
+
+function NetworkStatusIcon({ status }: { status: NetworkStatus }) {
+  return (
+    <div className={`network-status network-status-${status.kind}`} aria-label={status.label} title={status.label}>
+      <svg viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+        <path d="M5.5 13.5C11.3 8.8 20.7 8.8 26.5 13.5" />
+        <path d="M10.5 18.2C13.6 15.9 18.4 15.9 21.5 18.2" />
+        <path d="M15.1 23.2C15.6 22.8 16.4 22.8 16.9 23.2" />
+      </svg>
+      <span className="network-status-dot" />
+    </div>
+  );
+}
+
+interface NetworkStatus {
+  kind: "online" | "queued" | "offline" | "unknown";
+  label: string;
+}
+
+function networkStatusFor(health: KioskDisplayHealth | undefined, lastRefreshAt: number | undefined): NetworkStatus {
+  if (!lastRefreshAt || !health) return { kind: "unknown", label: "Network status pending" };
+  if (health.readerOnline === false) return { kind: "offline", label: "Fingerprint reader offline" };
+  if (health.lastSyncError) return { kind: "offline", label: "Remote sync offline" };
+  if (health.pendingScanCount > 0) return { kind: "queued", label: `${health.pendingScanCount} scan${health.pendingScanCount === 1 ? "" : "s"} queued` };
+  return { kind: "online", label: "Remote sync online" };
 }
 
 async function fetchDisplayState() {

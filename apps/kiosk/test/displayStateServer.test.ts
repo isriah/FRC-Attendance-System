@@ -124,4 +124,49 @@ describe("display state acknowledgements", () => {
     server.setReaderOffline();
     expect(server.current()).toMatchObject(baseDisplayState("reader_offline"));
   });
+
+  it("includes kiosk health in the display state payload", () => {
+    const server = new DisplayStateServer();
+    const displayUpdatedAt = server.current().updatedAt;
+
+    server.setHealth({
+      readerOnline: true,
+      pendingScanCount: 2,
+      lastSyncError: "Sync failed"
+    });
+
+    expect(server.current()).toMatchObject({
+      health: {
+        readerOnline: true,
+        pendingScanCount: 2,
+        lastSyncError: "Sync failed"
+      }
+    });
+    expect(server.current().updatedAt).toBe(displayUpdatedAt);
+  });
+
+  it("serves kiosk health from the display state endpoint", async () => {
+    const server = new DisplayStateServer();
+    const port = 18988;
+
+    server.setHealth({
+      readerOnline: false,
+      pendingScanCount: 1,
+      lastSyncError: "offline"
+    });
+    server.start(port);
+
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/kiosk/display-state`);
+      expect(await response.json()).toMatchObject({
+        health: {
+          readerOnline: false,
+          pendingScanCount: 1,
+          lastSyncError: "offline"
+        }
+      });
+    } finally {
+      server.stop();
+    }
+  });
 });
