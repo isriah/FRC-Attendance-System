@@ -26,6 +26,14 @@ npm --workspace @frc-attendance/api run check:deploy-config
 
 This preflight fails until `apps/api/wrangler.toml` has a real D1 `database_id`, a production `GOOGLE_CLIENT_ID`, and either `GOOGLE_ALLOWED_EMAILS` or `GOOGLE_ALLOWED_DOMAIN`.
 
+Before deploying production changes, run the full smoke checklist from the workstation:
+
+```powershell
+npm.cmd run smoke:predeploy
+```
+
+This repeatable check verifies the production Worker `/health` response, verifies the deployed dashboard Pages app serves and contains the production API URL plus Google sign-in configuration, then runs the Pi-local roster pull smoke check over `ssh attkiosk@AttKiosk`. Override `PRODUCTION_API_BASE_URL`, `DASHBOARD_URL`, `EXPECTED_GOOGLE_CLIENT_ID`, or `PI_ROSTER_PULL_SSH_TARGET` when validating a different environment. Set `PREDEPLOY_SKIP_PI=1` or pass `-- --skip-pi` only when the bench Pi is intentionally unavailable.
+
 1. Create a D1 database:
 
    ```bash
