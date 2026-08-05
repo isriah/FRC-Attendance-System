@@ -1,6 +1,6 @@
 import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
-import { buildMemberAttendanceReport, buildPresenceReport } from "../src/reports";
+import { buildAttendanceSessionReport, buildMemberAttendanceReport, buildPresenceReport } from "../src/reports";
 import type { Env } from "../src/env";
 
 describe("report builders", () => {
@@ -123,6 +123,39 @@ describe("report builders", () => {
     });
   });
 
+  it("includes scheduled meetings with no scans in the session report", async () => {
+    const env = createTestEnv();
+    insertStudent(env, "100001", "Bench", "Student");
+    insertMeeting(env, "2026-01-02", 1, "Required Shop");
+    insertMeeting(env, "2026-01-03", 0, "Optional Outreach");
+    insertSession(env, "100001", "2026-01-02", "2026-01-02T20:00:00.000Z", null, "open");
+
+    const rows = await buildAttendanceSessionReport(env);
+
+    expect(rows).toEqual([
+      {
+        meeting_date: "2026-01-03",
+        meeting_title: "Optional Outreach",
+        required: 0,
+        has_attendance: 0,
+        student_id: null,
+        check_in_at: null,
+        check_out_at: null,
+        status: "scheduled"
+      },
+      {
+        meeting_date: "2026-01-02",
+        meeting_title: "Required Shop",
+        required: 1,
+        has_attendance: 1,
+        student_id: "100001",
+        check_in_at: "2026-01-02T20:00:00.000Z",
+        check_out_at: null,
+        status: "open"
+      }
+    ]);
+  });
+
   it("marks missing members as not found", async () => {
     const env = createTestEnv();
 
@@ -201,13 +234,13 @@ function insertSession(
   ).run();
 }
 
-function insertMeeting(env: Env, meetingDate: string, required = 1) {
+function insertMeeting(env: Env, meetingDate: string, required = 1, title = `Meeting ${meetingDate}`) {
   return env.DB.prepare(
     "INSERT INTO scheduled_meetings (id, meeting_date, title, required, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)"
   ).bind(
     `meeting-${meetingDate}`,
     meetingDate,
-    `Meeting ${meetingDate}`,
+    title,
     required,
     "2026-01-01T00:00:00.000Z",
     "2026-01-01T00:00:00.000Z"

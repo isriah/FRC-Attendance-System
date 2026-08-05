@@ -6,7 +6,7 @@ import { buildLegacySheetExport } from "./export";
 import { errorResponse, json, noContent, optionsResponse, readJson } from "./http";
 import { claimPendingKioskCommands, completeKioskCommand, createKioskCommand, listRecentKioskCommands, requireKioskCommandAction } from "./kioskCommands";
 import { createScheduledMeeting, deleteScheduledMeeting, listScheduledMeetings, updateScheduledMeeting, type ScheduledMeetingInput } from "./meetings";
-import { buildMemberAttendanceReport, buildPresenceReport } from "./reports";
+import { buildAttendanceSessionReport, buildMemberAttendanceReport, buildPresenceReport } from "./reports";
 import { listActiveRoster, syncRoster, type RosterMemberInput } from "./roster";
 
 export default {
@@ -156,10 +156,7 @@ export default {
 
       if (route === "GET /admin/reports/sessions") {
         await requireAdmin(request, env);
-        const rows = await env.DB.prepare(
-          "SELECT student_id, meeting_date, check_in_at, check_out_at, status FROM attendance_sessions ORDER BY meeting_date DESC, student_id LIMIT 500"
-        ).all();
-        return json({ sessions: rows.results });
+        return json({ sessions: await buildAttendanceSessionReport(env) });
       }
 
       if (route === "GET /admin/reports/presence") {
