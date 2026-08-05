@@ -105,6 +105,116 @@ describe("kiosk sync acknowledgements", () => {
     });
   });
 
+  it("accepts delayed scans from different members inside another member's duplicate window", async () => {
+    const env = createTestEnv();
+
+    await syncKioskEvents(env, "bench-01", [{
+      localEventId: "bench-member-one",
+      studentId: "100001",
+      occurredAt: "2026-01-02T20:00:00.000Z",
+      source: "fingerprint"
+    }]);
+
+    const differentMember = await syncKioskEvents(env, "door-02", [{
+      localEventId: "door-member-two",
+      studentId: "100003",
+      occurredAt: "2026-01-02T20:00:30.000Z",
+      source: "fingerprint"
+    }]);
+
+    expect(differentMember.accepted).toHaveLength(1);
+    expect(differentMember.duplicates).toHaveLength(0);
+    expect(differentMember.acknowledgements?.[0]).toMatchObject({
+      localEventId: "door-member-two",
+      studentId: "100003",
+      status: "accepted",
+      displayName: "Second Student",
+      action: "check_in"
+    });
+
+    const sessions = await env.DB.prepare(
+      "SELECT student_id, meeting_date, check_in_at, check_out_at, status FROM attendance_sessions ORDER BY student_id ASC"
+    ).all<{
+      student_id: string;
+      meeting_date: string;
+      check_in_at: string;
+      check_out_at: string | null;
+      status: string;
+    }>();
+
+    expect(sessions.results).toEqual([
+      {
+        student_id: "100001",
+        meeting_date: "2026-01-02",
+        check_in_at: "2026-01-02T20:00:00.000Z",
+        check_out_at: null,
+        status: "open"
+      },
+      {
+        student_id: "100003",
+        meeting_date: "2026-01-02",
+        check_in_at: "2026-01-02T20:00:30.000Z",
+        check_out_at: null,
+        status: "open"
+      }
+    ]);
+  });
+
+  it("accepts delayed adjacent-date scans inside the duplicate window", async () => {
+    const env = createTestEnv();
+
+    await syncKioskEvents(env, "door-02", [{
+      localEventId: "door-jan-3",
+      studentId: "100001",
+      occurredAt: "2026-01-03T05:00:30.000Z",
+      source: "fingerprint"
+    }]);
+
+    const delayedPreviousDate = await syncKioskEvents(env, "bench-01", [{
+      localEventId: "bench-jan-2",
+      studentId: "100001",
+      occurredAt: "2026-01-03T04:59:30.000Z",
+      source: "fingerprint"
+    }]);
+
+    expect(delayedPreviousDate.accepted).toHaveLength(1);
+    expect(delayedPreviousDate.duplicates).toHaveLength(0);
+    expect(delayedPreviousDate.acknowledgements?.[0]).toMatchObject({
+      localEventId: "bench-jan-2",
+      studentId: "100001",
+      status: "accepted",
+      action: "check_in",
+      kioskMessage: "Welcome, Bench Student"
+    });
+
+    const sessions = await env.DB.prepare(
+      "SELECT meeting_date, check_in_at, check_out_at, status, source_event_ids FROM attendance_sessions ORDER BY meeting_date ASC"
+    ).all<{
+      meeting_date: string;
+      check_in_at: string;
+      check_out_at: string | null;
+      status: string;
+      source_event_ids: string;
+    }>();
+
+    expect(sessions.results).toEqual([
+      {
+        meeting_date: "2026-01-02",
+        check_in_at: "2026-01-03T04:59:30.000Z",
+        check_out_at: null,
+        status: "open",
+        source_event_ids: JSON.stringify(["bench-01:bench-jan-2"])
+      },
+      {
+        meeting_date: "2026-01-03",
+        check_in_at: "2026-01-03T05:00:30.000Z",
+        check_out_at: null,
+        status: "open",
+        source_event_ids: JSON.stringify(["door-02:door-jan-3"])
+      }
+    ]);
+  });
+
   it("keeps sessions unchanged when a delayed duplicate arrives out of order", async () => {
     const env = createTestEnv();
 
@@ -364,6 +474,7 @@ function createTestEnv(): Env {
     );
   `);
   sqlite.prepare("INSERT INTO students (student_id, first_name, last_name, active) VALUES (?, ?, ?, 1)").run("100001", "Bench", "Student");
+  sqlite.prepare("INSERT INTO students (student_id, first_name, last_name, active) VALUES (?, ?, ?, 1)").run("100003", "Second", "Student");
 
   return {
     DB: d1(sqlite),
