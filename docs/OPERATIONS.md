@@ -16,7 +16,7 @@ Current production dashboard:
 
 - Cloudflare Pages project: `frc-attendance-dashboard`
 - Pages URL: `https://frc-attendance-dashboard.pages.dev`
-- Latest verified deployment: `https://d3404d23.frc-attendance-dashboard.pages.dev`
+- Latest verified deployment: `https://f54beeb0.frc-attendance-dashboard.pages.dev`
 - API base URL baked into the uploaded Vite build: `https://frc-attendance-api.frc-attendance.workers.dev`
 - Google OAuth client ID baked into the uploaded Vite build: `180849199739-v04bktp7rfmimgjpvohmq7pinrrpr337.apps.googleusercontent.com`
 
@@ -158,6 +158,8 @@ Deployment `https://47a22129.frc-attendance-dashboard.pages.dev` adds scheduled 
 Deployment `https://77d95a08.frc-attendance-dashboard.pages.dev` keeps meetings date-based with time-only start/end fields, defaults new meetings to `Regular Meeting` from 3:00 PM to 5:30 PM, hides notes during meeting creation, and keeps notes editable later. Worker version `c83e53b6-eca7-4b9d-a904-3b746db7a311` rejects direct API requests whose start/end timestamps fall outside the meeting date. Production Worker/dashboard smoke passed on 2026-08-05 with Pi skipped.
 
 Deployment `https://d3404d23.frc-attendance-dashboard.pages.dev` combines single and repeating meeting creation into one Meetings form. The recurrence controls stay hidden until `Repeats` is checked. Production Worker/dashboard smoke passed on 2026-08-05 with Pi skipped.
+
+Deployment `https://f54beeb0.frc-attendance-dashboard.pages.dev` fixes the Meetings page responsive layout so the page no longer creates document-level horizontal overflow at split-screen widths. Production Worker/dashboard smoke passed on 2026-08-05 with Pi skipped.
 
 The dashboard login UI follows the same boundary: when `VITE_GOOGLE_CLIENT_ID` is configured, it shows Google sign-in and a production notice that email-only local login is disabled. The email-only form is rendered only for local development builds with no Google client ID.
 
