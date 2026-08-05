@@ -62,15 +62,9 @@ interface MeetingFormState {
   startTime: string;
   endTime: string;
   notes: string;
-}
-
-interface RecurringMeetingFormState {
+  repeats: boolean;
   startDate: string;
   endDate: string;
-  title: string;
-  required: boolean;
-  startTime: string;
-  endTime: string;
   weekdays: number[];
 }
 
@@ -437,29 +431,62 @@ function Meetings({ session }: { session: DashboardSession }) {
   const { data, error, reload } = useApi<{ meetings: ScheduledMeeting[] }>("/admin/meetings", session);
   const [editingMeeting, setEditingMeeting] = useState<ScheduledMeeting>();
   const [formState, setFormState] = useState<MeetingFormState>(emptyMeetingForm());
-  const [recurringForm, setRecurringForm] = useState<RecurringMeetingFormState>(emptyRecurringMeetingForm());
   const [message, setMessage] = useState<{ kind: "success" | "error"; text: string }>();
   const [saving, setSaving] = useState(false);
-  const [recurringSaving, setRecurringSaving] = useState(false);
   const meetings = data?.meetings ?? [];
   const existingMeetingDates = new Set(meetings.map((meeting) => meeting.meetingDate));
-  const recurringPreview = previewRecurringMeetings(recurringForm, existingMeetingDates);
+  const recurringPreview = formState.repeats ? previewRecurringMeetings(formState, existingMeetingDates) : undefined;
 
   async function submitMeeting(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSaving(true);
     setMessage(undefined);
     try {
-      const payload = meetingPayload(formState);
       if (editingMeeting) {
+        const payload = meetingPayload(formState);
         await apiPut<ScheduledMeeting>(`/admin/meetings/${encodeURIComponent(editingMeeting.id)}`, payload, session);
         setMessage({ kind: "success", text: `Updated ${payload.title}.` });
+      } else if (formState.repeats) {
+        const generatedDates = recurringMeetingDates(formState);
+        const conflictDates = generatedDates.filter((date) => existingMeetingDates.has(date));
+        const createDates = generatedDates.filter((date) => !existingMeetingDates.has(date));
+        const createdDates: string[] = [];
+        const failedDates: string[] = [];
+
+        if (createDates.length === 0) {
+          throw new Error(conflictDates.length > 0
+            ? `No meetings created. ${pluralize(conflictDates.length, "date")} already scheduled: ${formatDateList(conflictDates)}.`
+            : "No dates matched the selected recurrence.");
+        }
+
+        for (const meetingDate of createDates) {
+          try {
+            await apiPost<ScheduledMeeting>("/admin/meetings", recurringMeetingPayload(formState, meetingDate), session);
+            createdDates.push(meetingDate);
+          } catch {
+            failedDates.push(meetingDate);
+          }
+        }
+
+        if (failedDates.length > 0) {
+          setMessage({
+            kind: "error",
+            text: `Created ${pluralize(createdDates.length, "meeting")}. ${pluralize(failedDates.length, "date")} failed: ${formatDateList(failedDates)}.${conflictDates.length > 0 ? ` Skipped existing ${formatDateList(conflictDates)}.` : ""}`
+          });
+        } else {
+          setMessage({
+            kind: "success",
+            text: `Created ${pluralize(createdDates.length, "meeting")}${conflictDates.length > 0 ? ` and skipped existing ${formatDateList(conflictDates)}` : ""}.`
+          });
+          setFormState(emptyMeetingForm());
+        }
       } else {
+        const payload = meetingPayload(formState);
         await apiPost<ScheduledMeeting>("/admin/meetings", payload, session);
         setMessage({ kind: "success", text: `Added ${payload.title}.` });
+        setFormState(emptyMeetingForm());
       }
       setEditingMeeting(undefined);
-      setFormState(emptyMeetingForm());
       reload();
     } catch (err) {
       setMessage({ kind: "error", text: friendlyDashboardError(err) });
@@ -499,53 +526,6 @@ function Meetings({ session }: { session: DashboardSession }) {
     setMessage(undefined);
   }
 
-  async function submitRecurringMeetings(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setRecurringSaving(true);
-    setMessage(undefined);
-    try {
-      const generatedDates = recurringMeetingDates(recurringForm);
-      const conflictDates = generatedDates.filter((date) => existingMeetingDates.has(date));
-      const createDates = generatedDates.filter((date) => !existingMeetingDates.has(date));
-      const createdDates: string[] = [];
-      const failedDates: string[] = [];
-
-      if (createDates.length === 0) {
-        throw new Error(conflictDates.length > 0
-          ? `No meetings created. ${pluralize(conflictDates.length, "date")} already scheduled: ${formatDateList(conflictDates)}.`
-          : "No dates matched the selected recurrence.");
-      }
-
-      for (const meetingDate of createDates) {
-        try {
-          await apiPost<ScheduledMeeting>("/admin/meetings", recurringMeetingPayload(recurringForm, meetingDate), session);
-          createdDates.push(meetingDate);
-        } catch {
-          failedDates.push(meetingDate);
-        }
-      }
-
-      reload();
-      if (failedDates.length > 0) {
-        setMessage({
-          kind: "error",
-          text: `Created ${pluralize(createdDates.length, "meeting")}. ${pluralize(failedDates.length, "date")} failed: ${formatDateList(failedDates)}.${conflictDates.length > 0 ? ` Skipped existing ${formatDateList(conflictDates)}.` : ""}`
-        });
-        return;
-      }
-
-      setRecurringForm(emptyRecurringMeetingForm());
-      setMessage({
-        kind: "success",
-        text: `Created ${pluralize(createdDates.length, "meeting")}${conflictDates.length > 0 ? ` and skipped existing ${formatDateList(conflictDates)}` : ""}.`
-      });
-    } catch (err) {
-      setMessage({ kind: "error", text: friendlyDashboardError(err) });
-    } finally {
-      setRecurringSaving(false);
-    }
-  }
-
   return (
     <>
       <section>
@@ -577,63 +557,46 @@ function Meetings({ session }: { session: DashboardSession }) {
               <textarea value={formState.notes} onChange={(event) => setFormState({ ...formState, notes: event.target.value })} rows={3} placeholder="Optional context" />
             </label>
           ) : null}
+          {!editingMeeting ? (
+            <label className="inline-check repeat-toggle">
+              <input type="checkbox" checked={formState.repeats} onChange={(event) => setFormState({ ...formState, repeats: event.target.checked })} />
+              Repeats
+            </label>
+          ) : null}
+          {formState.repeats && !editingMeeting ? (
+            <div className="recurrence-options">
+              <label className="field-label">
+                <span>First date</span>
+                <input value={formState.startDate} onChange={(event) => setFormState({ ...formState, startDate: event.target.value })} type="date" required />
+              </label>
+              <label className="field-label">
+                <span>Last date</span>
+                <input value={formState.endDate} onChange={(event) => setFormState({ ...formState, endDate: event.target.value })} type="date" required />
+              </label>
+              <fieldset className="weekday-picker">
+                <legend>Repeats on</legend>
+                {weekdayOptions.map((weekday) => (
+                  <label key={weekday.value}>
+                    <input
+                      type="checkbox"
+                      checked={formState.weekdays.includes(weekday.value)}
+                      onChange={() => setFormState({ ...formState, weekdays: toggleWeekday(formState.weekdays, weekday.value) })}
+                    />
+                    {weekday.label}
+                  </label>
+                ))}
+              </fieldset>
+              {recurringPreview ? <p className={`recurrence-preview ${recurringPreview.kind}`}>{recurringPreview.text}</p> : null}
+            </div>
+          ) : null}
           <div className="toolbar compact form-actions">
-            <button disabled={saving}>{saving ? "Saving..." : editingMeeting ? "Save changes" : "Add meeting"}</button>
+            <button disabled={saving || (formState.repeats && recurringPreview?.createCount === 0)}>{saving ? "Saving..." : editingMeeting ? "Save changes" : formState.repeats ? "Create repeating meetings" : "Add meeting"}</button>
             {editingMeeting ? <button type="button" onClick={cancelEditing} disabled={saving}>Cancel</button> : null}
           </div>
         </form>
         {message ? <p className={`notice ${message.kind}`}>{message.text}</p> : null}
         {error ? <p className="error">{error}</p> : null}
       </section>
-
-      {!editingMeeting ? (
-        <section>
-          <h2>Add Repeating Meetings</h2>
-          <form className="recurring-meeting-form" onSubmit={submitRecurringMeetings}>
-            <label className="field-label">
-              <span>Starts</span>
-              <input value={recurringForm.startDate} onChange={(event) => setRecurringForm({ ...recurringForm, startDate: event.target.value })} type="date" required />
-            </label>
-            <label className="field-label">
-              <span>Ends</span>
-              <input value={recurringForm.endDate} onChange={(event) => setRecurringForm({ ...recurringForm, endDate: event.target.value })} type="date" required />
-            </label>
-            <label className="field-label wide-field">
-              <span>Title</span>
-              <input value={recurringForm.title} onChange={(event) => setRecurringForm({ ...recurringForm, title: event.target.value })} placeholder={defaultMeetingTitle} required />
-            </label>
-            <label className="inline-check required-toggle">
-              <input type="checkbox" checked={recurringForm.required} onChange={(event) => setRecurringForm({ ...recurringForm, required: event.target.checked })} />
-              Required attendance
-            </label>
-            <fieldset className="weekday-picker">
-              <legend>Repeats on</legend>
-              {weekdayOptions.map((weekday) => (
-                <label key={weekday.value}>
-                  <input
-                    type="checkbox"
-                    checked={recurringForm.weekdays.includes(weekday.value)}
-                    onChange={() => setRecurringForm({ ...recurringForm, weekdays: toggleWeekday(recurringForm.weekdays, weekday.value) })}
-                  />
-                  {weekday.label}
-                </label>
-              ))}
-            </fieldset>
-            <label className="field-label">
-              <span>Start time</span>
-              <input value={recurringForm.startTime} onChange={(event) => setRecurringForm({ ...recurringForm, startTime: event.target.value })} type="time" />
-            </label>
-            <label className="field-label">
-              <span>End time</span>
-              <input value={recurringForm.endTime} onChange={(event) => setRecurringForm({ ...recurringForm, endTime: event.target.value })} type="time" />
-            </label>
-            <p className={`recurrence-preview ${recurringPreview.kind}`}>{recurringPreview.text}</p>
-            <div className="toolbar compact form-actions">
-              <button disabled={recurringSaving || recurringPreview.createCount === 0}>{recurringSaving ? "Creating..." : "Create repeating meetings"}</button>
-            </div>
-          </form>
-        </section>
-      ) : null}
 
       <section>
         <div className="section-heading">
@@ -1014,25 +977,17 @@ function formatPercent(value: number | null) {
 }
 
 function emptyMeetingForm(): MeetingFormState {
-  return {
-    meetingDate: localDateInputValue(),
-    title: defaultMeetingTitle,
-    required: true,
-    startTime: defaultMeetingStartTime,
-    endTime: defaultMeetingEndTime,
-    notes: ""
-  };
-}
-
-function emptyRecurringMeetingForm(): RecurringMeetingFormState {
   const today = localDateInputValue();
   return {
-    startDate: today,
-    endDate: today,
+    meetingDate: today,
     title: defaultMeetingTitle,
     required: true,
     startTime: defaultMeetingStartTime,
     endTime: defaultMeetingEndTime,
+    notes: "",
+    repeats: false,
+    startDate: today,
+    endDate: today,
     weekdays: [weekdayForIsoDate(today)]
   };
 }
@@ -1044,7 +999,11 @@ function meetingToFormState(meeting: ScheduledMeeting): MeetingFormState {
     required: meeting.required,
     startTime: localTimeInputValue(meeting.startsAt),
     endTime: localTimeInputValue(meeting.endsAt),
-    notes: meeting.notes ?? ""
+    notes: meeting.notes ?? "",
+    repeats: false,
+    startDate: meeting.meetingDate,
+    endDate: meeting.meetingDate,
+    weekdays: [weekdayForIsoDate(meeting.meetingDate)]
   };
 }
 
@@ -1062,7 +1021,7 @@ function meetingPayload(formState: MeetingFormState) {
   };
 }
 
-function recurringMeetingPayload(formState: RecurringMeetingFormState, meetingDate: string) {
+function recurringMeetingPayload(formState: MeetingFormState, meetingDate: string) {
   if (formState.startTime && formState.endTime && formState.endTime <= formState.startTime) {
     throw new Error("Meeting end time must be after the start time.");
   }
@@ -1075,7 +1034,7 @@ function recurringMeetingPayload(formState: RecurringMeetingFormState, meetingDa
   };
 }
 
-function recurringMeetingDates(formState: RecurringMeetingFormState) {
+function recurringMeetingDates(formState: MeetingFormState) {
   if (!formState.title.trim()) throw new Error("Meeting title is required.");
   if (!formState.startDate || !formState.endDate) throw new Error("Start and end dates are required.");
   if (formState.startDate > formState.endDate) throw new Error("End date must be on or after the start date.");
@@ -1094,7 +1053,7 @@ function recurringMeetingDates(formState: RecurringMeetingFormState) {
   return dates;
 }
 
-function previewRecurringMeetings(formState: RecurringMeetingFormState, existingMeetingDates: Set<string>) {
+function previewRecurringMeetings(formState: MeetingFormState, existingMeetingDates: Set<string>) {
   try {
     const dates = recurringMeetingDates(formState);
     const createCount = dates.filter((date) => !existingMeetingDates.has(date)).length;

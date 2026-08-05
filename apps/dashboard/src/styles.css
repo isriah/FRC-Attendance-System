@@ -176,8 +176,7 @@ textarea {
   min-width: 260px;
 }
 
-.meeting-form,
-.recurring-meeting-form {
+.meeting-form {
   display: grid;
   grid-template-columns: minmax(160px, 0.8fr) minmax(260px, 1.4fr) auto minmax(220px, 1fr) minmax(220px, 1fr);
   gap: 12px;
@@ -185,12 +184,7 @@ textarea {
   margin-bottom: 14px;
 }
 
-.recurring-meeting-form {
-  grid-template-columns: minmax(150px, 0.7fr) minmax(150px, 0.7fr) minmax(240px, 1.2fr) auto;
-}
-
-.meeting-form textarea,
-.recurring-meeting-form textarea {
+.meeting-form textarea {
   font-family: inherit;
 }
 
@@ -202,6 +196,19 @@ textarea {
 
 .notes-field {
   grid-column: 1 / -1;
+}
+
+.repeat-toggle {
+  grid-column: 1 / -1;
+  margin-bottom: 0;
+}
+
+.recurrence-options {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: minmax(150px, 0.7fr) minmax(150px, 0.7fr) minmax(260px, 1.6fr);
+  gap: 12px;
+  align-items: end;
 }
 
 .form-actions {
@@ -509,6 +516,7 @@ pre {
   }
 
   .meeting-form,
+  .recurrence-options,
   .grid {
     grid-template-columns: 1fr;
   }
