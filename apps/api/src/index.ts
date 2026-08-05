@@ -5,6 +5,7 @@ import type { Env } from "./env";
 import { buildLegacySheetExport } from "./export";
 import { errorResponse, json, noContent, optionsResponse, readJson } from "./http";
 import { claimPendingKioskCommands, completeKioskCommand, createKioskCommand, listRecentKioskCommands, requireKioskCommandAction } from "./kioskCommands";
+import { createScheduledMeeting, deleteScheduledMeeting, listScheduledMeetings, updateScheduledMeeting, type ScheduledMeetingInput } from "./meetings";
 import { buildMemberAttendanceReport, buildPresenceReport } from "./reports";
 import { listActiveRoster, syncRoster, type RosterMemberInput } from "./roster";
 
@@ -89,6 +90,34 @@ export default {
       if (route === "GET /admin/kiosk-commands") {
         await requireAdmin(request, env);
         return json({ commands: await listRecentKioskCommands(env, Number(url.searchParams.get("limit") ?? 50)) });
+      }
+
+      if (route === "GET /admin/meetings") {
+        await requireAdmin(request, env);
+        return json({ meetings: await listScheduledMeetings(env) });
+      }
+
+      if (route === "POST /admin/meetings") {
+        await requireAdmin(request, env);
+        const body = await readJson<ScheduledMeetingInput>(request);
+        return json(await createScheduledMeeting(env, body), { status: 201 });
+      }
+
+      const adminMeeting = url.pathname.match(/^\/admin\/meetings\/([^/]+)$/);
+      if (adminMeeting && request.method === "PUT") {
+        await requireAdmin(request, env);
+        const meetingId = adminMeeting[1];
+        if (!meetingId) throw Object.assign(new Error("Scheduled meeting id is required"), { status: 400 });
+        const body = await readJson<ScheduledMeetingInput>(request);
+        return json(await updateScheduledMeeting(env, decodeURIComponent(meetingId), body));
+      }
+
+      if (adminMeeting && request.method === "DELETE") {
+        await requireAdmin(request, env);
+        const meetingId = adminMeeting[1];
+        if (!meetingId) throw Object.assign(new Error("Scheduled meeting id is required"), { status: 400 });
+        await deleteScheduledMeeting(env, decodeURIComponent(meetingId));
+        return noContent();
       }
 
       const adminKioskCommand = url.pathname.match(/^\/admin\/kiosks\/([^/]+)\/commands$/);

@@ -78,6 +78,18 @@ export interface AttendanceSession {
   sourceEventIds: string[];
 }
 
+export interface ScheduledMeeting {
+  id: string;
+  meetingDate: string;
+  title: string;
+  required: boolean;
+  startsAt?: string;
+  endsAt?: string;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface KioskSyncEventInput {
   localEventId: string;
   studentId: string;

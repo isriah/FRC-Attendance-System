@@ -82,6 +82,47 @@ describe("report builders", () => {
     expect(report.absentDates).toEqual([]);
   });
 
+  it("counts required scheduled meetings with no scans as missed", async () => {
+    const env = createTestEnv();
+    insertStudent(env, "100001", "Bench", "Student");
+    insertMeeting(env, "2026-01-02");
+    insertMeeting(env, "2026-01-09");
+    insertSession(env, "100001", "2026-01-02", "2026-01-02T20:00:00.000Z", null, "open");
+
+    const report = await buildMemberAttendanceReport(env, "100001");
+
+    expect(report).toMatchObject({
+      totalMeetings: 2,
+      presentMeetings: 1,
+      missedMeetings: 1,
+      attendanceRate: 0.5,
+      presentDates: ["2026-01-02"],
+      absentDates: ["2026-01-09"],
+      openSessionDates: ["2026-01-02"]
+    });
+  });
+
+  it("excludes optional scheduled meetings from member attendance totals", async () => {
+    const env = createTestEnv();
+    insertStudent(env, "100001", "Bench", "Student");
+    insertMeeting(env, "2026-01-02");
+    insertMeeting(env, "2026-01-03", 0);
+    insertSession(env, "100001", "2026-01-02", "2026-01-02T20:00:00.000Z", null, "open");
+    insertSession(env, "100001", "2026-01-03", "2026-01-03T20:00:00.000Z", null, "open");
+
+    const report = await buildMemberAttendanceReport(env, "100001");
+
+    expect(report).toMatchObject({
+      totalMeetings: 1,
+      presentMeetings: 1,
+      missedMeetings: 0,
+      attendanceRate: 1,
+      presentDates: ["2026-01-02"],
+      absentDates: [],
+      openSessionDates: ["2026-01-02"]
+    });
+  });
+
   it("marks missing members as not found", async () => {
     const env = createTestEnv();
 
@@ -111,6 +152,18 @@ function createTestEnv(): Env {
       status TEXT NOT NULL,
       source_event_ids TEXT NOT NULL,
       rebuilt_at TEXT NOT NULL
+    );
+
+    CREATE TABLE scheduled_meetings (
+      id TEXT PRIMARY KEY,
+      meeting_date TEXT NOT NULL UNIQUE,
+      title TEXT NOT NULL,
+      required INTEGER NOT NULL DEFAULT 1,
+      starts_at TEXT,
+      ends_at TEXT,
+      notes TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
     );
   `);
 
@@ -145,6 +198,19 @@ function insertSession(
     status,
     "[]",
     "2026-01-10T00:00:00.000Z"
+  ).run();
+}
+
+function insertMeeting(env: Env, meetingDate: string, required = 1) {
+  return env.DB.prepare(
+    "INSERT INTO scheduled_meetings (id, meeting_date, title, required, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)"
+  ).bind(
+    `meeting-${meetingDate}`,
+    meetingDate,
+    `Meeting ${meetingDate}`,
+    required,
+    "2026-01-01T00:00:00.000Z",
+    "2026-01-01T00:00:00.000Z"
   ).run();
 }
 

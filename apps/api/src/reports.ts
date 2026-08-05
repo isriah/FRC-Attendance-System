@@ -62,15 +62,26 @@ export async function buildMemberAttendanceReport(env: Env, studentId: string): 
   if (!student) throw Object.assign(new Error("Member not found"), { status: 404 });
 
   const meetingDates = await env.DB.prepare(
-    "SELECT DISTINCT meeting_date FROM attendance_sessions ORDER BY meeting_date"
-  ).all<{ meeting_date: string }>();
+    `
+      SELECT meeting_date, required
+      FROM (
+        SELECT meeting_date, required FROM scheduled_meetings
+        UNION ALL
+        SELECT DISTINCT meeting_date, 1 AS required
+        FROM attendance_sessions
+        WHERE NOT EXISTS (SELECT 1 FROM scheduled_meetings)
+      )
+      ORDER BY meeting_date
+    `
+  ).all<{ meeting_date: string; required: number }>();
   const sessions = await env.DB.prepare(
     "SELECT meeting_date, status FROM attendance_sessions WHERE student_id = ? ORDER BY meeting_date"
   ).bind(studentId).all<{ meeting_date: string; status: "open" | "closed" }>();
 
-  const presentDates = [...new Set(sessions.results.map((session) => session.meeting_date))];
+  const allDates = [...new Set(meetingDates.results.filter((row) => Boolean(row.required)).map((row) => row.meeting_date))];
+  const allDateSet = new Set(allDates);
+  const presentDates = [...new Set(sessions.results.map((session) => session.meeting_date))].filter((date) => allDateSet.has(date));
   const presentDateSet = new Set(presentDates);
-  const allDates = meetingDates.results.map((row) => row.meeting_date);
   const absentDates = allDates.filter((date) => !presentDateSet.has(date));
   const attendanceRate = allDates.length === 0 ? null : presentDates.length / allDates.length;
 
@@ -84,6 +95,6 @@ export async function buildMemberAttendanceReport(env: Env, studentId: string): 
     attendanceRate,
     presentDates,
     absentDates,
-    openSessionDates: sessions.results.filter((session) => session.status === "open").map((session) => session.meeting_date)
+    openSessionDates: sessions.results.filter((session) => session.status === "open" && allDateSet.has(session.meeting_date)).map((session) => session.meeting_date)
   };
 }
