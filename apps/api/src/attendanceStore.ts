@@ -36,7 +36,7 @@ export async function syncKioskEvents(env: Env, kioskId: string, events: KioskSy
         input,
         status: event.status,
         reason: event.status === "rejected" ? "previously rejected" : undefined,
-        action: event.status === "accepted" ? await actionForAcceptedScan(env, input) : undefined
+        action: event.status === "accepted" ? await actionForAcceptedScan(env, kioskId, input) : undefined
       });
       continue;
     }
@@ -63,7 +63,7 @@ export async function syncKioskEvents(env: Env, kioskId: string, events: KioskSy
 
     const event = await insertScanEvent(env, kioskId, input, now, "accepted");
     accepted.push(event);
-    acknowledgementInputs.push({ input, status: "accepted", action: await actionForAcceptedScan(env, input) });
+    acknowledgementInputs.push({ input, status: "accepted", action: await actionForAcceptedScan(env, kioskId, input) });
   }
 
   if (accepted.length > 0) await rebuildAttendanceSessions(env);
@@ -217,13 +217,15 @@ async function buildAcknowledgement(env: Env, acknowledgement: AcknowledgementIn
   };
 }
 
-async function actionForAcceptedScan(env: Env, input: KioskSyncEventInput): Promise<"check_in" | "check_out"> {
+async function actionForAcceptedScan(env: Env, kioskId: string, input: KioskSyncEventInput): Promise<"check_in" | "check_out"> {
   const meetingDate = meetingDateForTimestamp(input.occurredAt, env.TIME_ZONE);
   const rows = await env.DB.prepare(
     "SELECT id, occurred_at FROM scan_events WHERE student_id = ? AND status = 'accepted' ORDER BY occurred_at ASC, id ASC"
   ).bind(input.studentId).all<{ id: string; occurred_at: string }>();
   const acceptedForMeeting = rows.results.filter((row) => meetingDateForTimestamp(row.occurred_at, env.TIME_ZONE) === meetingDate);
-  return acceptedForMeeting.length % 2 === 0 ? "check_out" : "check_in";
+  const index = acceptedForMeeting.findIndex((row) => row.id === eventId(kioskId, input.localEventId));
+  const actionIndex = index >= 0 ? index : acceptedForMeeting.length - 1;
+  return actionIndex % 2 === 0 ? "check_in" : "check_out";
 }
 
 async function attendanceSummary(env: Env, studentId: string): Promise<{ rate: number | null; summary?: string }> {

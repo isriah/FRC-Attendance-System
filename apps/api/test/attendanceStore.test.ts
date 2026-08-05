@@ -183,6 +183,66 @@ describe("kiosk sync acknowledgements", () => {
       }
     ]);
   });
+
+  it("acknowledges a delayed earlier scan by its chronological action", async () => {
+    const env = createTestEnv();
+
+    await syncKioskEvents(env, "pit-01", [{
+      localEventId: "pit-late-checkout",
+      studentId: "100001",
+      occurredAt: "2026-01-02T22:00:00.000Z",
+      source: "fingerprint"
+    }]);
+
+    const delayed = await syncKioskEvents(env, "bench-01", [{
+      localEventId: "bench-early-checkin",
+      studentId: "100001",
+      occurredAt: "2026-01-02T20:00:00.000Z",
+      source: "fingerprint"
+    }]);
+
+    expect(delayed.acknowledgements?.[0]).toMatchObject({
+      localEventId: "bench-early-checkin",
+      status: "accepted",
+      action: "check_in",
+      kioskMessage: "Welcome, Bench Student",
+      kioskDetail: "Checked in at 3:00 PM - Attendance 100% (1/1)",
+      message: "Welcome, Bench Student"
+    });
+  });
+
+  it("derives acknowledgement actions per accepted scan when replayed after out-of-order sync", async () => {
+    const env = createTestEnv();
+
+    await syncKioskEvents(env, "pit-01", [{
+      localEventId: "pit-late-checkout",
+      studentId: "100001",
+      occurredAt: "2026-01-02T22:00:00.000Z",
+      source: "fingerprint"
+    }]);
+    await syncKioskEvents(env, "bench-01", [{
+      localEventId: "bench-early-checkin",
+      studentId: "100001",
+      occurredAt: "2026-01-02T20:00:00.000Z",
+      source: "fingerprint"
+    }]);
+
+    const replay = await syncKioskEvents(env, "pit-01", [{
+      localEventId: "pit-late-checkout",
+      studentId: "100001",
+      occurredAt: "2026-01-02T22:00:00.000Z",
+      source: "fingerprint"
+    }]);
+
+    expect(replay.acknowledgements?.[0]).toMatchObject({
+      localEventId: "pit-late-checkout",
+      status: "accepted",
+      action: "check_out",
+      kioskMessage: "Goodbye, Bench Student",
+      kioskDetail: "Checked out at 5:00 PM - Attendance 100% (1/1)",
+      message: "Goodbye, Bench Student"
+    });
+  });
 });
 
 function createTestEnv(): Env {
