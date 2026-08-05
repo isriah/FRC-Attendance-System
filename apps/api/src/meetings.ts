@@ -1,4 +1,4 @@
-import { requireIsoDate, requireIsoTimestamp, requireNonEmptyString, type ScheduledMeeting } from "@frc-attendance/shared";
+import { meetingDateForTimestamp, requireIsoDate, requireIsoTimestamp, requireNonEmptyString, type ScheduledMeeting } from "@frc-attendance/shared";
 import type { Env } from "./env";
 
 export interface ScheduledMeetingInput {
@@ -20,7 +20,7 @@ export async function listScheduledMeetings(env: Env): Promise<ScheduledMeeting[
 }
 
 export async function createScheduledMeeting(env: Env, input: ScheduledMeetingInput): Promise<ScheduledMeeting> {
-  const normalized = normalizeMeetingInput(input);
+  const normalized = normalizeMeetingInput(input, env.TIME_ZONE);
   const now = new Date().toISOString();
   const meeting: ScheduledMeeting = {
     id: crypto.randomUUID(),
@@ -60,7 +60,7 @@ export async function updateScheduledMeeting(env: Env, meetingId: string, input:
   const existing = await getScheduledMeetingRow(env, meetingId);
   if (!existing) throw Object.assign(new Error("Scheduled meeting not found"), { status: 404 });
 
-  const normalized = normalizeMeetingInput(input);
+  const normalized = normalizeMeetingInput(input, env.TIME_ZONE);
   const updatedAt = new Date().toISOString();
   try {
     await env.DB.prepare(`
@@ -92,12 +92,14 @@ export async function deleteScheduledMeeting(env: Env, meetingId: string): Promi
   await env.DB.prepare("DELETE FROM scheduled_meetings WHERE id = ?").bind(meetingId).run();
 }
 
-function normalizeMeetingInput(input: ScheduledMeetingInput): Omit<ScheduledMeeting, "id" | "createdAt" | "updatedAt"> {
+function normalizeMeetingInput(input: ScheduledMeetingInput, timeZone: string): Omit<ScheduledMeeting, "id" | "createdAt" | "updatedAt"> {
   const meetingDate = requireIsoDate(input.meetingDate, "meetingDate");
   const title = requireNonEmptyString(input.title, "title");
   const required = input.required === undefined ? true : requireBoolean(input.required, "required");
   const startsAt = optionalIsoTimestamp(input.startsAt, "startsAt");
   const endsAt = optionalIsoTimestamp(input.endsAt, "endsAt");
+  requireTimestampOnMeetingDate(startsAt, meetingDate, timeZone, "startsAt");
+  requireTimestampOnMeetingDate(endsAt, meetingDate, timeZone, "endsAt");
   if (startsAt && endsAt && new Date(endsAt).getTime() < new Date(startsAt).getTime()) {
     throw Object.assign(new Error("endsAt must be after startsAt"), { status: 400 });
   }
@@ -122,6 +124,13 @@ function requireBoolean(value: unknown, fieldName: string): boolean {
 function optionalIsoTimestamp(value: unknown, fieldName: string): string | undefined {
   if (value === undefined || value === null || value === "") return undefined;
   return requireIsoTimestamp(value, fieldName);
+}
+
+function requireTimestampOnMeetingDate(value: string | undefined, meetingDate: string, timeZone: string, fieldName: string) {
+  if (!value) return;
+  if (meetingDateForTimestamp(value, timeZone) !== meetingDate) {
+    throw Object.assign(new Error(`${fieldName} must be on meetingDate`), { status: 400 });
+  }
 }
 
 function optionalTrimmedString(value: unknown): string | undefined {

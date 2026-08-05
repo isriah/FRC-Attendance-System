@@ -59,8 +59,8 @@ interface MeetingFormState {
   meetingDate: string;
   title: string;
   required: boolean;
-  startsAt: string;
-  endsAt: string;
+  startTime: string;
+  endTime: string;
   notes: string;
 }
 
@@ -72,9 +72,11 @@ interface RecurringMeetingFormState {
   startTime: string;
   endTime: string;
   weekdays: number[];
-  notes: string;
 }
 
+const defaultMeetingTitle = "Regular Meeting";
+const defaultMeetingStartTime = "15:00";
+const defaultMeetingEndTime = "17:30";
 const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
 const googleAuthEnabled = Boolean(googleClientId);
 const fingerprintEnrollmentAvailable = !apiBaseUrl.includes("workers.dev");
@@ -555,24 +557,26 @@ function Meetings({ session }: { session: DashboardSession }) {
           </label>
           <label className="field-label wide-field">
             <span>Title</span>
-            <input value={formState.title} onChange={(event) => setFormState({ ...formState, title: event.target.value })} placeholder="Build meeting" required />
+            <input value={formState.title} onChange={(event) => setFormState({ ...formState, title: event.target.value })} placeholder={defaultMeetingTitle} required />
           </label>
           <label className="inline-check required-toggle">
             <input type="checkbox" checked={formState.required} onChange={(event) => setFormState({ ...formState, required: event.target.checked })} />
             Required attendance
           </label>
           <label className="field-label">
-            <span>Starts</span>
-            <input value={formState.startsAt} onChange={(event) => setFormState({ ...formState, startsAt: event.target.value })} type="datetime-local" />
+            <span>Start time</span>
+            <input value={formState.startTime} onChange={(event) => setFormState({ ...formState, startTime: event.target.value })} type="time" required />
           </label>
           <label className="field-label">
-            <span>Ends</span>
-            <input value={formState.endsAt} onChange={(event) => setFormState({ ...formState, endsAt: event.target.value })} type="datetime-local" />
+            <span>End time</span>
+            <input value={formState.endTime} onChange={(event) => setFormState({ ...formState, endTime: event.target.value })} type="time" required />
           </label>
-          <label className="field-label notes-field">
-            <span>Notes</span>
-            <textarea value={formState.notes} onChange={(event) => setFormState({ ...formState, notes: event.target.value })} rows={3} placeholder="Optional context" />
-          </label>
+          {editingMeeting ? (
+            <label className="field-label notes-field">
+              <span>Notes</span>
+              <textarea value={formState.notes} onChange={(event) => setFormState({ ...formState, notes: event.target.value })} rows={3} placeholder="Optional context" />
+            </label>
+          ) : null}
           <div className="toolbar compact form-actions">
             <button disabled={saving}>{saving ? "Saving..." : editingMeeting ? "Save changes" : "Add meeting"}</button>
             {editingMeeting ? <button type="button" onClick={cancelEditing} disabled={saving}>Cancel</button> : null}
@@ -596,7 +600,7 @@ function Meetings({ session }: { session: DashboardSession }) {
             </label>
             <label className="field-label wide-field">
               <span>Title</span>
-              <input value={recurringForm.title} onChange={(event) => setRecurringForm({ ...recurringForm, title: event.target.value })} placeholder="Build meeting" required />
+              <input value={recurringForm.title} onChange={(event) => setRecurringForm({ ...recurringForm, title: event.target.value })} placeholder={defaultMeetingTitle} required />
             </label>
             <label className="inline-check required-toggle">
               <input type="checkbox" checked={recurringForm.required} onChange={(event) => setRecurringForm({ ...recurringForm, required: event.target.checked })} />
@@ -622,10 +626,6 @@ function Meetings({ session }: { session: DashboardSession }) {
             <label className="field-label">
               <span>End time</span>
               <input value={recurringForm.endTime} onChange={(event) => setRecurringForm({ ...recurringForm, endTime: event.target.value })} type="time" />
-            </label>
-            <label className="field-label notes-field">
-              <span>Notes</span>
-              <textarea value={recurringForm.notes} onChange={(event) => setRecurringForm({ ...recurringForm, notes: event.target.value })} rows={3} placeholder="Optional context for every generated meeting" />
             </label>
             <p className={`recurrence-preview ${recurringPreview.kind}`}>{recurringPreview.text}</p>
             <div className="toolbar compact form-actions">
@@ -1000,16 +1000,13 @@ function localDateInputValue(date = new Date()) {
   return `${year}-${month}-${day}`;
 }
 
-function localDateTimeInputValue(value?: string) {
+function localTimeInputValue(value?: string) {
   if (!value) return "";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
   const hours = String(date.getHours()).padStart(2, "0");
   const minutes = String(date.getMinutes()).padStart(2, "0");
-  return `${year}-${month}-${day}T${hours}:${minutes}`;
+  return `${hours}:${minutes}`;
 }
 
 function formatPercent(value: number | null) {
@@ -1019,10 +1016,10 @@ function formatPercent(value: number | null) {
 function emptyMeetingForm(): MeetingFormState {
   return {
     meetingDate: localDateInputValue(),
-    title: "",
+    title: defaultMeetingTitle,
     required: true,
-    startsAt: "",
-    endsAt: "",
+    startTime: defaultMeetingStartTime,
+    endTime: defaultMeetingEndTime,
     notes: ""
   };
 }
@@ -1032,12 +1029,11 @@ function emptyRecurringMeetingForm(): RecurringMeetingFormState {
   return {
     startDate: today,
     endDate: today,
-    title: "",
+    title: defaultMeetingTitle,
     required: true,
-    startTime: "",
-    endTime: "",
-    weekdays: [weekdayForIsoDate(today)],
-    notes: ""
+    startTime: defaultMeetingStartTime,
+    endTime: defaultMeetingEndTime,
+    weekdays: [weekdayForIsoDate(today)]
   };
 }
 
@@ -1046,22 +1042,22 @@ function meetingToFormState(meeting: ScheduledMeeting): MeetingFormState {
     meetingDate: meeting.meetingDate,
     title: meeting.title,
     required: meeting.required,
-    startsAt: localDateTimeInputValue(meeting.startsAt),
-    endsAt: localDateTimeInputValue(meeting.endsAt),
+    startTime: localTimeInputValue(meeting.startsAt),
+    endTime: localTimeInputValue(meeting.endsAt),
     notes: meeting.notes ?? ""
   };
 }
 
 function meetingPayload(formState: MeetingFormState) {
-  if (formState.startsAt && formState.endsAt && formState.endsAt <= formState.startsAt) {
+  if (formState.startTime && formState.endTime && formState.endTime <= formState.startTime) {
     throw new Error("Meeting end time must be after the start time.");
   }
   return {
     meetingDate: formState.meetingDate,
     title: formState.title.trim(),
     required: formState.required,
-    startsAt: formState.startsAt ? new Date(formState.startsAt).toISOString() : undefined,
-    endsAt: formState.endsAt ? new Date(formState.endsAt).toISOString() : undefined,
+    startsAt: formState.startTime ? localDateAndTimeToIso(formState.meetingDate, formState.startTime) : undefined,
+    endsAt: formState.endTime ? localDateAndTimeToIso(formState.meetingDate, formState.endTime) : undefined,
     notes: formState.notes.trim() || undefined
   };
 }
@@ -1075,8 +1071,7 @@ function recurringMeetingPayload(formState: RecurringMeetingFormState, meetingDa
     title: formState.title.trim(),
     required: formState.required,
     startsAt: formState.startTime ? localDateAndTimeToIso(meetingDate, formState.startTime) : undefined,
-    endsAt: formState.endTime ? localDateAndTimeToIso(meetingDate, formState.endTime) : undefined,
-    notes: formState.notes.trim() || undefined
+    endsAt: formState.endTime ? localDateAndTimeToIso(meetingDate, formState.endTime) : undefined
   };
 }
 
@@ -1100,9 +1095,6 @@ function recurringMeetingDates(formState: RecurringMeetingFormState) {
 }
 
 function previewRecurringMeetings(formState: RecurringMeetingFormState, existingMeetingDates: Set<string>) {
-  if (!formState.title.trim()) {
-    return { kind: "info", createCount: 0, text: "Add a title to preview generated meetings." };
-  }
   try {
     const dates = recurringMeetingDates(formState);
     const createCount = dates.filter((date) => !existingMeetingDates.has(date)).length;
@@ -1162,9 +1154,9 @@ function MeetingRequirementBadge({ required }: { required: boolean }) {
 
 function meetingTimeRange(meeting: ScheduledMeeting) {
   if (!meeting.startsAt && !meeting.endsAt) return "";
-  if (meeting.startsAt && meeting.endsAt) return `${formatDateTime(meeting.startsAt)} - ${formatDateTime(meeting.endsAt)}`;
-  if (meeting.startsAt) return `Starts ${formatDateTime(meeting.startsAt)}`;
-  return `Ends ${formatDateTime(meeting.endsAt)}`;
+  if (meeting.startsAt && meeting.endsAt) return `${formatTime(meeting.startsAt)} - ${formatTime(meeting.endsAt)}`;
+  if (meeting.startsAt) return `Starts ${formatTime(meeting.startsAt)}`;
+  return `Ends ${formatTime(meeting.endsAt)}`;
 }
 
 function findHeaderIndex(header: string[], names: string[]) {
@@ -1251,6 +1243,14 @@ function formatDateTime(value?: string) {
   return new Intl.DateTimeFormat(undefined, {
     month: "short",
     day: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  }).format(new Date(value));
+}
+
+function formatTime(value?: string) {
+  if (!value) return "";
+  return new Intl.DateTimeFormat(undefined, {
     hour: "numeric",
     minute: "2-digit"
   }).format(new Date(value));

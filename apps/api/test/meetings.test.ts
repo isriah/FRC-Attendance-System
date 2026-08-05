@@ -72,6 +72,20 @@ describe("scheduled meeting admin API", () => {
     expect(duplicate.status).toBe(409);
     expect(await duplicate.json()).toEqual({ error: "Scheduled meeting already exists for 2026-01-02" });
   });
+
+  it("rejects meeting times that fall outside the scheduled meeting date", async () => {
+    const env = createTestEnv();
+
+    const response = await request(env, "POST", "/admin/meetings", {
+      meetingDate: "2026-01-02",
+      title: "Regular Meeting",
+      startsAt: "2026-01-02T20:00:00.000Z",
+      endsAt: "2026-01-03T22:30:00.000Z"
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "endsAt must be on meetingDate" });
+  });
 });
 
 function createTestEnv(): Env {
