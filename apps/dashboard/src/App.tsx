@@ -901,7 +901,7 @@ function Reports({ session }: { session: DashboardSession }) {
         <input name="reason" placeholder="Correction reason" required />
         <button>Add manual event</button>
       </form>
-      <Table title="Attendance sessions" error={error} rows={data?.sessions ?? []} columns={["student_id", "meeting_date", "check_in_at", "check_out_at", "status"]} />
+      <Table title="Attendance sessions" error={error} rows={data?.sessions ?? []} columns={["meeting_date", "meeting_title", "required", "has_attendance", "student_id", "check_in_at", "check_out_at", "status"]} />
     </>
   );
 }
