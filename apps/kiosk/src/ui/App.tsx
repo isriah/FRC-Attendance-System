@@ -15,7 +15,7 @@ const readyState: KioskDisplayState = baseDisplayState("ready");
 const kioskBrand = {
   title: import.meta.env.VITE_KIOSK_TITLE ?? "FRC Attendance",
   subtitle: import.meta.env.VITE_KIOSK_SUBTITLE ?? "RoboLancers 321",
-  primaryColor: import.meta.env.VITE_KIOSK_PRIMARY_COLOR ?? "#1d7a8c",
+  primaryColor: import.meta.env.VITE_KIOSK_PRIMARY_COLOR ?? "#B80100",
   accentColor: import.meta.env.VITE_KIOSK_ACCENT_COLOR ?? "#f2c14e"
 };
 
@@ -69,7 +69,7 @@ function KioskApp() {
   }, [state.updatedAt, state.status]);
 
   return (
-    <main className="kiosk-shell">
+    <main className={`kiosk-shell kiosk-shell-${state.status}`}>
       <header className="kiosk-brand">
         <span>{kioskBrand.title}</span>
         <strong>{kioskBrand.subtitle}</strong>
