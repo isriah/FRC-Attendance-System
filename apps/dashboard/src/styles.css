@@ -12,6 +12,7 @@ body,
   --primary-dark: color-mix(in srgb, var(--primary-color), #000000 24%);
   --primary-soft: color-mix(in srgb, var(--primary-color), #ffffff 78%);
   --primary-bg: color-mix(in srgb, var(--primary-color), #ffffff 93%);
+  --success-color: var(--primary-dark);
   --accent-dark: color-mix(in srgb, var(--accent-color), #000000 38%);
   --accent-soft: color-mix(in srgb, var(--accent-color), #ffffff 72%);
   --accent-bg: color-mix(in srgb, var(--accent-color), #ffffff 91%);
@@ -175,7 +176,8 @@ textarea {
   min-width: 260px;
 }
 
-.meeting-form {
+.meeting-form,
+.recurring-meeting-form {
   display: grid;
   grid-template-columns: minmax(160px, 0.8fr) minmax(260px, 1.4fr) auto minmax(220px, 1fr) minmax(220px, 1fr);
   gap: 12px;
@@ -183,7 +185,12 @@ textarea {
   margin-bottom: 14px;
 }
 
-.meeting-form textarea {
+.recurring-meeting-form {
+  grid-template-columns: minmax(150px, 0.7fr) minmax(150px, 0.7fr) minmax(240px, 1.2fr) auto;
+}
+
+.meeting-form textarea,
+.recurring-meeting-form textarea {
   font-family: inherit;
 }
 
@@ -199,6 +206,53 @@ textarea {
 
 .form-actions {
   grid-column: 1 / -1;
+}
+
+.weekday-picker {
+  grid-column: 1 / -1;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 12px 12px;
+}
+
+.weekday-picker legend {
+  color: var(--muted-color);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 0 4px;
+}
+
+.weekday-picker label {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+  min-height: 28px;
+}
+
+.weekday-picker input {
+  width: auto;
+}
+
+.recurrence-preview {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 13px;
+}
+
+.recurrence-preview.info {
+  color: var(--muted-color);
+}
+
+.recurrence-preview.success {
+  color: var(--success-color);
+}
+
+.recurrence-preview.error {
+  color: var(--danger-color);
 }
 
 .section-heading {

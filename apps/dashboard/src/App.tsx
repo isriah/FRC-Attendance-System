@@ -64,10 +64,30 @@ interface MeetingFormState {
   notes: string;
 }
 
+interface RecurringMeetingFormState {
+  startDate: string;
+  endDate: string;
+  title: string;
+  required: boolean;
+  startTime: string;
+  endTime: string;
+  weekdays: number[];
+  notes: string;
+}
+
 const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
 const googleAuthEnabled = Boolean(googleClientId);
 const fingerprintEnrollmentAvailable = !apiBaseUrl.includes("workers.dev");
 const productionRosterPullAvailable = fingerprintEnrollmentAvailable;
+const weekdayOptions = [
+  { value: 0, label: "Sun" },
+  { value: 1, label: "Mon" },
+  { value: 2, label: "Tue" },
+  { value: 3, label: "Wed" },
+  { value: 4, label: "Thu" },
+  { value: 5, label: "Fri" },
+  { value: 6, label: "Sat" }
+];
 
 function App() {
   const [session, setSession] = useState<DashboardSession>(readStoredSession);
@@ -415,9 +435,13 @@ function Meetings({ session }: { session: DashboardSession }) {
   const { data, error, reload } = useApi<{ meetings: ScheduledMeeting[] }>("/admin/meetings", session);
   const [editingMeeting, setEditingMeeting] = useState<ScheduledMeeting>();
   const [formState, setFormState] = useState<MeetingFormState>(emptyMeetingForm());
+  const [recurringForm, setRecurringForm] = useState<RecurringMeetingFormState>(emptyRecurringMeetingForm());
   const [message, setMessage] = useState<{ kind: "success" | "error"; text: string }>();
   const [saving, setSaving] = useState(false);
+  const [recurringSaving, setRecurringSaving] = useState(false);
   const meetings = data?.meetings ?? [];
+  const existingMeetingDates = new Set(meetings.map((meeting) => meeting.meetingDate));
+  const recurringPreview = previewRecurringMeetings(recurringForm, existingMeetingDates);
 
   async function submitMeeting(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -473,6 +497,53 @@ function Meetings({ session }: { session: DashboardSession }) {
     setMessage(undefined);
   }
 
+  async function submitRecurringMeetings(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setRecurringSaving(true);
+    setMessage(undefined);
+    try {
+      const generatedDates = recurringMeetingDates(recurringForm);
+      const conflictDates = generatedDates.filter((date) => existingMeetingDates.has(date));
+      const createDates = generatedDates.filter((date) => !existingMeetingDates.has(date));
+      const createdDates: string[] = [];
+      const failedDates: string[] = [];
+
+      if (createDates.length === 0) {
+        throw new Error(conflictDates.length > 0
+          ? `No meetings created. ${pluralize(conflictDates.length, "date")} already scheduled: ${formatDateList(conflictDates)}.`
+          : "No dates matched the selected recurrence.");
+      }
+
+      for (const meetingDate of createDates) {
+        try {
+          await apiPost<ScheduledMeeting>("/admin/meetings", recurringMeetingPayload(recurringForm, meetingDate), session);
+          createdDates.push(meetingDate);
+        } catch {
+          failedDates.push(meetingDate);
+        }
+      }
+
+      reload();
+      if (failedDates.length > 0) {
+        setMessage({
+          kind: "error",
+          text: `Created ${pluralize(createdDates.length, "meeting")}. ${pluralize(failedDates.length, "date")} failed: ${formatDateList(failedDates)}.${conflictDates.length > 0 ? ` Skipped existing ${formatDateList(conflictDates)}.` : ""}`
+        });
+        return;
+      }
+
+      setRecurringForm(emptyRecurringMeetingForm());
+      setMessage({
+        kind: "success",
+        text: `Created ${pluralize(createdDates.length, "meeting")}${conflictDates.length > 0 ? ` and skipped existing ${formatDateList(conflictDates)}` : ""}.`
+      });
+    } catch (err) {
+      setMessage({ kind: "error", text: friendlyDashboardError(err) });
+    } finally {
+      setRecurringSaving(false);
+    }
+  }
+
   return (
     <>
       <section>
@@ -510,6 +581,59 @@ function Meetings({ session }: { session: DashboardSession }) {
         {message ? <p className={`notice ${message.kind}`}>{message.text}</p> : null}
         {error ? <p className="error">{error}</p> : null}
       </section>
+
+      {!editingMeeting ? (
+        <section>
+          <h2>Add Repeating Meetings</h2>
+          <form className="recurring-meeting-form" onSubmit={submitRecurringMeetings}>
+            <label className="field-label">
+              <span>Starts</span>
+              <input value={recurringForm.startDate} onChange={(event) => setRecurringForm({ ...recurringForm, startDate: event.target.value })} type="date" required />
+            </label>
+            <label className="field-label">
+              <span>Ends</span>
+              <input value={recurringForm.endDate} onChange={(event) => setRecurringForm({ ...recurringForm, endDate: event.target.value })} type="date" required />
+            </label>
+            <label className="field-label wide-field">
+              <span>Title</span>
+              <input value={recurringForm.title} onChange={(event) => setRecurringForm({ ...recurringForm, title: event.target.value })} placeholder="Build meeting" required />
+            </label>
+            <label className="inline-check required-toggle">
+              <input type="checkbox" checked={recurringForm.required} onChange={(event) => setRecurringForm({ ...recurringForm, required: event.target.checked })} />
+              Required attendance
+            </label>
+            <fieldset className="weekday-picker">
+              <legend>Repeats on</legend>
+              {weekdayOptions.map((weekday) => (
+                <label key={weekday.value}>
+                  <input
+                    type="checkbox"
+                    checked={recurringForm.weekdays.includes(weekday.value)}
+                    onChange={() => setRecurringForm({ ...recurringForm, weekdays: toggleWeekday(recurringForm.weekdays, weekday.value) })}
+                  />
+                  {weekday.label}
+                </label>
+              ))}
+            </fieldset>
+            <label className="field-label">
+              <span>Start time</span>
+              <input value={recurringForm.startTime} onChange={(event) => setRecurringForm({ ...recurringForm, startTime: event.target.value })} type="time" />
+            </label>
+            <label className="field-label">
+              <span>End time</span>
+              <input value={recurringForm.endTime} onChange={(event) => setRecurringForm({ ...recurringForm, endTime: event.target.value })} type="time" />
+            </label>
+            <label className="field-label notes-field">
+              <span>Notes</span>
+              <textarea value={recurringForm.notes} onChange={(event) => setRecurringForm({ ...recurringForm, notes: event.target.value })} rows={3} placeholder="Optional context for every generated meeting" />
+            </label>
+            <p className={`recurrence-preview ${recurringPreview.kind}`}>{recurringPreview.text}</p>
+            <div className="toolbar compact form-actions">
+              <button disabled={recurringSaving || recurringPreview.createCount === 0}>{recurringSaving ? "Creating..." : "Create repeating meetings"}</button>
+            </div>
+          </form>
+        </section>
+      ) : null}
 
       <section>
         <div className="section-heading">
@@ -903,6 +1027,20 @@ function emptyMeetingForm(): MeetingFormState {
   };
 }
 
+function emptyRecurringMeetingForm(): RecurringMeetingFormState {
+  const today = localDateInputValue();
+  return {
+    startDate: today,
+    endDate: today,
+    title: "",
+    required: true,
+    startTime: "",
+    endTime: "",
+    weekdays: [weekdayForIsoDate(today)],
+    notes: ""
+  };
+}
+
 function meetingToFormState(meeting: ScheduledMeeting): MeetingFormState {
   return {
     meetingDate: meeting.meetingDate,
@@ -915,6 +1053,9 @@ function meetingToFormState(meeting: ScheduledMeeting): MeetingFormState {
 }
 
 function meetingPayload(formState: MeetingFormState) {
+  if (formState.startsAt && formState.endsAt && formState.endsAt <= formState.startsAt) {
+    throw new Error("Meeting end time must be after the start time.");
+  }
   return {
     meetingDate: formState.meetingDate,
     title: formState.title.trim(),
@@ -923,6 +1064,96 @@ function meetingPayload(formState: MeetingFormState) {
     endsAt: formState.endsAt ? new Date(formState.endsAt).toISOString() : undefined,
     notes: formState.notes.trim() || undefined
   };
+}
+
+function recurringMeetingPayload(formState: RecurringMeetingFormState, meetingDate: string) {
+  if (formState.startTime && formState.endTime && formState.endTime <= formState.startTime) {
+    throw new Error("Meeting end time must be after the start time.");
+  }
+  return {
+    meetingDate,
+    title: formState.title.trim(),
+    required: formState.required,
+    startsAt: formState.startTime ? localDateAndTimeToIso(meetingDate, formState.startTime) : undefined,
+    endsAt: formState.endTime ? localDateAndTimeToIso(meetingDate, formState.endTime) : undefined,
+    notes: formState.notes.trim() || undefined
+  };
+}
+
+function recurringMeetingDates(formState: RecurringMeetingFormState) {
+  if (!formState.title.trim()) throw new Error("Meeting title is required.");
+  if (!formState.startDate || !formState.endDate) throw new Error("Start and end dates are required.");
+  if (formState.startDate > formState.endDate) throw new Error("End date must be on or after the start date.");
+  if (formState.weekdays.length === 0) throw new Error("Choose at least one weekday.");
+  if (formState.startTime && formState.endTime && formState.endTime <= formState.startTime) {
+    throw new Error("Meeting end time must be after the start time.");
+  }
+
+  const selectedWeekdays = new Set(formState.weekdays);
+  const dates: string[] = [];
+  for (let date = formState.startDate; date <= formState.endDate; date = addDays(date, 1)) {
+    if (selectedWeekdays.has(weekdayForIsoDate(date))) dates.push(date);
+    if (dates.length > 260) throw new Error("Recurring creation is limited to 260 meetings at a time.");
+  }
+  if (dates.length === 0) throw new Error("No dates matched the selected recurrence.");
+  return dates;
+}
+
+function previewRecurringMeetings(formState: RecurringMeetingFormState, existingMeetingDates: Set<string>) {
+  if (!formState.title.trim()) {
+    return { kind: "info", createCount: 0, text: "Add a title to preview generated meetings." };
+  }
+  try {
+    const dates = recurringMeetingDates(formState);
+    const createCount = dates.filter((date) => !existingMeetingDates.has(date)).length;
+    const conflictDates = dates.filter((date) => existingMeetingDates.has(date));
+    return {
+      kind: createCount > 0 ? "success" : "error",
+      createCount,
+      text: `${pluralize(createCount, "meeting")} will be created${conflictDates.length > 0 ? `; ${pluralize(conflictDates.length, "existing date")} will be skipped: ${formatDateList(conflictDates)}.` : "."}`
+    };
+  } catch (error) {
+    return { kind: "error", createCount: 0, text: friendlyDashboardError(error) };
+  }
+}
+
+function toggleWeekday(weekdays: number[], weekday: number) {
+  if (weekdays.includes(weekday)) return weekdays.filter((value) => value !== weekday);
+  return [...weekdays, weekday].sort((left, right) => left - right);
+}
+
+function weekdayForIsoDate(value: string) {
+  const { year, month, day } = parseIsoDate(value);
+  return new Date(year, month - 1, day).getDay();
+}
+
+function addDays(value: string, days: number) {
+  const { year, month, day } = parseIsoDate(value);
+  const date = new Date(year, month - 1, day + days);
+  const nextYear = date.getFullYear();
+  const nextMonth = String(date.getMonth() + 1).padStart(2, "0");
+  const nextDay = String(date.getDate()).padStart(2, "0");
+  return `${nextYear}-${nextMonth}-${nextDay}`;
+}
+
+function parseIsoDate(value: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) throw new Error("Dates must use YYYY-MM-DD format.");
+  const [, year, month, day] = match;
+  return { year: Number(year), month: Number(month), day: Number(day) };
+}
+
+function localDateAndTimeToIso(meetingDate: string, time: string) {
+  return new Date(`${meetingDate}T${time}`).toISOString();
+}
+
+function pluralize(count: number, singular: string) {
+  return `${count} ${count === 1 ? singular : `${singular}s`}`;
+}
+
+function formatDateList(dates: string[]) {
+  if (dates.length <= 4) return dates.join(", ");
+  return `${dates.slice(0, 4).join(", ")} and ${dates.length - 4} more`;
 }
 
 function MeetingRequirementBadge({ required }: { required: boolean }) {
