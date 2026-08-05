@@ -108,6 +108,8 @@ npm --workspace @frc-attendance/api run dev
 
 `apps/dashboard` is deployed to Cloudflare Pages project `frc-attendance-dashboard`.
 
+Current feature-completion priority: scheduled meeting management. The system needs a durable calendar/list source of truth for expected meetings, dashboard controls for mentors to create/edit/cancel/review those meetings, report builders that include scheduled meetings even when no one scans in, and matching bench Pi/local bench API support so this behavior can be validated before production deployment. After that path is reliable, polish mentor-facing report exports around the same scheduled-meeting data.
+
 For direct uploads, build with production Vite variables before deploying:
 
 ```powershell
