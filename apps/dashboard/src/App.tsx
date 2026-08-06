@@ -847,6 +847,19 @@ function MeetingDetails({
     checkInAt: typeof row.checkInAt === "string" ? formatTime(row.checkInAt) : row.checkInAt,
     checkOutAt: typeof row.checkOutAt === "string" ? formatTime(row.checkOutAt) : row.checkOutAt
   }));
+  const absentRows = absences?.rows ?? [];
+  const presentStateText = presence
+    ? meetingPresentRows.length === 0
+      ? "No members have checked in for this meeting yet."
+      : `${pluralize(meetingPresentRows.length, "member")} checked in for this meeting.`
+    : "Loading present members...";
+  const absentStateText = meeting.required
+    ? absences
+      ? absentRows.length === 0
+        ? "No active members are absent for this required meeting."
+        : `${pluralize(absentRows.length, "active member")} absent from this required meeting.`
+      : "Loading absent members..."
+    : "Optional meetings do not create missed-attendance records.";
 
   return (
     <div className="meeting-details">
@@ -876,15 +889,23 @@ function MeetingDetails({
       {absencesError ? <p className="error">{absencesError}</p> : null}
       <div className="meeting-detail-grid">
         <div>
-          <h3>Present Members</h3>
+          <div className="meeting-detail-subheading">
+            <h3>Present Members</h3>
+            <span>{presence ? meetingPresentRows.length : "..."}</span>
+          </div>
+          <p className="empty-state">{presentStateText}</p>
           <DataTable rows={meetingPresentRows} columns={["studentId", "firstName", "lastName", "status", "checkInAt", "checkOutAt"]} />
         </div>
         <div>
-          <h3>{meeting.required ? "Absent Members" : "Optional Attendance"}</h3>
+          <div className="meeting-detail-subheading">
+            <h3>{meeting.required ? "Absent Members" : "Optional Attendance"}</h3>
+            <span>{meeting.required ? absences?.absentCount ?? "..." : "N/A"}</span>
+          </div>
+          <p className="empty-state">{absentStateText}</p>
           {meeting.required ? (
-            <DataTable rows={absences?.rows ?? []} columns={["studentId", "firstName", "lastName"]} />
+            <DataTable rows={absentRows} columns={["studentId", "firstName", "lastName"]} />
           ) : (
-            <p className="empty-state">No missed attendance is recorded for optional meetings.</p>
+            <p className="notice info">Track attendance here as present-only participation; use required meetings for absence accountability.</p>
           )}
         </div>
       </div>

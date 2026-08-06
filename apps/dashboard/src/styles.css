@@ -450,6 +450,31 @@ textarea {
   min-width: 0;
 }
 
+.meeting-detail-subheading {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.meeting-detail-subheading h3 {
+  margin: 0;
+  min-width: 0;
+}
+
+.meeting-detail-subheading span {
+  background: var(--page-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  color: var(--muted-color);
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 4px 8px;
+}
+
 .selected-row {
   background: var(--primary-bg);
 }
