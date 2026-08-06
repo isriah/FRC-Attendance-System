@@ -429,13 +429,37 @@ function FingerprintEnrollmentTable({ enrollments, onDelete, deleting }: { enrol
 
 function Meetings({ session }: { session: DashboardSession }) {
   const { data, error, reload } = useApi<{ meetings: ScheduledMeeting[] }>("/admin/meetings", session);
+  const { data: meetingSummary, error: meetingSummaryError, reload: reloadMeetingSummary } = useApi<{ meetings: MeetingSummaryReportRow[] }>("/admin/reports/meetings", session);
   const [editingMeeting, setEditingMeeting] = useState<ScheduledMeeting>();
   const [formState, setFormState] = useState<MeetingFormState>(emptyMeetingForm());
   const [message, setMessage] = useState<{ kind: "success" | "error"; text: string }>();
   const [saving, setSaving] = useState(false);
+  const [selectedMeetingDate, setSelectedMeetingDate] = useState("");
+  const [calendarMonth, setCalendarMonth] = useState("");
   const meetings = data?.meetings ?? [];
+  const meetingSummaryRows = meetingSummary?.meetings ?? [];
+  const meetingSummaryByDate = new Map(meetingSummaryRows.map((meeting) => [meeting.meetingDate, meeting]));
+  const selectedMeeting = meetings.find((meeting) => meeting.meetingDate === selectedMeetingDate);
+  const selectedMeetingSummary = selectedMeetingDate ? meetingSummaryByDate.get(selectedMeetingDate) : undefined;
+  const { data: selectedPresence, error: selectedPresenceError, reload: reloadSelectedPresence } = useOptionalApi<PresenceReport>(
+    selectedMeetingDate ? `/admin/reports/presence?date=${selectedMeetingDate}` : undefined,
+    session
+  );
+  const { data: selectedAbsences, error: selectedAbsencesError, reload: reloadSelectedAbsences } = useOptionalApi<MeetingAbsenceReport>(
+    selectedMeetingDate ? `/admin/reports/meeting-absences?date=${selectedMeetingDate}` : undefined,
+    session
+  );
+  const presentRows = (selectedPresence?.rows ?? []).filter((row) => row.status === "signed_in" || row.status === "signed_out");
   const existingMeetingDates = new Set(meetings.map((meeting) => meeting.meetingDate));
   const recurringPreview = formState.repeats ? previewRecurringMeetings(formState, existingMeetingDates) : undefined;
+
+  useEffect(() => {
+    if (meetings.length === 0) return;
+    const todayMonth = localDateInputValue().slice(0, 7);
+    const defaultMeeting = meetings.find((meeting) => meeting.meetingDate.startsWith(todayMonth)) ?? meetings[0];
+    if (!calendarMonth && defaultMeeting) setCalendarMonth(defaultMeeting.meetingDate.slice(0, 7));
+    if (!selectedMeetingDate && defaultMeeting) setSelectedMeetingDate(defaultMeeting.meetingDate);
+  }, [calendarMonth, meetings, selectedMeetingDate]);
 
   async function submitMeeting(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -488,6 +512,7 @@ function Meetings({ session }: { session: DashboardSession }) {
       }
       setEditingMeeting(undefined);
       reload();
+      reloadMeetingSummary();
     } catch (err) {
       setMessage({ kind: "error", text: friendlyDashboardError(err) });
     } finally {
@@ -506,7 +531,9 @@ function Meetings({ session }: { session: DashboardSession }) {
         setFormState(emptyMeetingForm());
       }
       setMessage({ kind: "success", text: `Deleted ${meeting.title}.` });
+      if (selectedMeetingDate === meeting.meetingDate) setSelectedMeetingDate("");
       reload();
+      reloadMeetingSummary();
     } catch (err) {
       setMessage({ kind: "error", text: friendlyDashboardError(err) });
     } finally {
@@ -601,39 +628,203 @@ function Meetings({ session }: { session: DashboardSession }) {
       <section>
         <div className="section-heading">
           <h2>Scheduled Meetings</h2>
-          <button type="button" onClick={reload}>Refresh</button>
+          <button type="button" onClick={() => {
+            reload();
+            reloadMeetingSummary();
+            reloadSelectedPresence();
+            reloadSelectedAbsences();
+          }}>Refresh</button>
         </div>
+        {meetingSummaryError ? <p className="error">{meetingSummaryError}</p> : null}
+        {meetings.length > 0 ? (
+          <MeetingCalendar
+            month={calendarMonth || meetings[0]?.meetingDate.slice(0, 7) || localDateInputValue().slice(0, 7)}
+            meetings={meetings}
+            summariesByDate={meetingSummaryByDate}
+            selectedMeetingDate={selectedMeetingDate}
+            onMonthChange={setCalendarMonth}
+            onSelectMeeting={setSelectedMeetingDate}
+          />
+        ) : null}
+        <MeetingDetails
+          meeting={selectedMeeting}
+          summary={selectedMeetingSummary}
+          presence={selectedPresence}
+          absences={selectedAbsences}
+          presentRows={presentRows}
+          presenceError={selectedPresenceError}
+          absencesError={selectedAbsencesError}
+        />
         {meetings.length === 0 ? <p className="empty-state">No scheduled meetings yet.</p> : null}
         {meetings.length > 0 ? (
           <div className="meeting-table-wrap">
             <table className="meeting-table">
               <thead>
                 <tr>
-                  {["date", "title", "attendance", "time", "notes", "actions"].map((column) => <th key={column}>{column}</th>)}
+                  {["date", "title", "attendance", "present", "absent", "time", "notes", "actions"].map((column) => <th key={column}>{column}</th>)}
                 </tr>
               </thead>
               <tbody>
-                {meetings.map((meeting) => (
-                  <tr key={meeting.id}>
-                    <td>{meeting.meetingDate}</td>
+                {meetings.map((meeting) => {
+                  const summary = meetingSummaryByDate.get(meeting.meetingDate);
+                  return (
+                  <tr
+                    key={meeting.id}
+                    className={selectedMeetingDate === meeting.meetingDate ? "selected-row" : undefined}
+                    tabIndex={0}
+                    onClick={() => setSelectedMeetingDate(meeting.meetingDate)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") setSelectedMeetingDate(meeting.meetingDate);
+                    }}
+                  >
+                    <td><button className="link-button" type="button" onClick={() => setSelectedMeetingDate(meeting.meetingDate)}>{meeting.meetingDate}</button></td>
                     <td>{meeting.title}</td>
                     <td><MeetingRequirementBadge required={meeting.required} /></td>
+                    <td>{summary ? summary.presentCount : "..."}</td>
+                    <td>{meeting.required ? summary?.absentCount ?? "..." : "N/A"}</td>
                     <td>{meetingTimeRange(meeting)}</td>
                     <td>{meeting.notes ?? ""}</td>
                     <td>
                       <div className="kiosk-actions">
-                        <button type="button" onClick={() => startEditing(meeting)} disabled={saving}>Edit</button>
-                        <button type="button" onClick={() => deleteMeeting(meeting)} disabled={saving}>Delete</button>
+                        <button type="button" onClick={(event) => {
+                          event.stopPropagation();
+                          startEditing(meeting);
+                        }} disabled={saving}>Edit</button>
+                        <button type="button" onClick={(event) => {
+                          event.stopPropagation();
+                          deleteMeeting(meeting);
+                        }} disabled={saving}>Delete</button>
                       </div>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
         ) : null}
       </section>
     </>
+  );
+}
+
+function MeetingCalendar({
+  month,
+  meetings,
+  summariesByDate,
+  selectedMeetingDate,
+  onMonthChange,
+  onSelectMeeting
+}: {
+  month: string;
+  meetings: ScheduledMeeting[];
+  summariesByDate: Map<string, MeetingSummaryReportRow>;
+  selectedMeetingDate: string;
+  onMonthChange: (month: string) => void;
+  onSelectMeeting: (meetingDate: string) => void;
+}) {
+  const days = calendarDaysForMonth(month);
+  const meetingsByDate = groupMeetingsByDate(meetings);
+
+  return (
+    <div className="meeting-calendar">
+      <div className="calendar-toolbar">
+        <h3>{formatMonthLabel(month)}</h3>
+        <div className="kiosk-actions">
+          <button type="button" onClick={() => onMonthChange(addMonthsToMonth(month, -1))}>Previous</button>
+          <button type="button" onClick={() => onMonthChange(localDateInputValue().slice(0, 7))}>Current Month</button>
+          <button type="button" onClick={() => onMonthChange(addMonthsToMonth(month, 1))}>Next</button>
+        </div>
+      </div>
+      <div className="calendar-grid">
+        {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((weekday) => <div className="calendar-weekday" key={weekday}>{weekday}</div>)}
+        {days.map((day) => {
+          const dayMeetings = meetingsByDate.get(day.date) ?? [];
+          return (
+            <div className={`calendar-day ${day.inMonth ? "" : "outside-month"} ${day.date === localDateInputValue() ? "today" : ""}`} key={day.date}>
+              <span className="calendar-date">{day.dayOfMonth}</span>
+              <div className="calendar-events">
+                {dayMeetings.map((meeting) => {
+                  const summary = summariesByDate.get(meeting.meetingDate);
+                  return (
+                    <button
+                      className={`calendar-event ${selectedMeetingDate === meeting.meetingDate ? "selected" : ""}`}
+                      key={meeting.id}
+                      type="button"
+                      onClick={() => onSelectMeeting(meeting.meetingDate)}
+                    >
+                      <span>{meeting.title}</span>
+                      <small>{summary ? `${summary.presentCount} present` : "loading"}</small>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function MeetingDetails({
+  meeting,
+  summary,
+  presence,
+  absences,
+  presentRows,
+  presenceError,
+  absencesError
+}: {
+  meeting?: ScheduledMeeting;
+  summary?: MeetingSummaryReportRow;
+  presence?: PresenceReport;
+  absences?: MeetingAbsenceReport;
+  presentRows: Array<Record<string, unknown>>;
+  presenceError?: string;
+  absencesError?: string;
+}) {
+  if (!meeting) {
+    return <p className="empty-state">Select a meeting on the calendar or table to see attendance details.</p>;
+  }
+
+  return (
+    <div className="meeting-details">
+      <div className="section-heading">
+        <div>
+          <h3>{meeting.title}</h3>
+          <p className="report-context">{meeting.meetingDate}{meetingTimeRange(meeting) ? `, ${meetingTimeRange(meeting)}` : ""}</p>
+        </div>
+        <MeetingRequirementBadge required={meeting.required} />
+      </div>
+      <p className="report-context">
+        {meeting.required
+          ? "Required meetings count active members who were not present as absent."
+          : "Optional meetings show who attended, but do not create missed-meeting counts."}
+      </p>
+      <div className="grid compact-grid">
+        <Metric label="Present" value={summary?.presentCount ?? (presence ? presentRows.length : "...")} />
+        <Metric label="Signed In" value={presence?.counts.signedIn ?? 0} />
+        <Metric label="Open Check-Ins" value={summary?.openCheckIns ?? 0} />
+        <Metric label="Absent" value={meeting.required ? summary?.absentCount ?? absences?.absentCount ?? "..." : "N/A"} />
+      </div>
+      {presenceError ? <p className="error">{presenceError}</p> : null}
+      {absencesError ? <p className="error">{absencesError}</p> : null}
+      <div className="meeting-detail-grid">
+        <div>
+          <h3>Present Members</h3>
+          <DataTable rows={presentRows} columns={["studentId", "firstName", "lastName", "status", "checkInAt", "checkOutAt"]} />
+        </div>
+        <div>
+          <h3>{meeting.required ? "Absent Members" : "Optional Attendance"}</h3>
+          {meeting.required ? (
+            <DataTable rows={absences?.rows ?? []} columns={["studentId", "firstName", "lastName"]} />
+          ) : (
+            <p className="empty-state">No missed attendance is recorded for optional meetings.</p>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -1225,6 +1416,54 @@ function pluralize(count: number, singular: string) {
 function formatDateList(dates: string[]) {
   if (dates.length <= 4) return dates.join(", ");
   return `${dates.slice(0, 4).join(", ")} and ${dates.length - 4} more`;
+}
+
+function groupMeetingsByDate(meetings: ScheduledMeeting[]) {
+  return meetings.reduce<Map<string, ScheduledMeeting[]>>((groups, meeting) => {
+    groups.set(meeting.meetingDate, [...(groups.get(meeting.meetingDate) ?? []), meeting]);
+    return groups;
+  }, new Map());
+}
+
+function calendarDaysForMonth(month: string) {
+  const { year, monthIndex } = parseMonthValue(month);
+  const firstDay = new Date(year, monthIndex, 1);
+  const startDate = new Date(year, monthIndex, 1 - firstDay.getDay());
+  return Array.from({ length: 42 }, (_, index) => {
+    const date = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate() + index);
+    const isoDate = localDateInputValue(date);
+    return {
+      date: isoDate,
+      dayOfMonth: date.getDate(),
+      inMonth: date.getMonth() === monthIndex
+    };
+  });
+}
+
+function addMonthsToMonth(month: string, offset: number) {
+  const { year, monthIndex } = parseMonthValue(month);
+  const date = new Date(year, monthIndex + offset, 1);
+  return localDateInputValue(date).slice(0, 7);
+}
+
+function formatMonthLabel(month: string) {
+  const { year, monthIndex } = parseMonthValue(month);
+  return new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric" }).format(new Date(year, monthIndex, 1));
+}
+
+function parseMonthValue(month: string) {
+  const match = /^(\d{4})-(\d{2})$/.exec(month);
+  if (!match) {
+    const today = new Date();
+    return { year: today.getFullYear(), monthIndex: today.getMonth() };
+  }
+  const year = Number(match[1]);
+  const monthIndex = Number(match[2]) - 1;
+  if (!Number.isFinite(year) || monthIndex < 0 || monthIndex > 11) {
+    const today = new Date();
+    return { year: today.getFullYear(), monthIndex: today.getMonth() };
+  }
+  return { year, monthIndex };
 }
 
 function MeetingRequirementBadge({ required }: { required: boolean }) {

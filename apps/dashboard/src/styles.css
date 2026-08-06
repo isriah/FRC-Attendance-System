@@ -285,7 +285,170 @@ textarea {
 }
 
 .meeting-table {
-  min-width: 760px;
+  min-width: 860px;
+}
+
+.meeting-calendar {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 16px;
+  min-width: 0;
+}
+
+.calendar-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.calendar-toolbar h3 {
+  margin: 0;
+}
+
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  overflow: hidden;
+  min-width: 0;
+}
+
+.calendar-weekday,
+.calendar-day {
+  border-bottom: 1px solid var(--border-color);
+  border-right: 1px solid var(--border-color);
+  min-width: 0;
+}
+
+.calendar-weekday:nth-child(7n),
+.calendar-day:nth-child(7n) {
+  border-right: 0;
+}
+
+.calendar-day:nth-last-child(-n + 7) {
+  border-bottom: 0;
+}
+
+.calendar-weekday {
+  background: var(--page-bg);
+  color: var(--muted-color);
+  font-size: 12px;
+  font-weight: 700;
+  padding: 8px;
+  text-align: center;
+}
+
+.calendar-day {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 6px;
+  min-height: 112px;
+  padding: 8px;
+  background: var(--surface-bg);
+}
+
+.calendar-day.outside-month {
+  background: var(--page-bg);
+}
+
+.calendar-day.today .calendar-date {
+  background: var(--primary-color);
+  color: var(--surface-bg);
+}
+
+.calendar-date {
+  align-items: center;
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 700;
+  height: 24px;
+  justify-content: center;
+  width: 24px;
+}
+
+.calendar-events {
+  display: grid;
+  align-content: start;
+  gap: 5px;
+  min-width: 0;
+}
+
+.calendar-event {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 6px 7px;
+  text-align: left;
+  background: var(--primary-bg);
+  border-color: var(--primary-soft);
+  color: var(--primary-dark);
+}
+
+.calendar-event:hover,
+.calendar-event.selected {
+  background: var(--primary-color);
+  border-color: var(--primary-color);
+  color: var(--surface-bg);
+}
+
+.calendar-event span,
+.calendar-event small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.calendar-event small {
+  font-size: 11px;
+}
+
+.meeting-details {
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 14px;
+  margin-bottom: 16px;
+  min-width: 0;
+}
+
+.meeting-details .section-heading {
+  align-items: start;
+}
+
+.meeting-details h3 {
+  margin-top: 0;
+}
+
+.meeting-detail-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+  min-width: 0;
+}
+
+.meeting-detail-grid > div {
+  min-width: 0;
+}
+
+.selected-row {
+  background: var(--primary-bg);
+}
+
+.link-button {
+  border: 0;
+  background: transparent;
+  color: var(--primary-dark);
+  padding: 0;
+  text-align: left;
+  text-decoration: underline;
+}
+
+.link-button:hover {
+  background: transparent;
+  color: var(--primary-color);
 }
 
 .data-table-wrap {
@@ -540,8 +703,33 @@ pre {
 
   .meeting-form,
   .recurrence-options,
-  .grid {
+  .grid,
+  .meeting-detail-grid {
     grid-template-columns: 1fr;
+  }
+
+  .calendar-toolbar {
+    align-items: start;
+    flex-direction: column;
+  }
+
+  .calendar-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .calendar-weekday {
+    display: none;
+  }
+
+  .calendar-day,
+  .calendar-day:nth-last-child(-n + 7) {
+    border-right: 0;
+    border-bottom: 1px solid var(--border-color);
+    min-height: 84px;
+  }
+
+  .calendar-day.outside-month {
+    display: none;
   }
 
   .wide-field input {
