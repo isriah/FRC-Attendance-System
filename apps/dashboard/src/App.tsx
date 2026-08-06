@@ -4,6 +4,7 @@ import { apiBaseUrl, apiDelete, apiGet, apiPost, apiPut, type DashboardSession }
 import "./styles.css";
 
 type Tab = "overview" | "roster" | "meetings" | "kiosks" | "events" | "reports" | "export";
+type MeetingViewTab = "calendar" | "all" | "form";
 type KioskCommandAction = "restart_display" | "restart_services" | "reboot_system";
 type KioskCommandStatus = "pending" | "running" | "completed" | "failed";
 type KioskHealthStatus = "online" | "degraded" | "offline" | "unknown";
@@ -430,6 +431,7 @@ function FingerprintEnrollmentTable({ enrollments, onDelete, deleting }: { enrol
 function Meetings({ session }: { session: DashboardSession }) {
   const { data, error, reload } = useApi<{ meetings: ScheduledMeeting[] }>("/admin/meetings", session);
   const { data: meetingSummary, error: meetingSummaryError, reload: reloadMeetingSummary } = useApi<{ meetings: MeetingSummaryReportRow[] }>("/admin/reports/meetings", session);
+  const [meetingViewTab, setMeetingViewTab] = useState<MeetingViewTab>("calendar");
   const [editingMeeting, setEditingMeeting] = useState<ScheduledMeeting>();
   const [formState, setFormState] = useState<MeetingFormState>(emptyMeetingForm());
   const [message, setMessage] = useState<{ kind: "success" | "error"; text: string }>();
@@ -455,10 +457,15 @@ function Meetings({ session }: { session: DashboardSession }) {
 
   useEffect(() => {
     if (meetings.length === 0) return;
-    const todayMonth = localDateInputValue().slice(0, 7);
-    const defaultMeeting = meetings.find((meeting) => meeting.meetingDate.startsWith(todayMonth)) ?? meetings[0];
+    const today = localDateInputValue();
+    const todayMonth = today.slice(0, 7);
+    const selectedMeetingExists = meetings.some((meeting) => meeting.meetingDate === selectedMeetingDate);
+    const defaultMeeting =
+      meetings.find((meeting) => meeting.meetingDate === today)
+      ?? meetings.find((meeting) => meeting.meetingDate.startsWith(todayMonth))
+      ?? meetings[0];
     if (!calendarMonth && defaultMeeting) setCalendarMonth(defaultMeeting.meetingDate.slice(0, 7));
-    if (!selectedMeetingDate && defaultMeeting) setSelectedMeetingDate(defaultMeeting.meetingDate);
+    if ((!selectedMeetingDate || !selectedMeetingExists) && defaultMeeting) setSelectedMeetingDate(defaultMeeting.meetingDate);
   }, [calendarMonth, meetings, selectedMeetingDate]);
 
   async function submitMeeting(event: FormEvent<HTMLFormElement>) {
@@ -470,6 +477,9 @@ function Meetings({ session }: { session: DashboardSession }) {
         const payload = meetingPayload(formState);
         await apiPut<ScheduledMeeting>(`/admin/meetings/${encodeURIComponent(editingMeeting.id)}`, payload, session);
         setMessage({ kind: "success", text: `Updated ${payload.title}.` });
+        setSelectedMeetingDate(payload.meetingDate);
+        setCalendarMonth(payload.meetingDate.slice(0, 7));
+        setMeetingViewTab("calendar");
       } else if (formState.repeats) {
         const generatedDates = recurringMeetingDates(formState);
         const conflictDates = generatedDates.filter((date) => existingMeetingDates.has(date));
@@ -502,13 +512,21 @@ function Meetings({ session }: { session: DashboardSession }) {
             kind: "success",
             text: `Created ${pluralize(createdDates.length, "meeting")}${conflictDates.length > 0 ? ` and skipped existing ${formatDateList(conflictDates)}` : ""}.`
           });
+          if (createdDates[0]) {
+            setSelectedMeetingDate(createdDates[0]);
+            setCalendarMonth(createdDates[0].slice(0, 7));
+          }
           setFormState(emptyMeetingForm());
+          setMeetingViewTab("calendar");
         }
       } else {
         const payload = meetingPayload(formState);
         await apiPost<ScheduledMeeting>("/admin/meetings", payload, session);
         setMessage({ kind: "success", text: `Added ${payload.title}.` });
+        setSelectedMeetingDate(payload.meetingDate);
+        setCalendarMonth(payload.meetingDate.slice(0, 7));
         setFormState(emptyMeetingForm());
+        setMeetingViewTab("calendar");
       }
       setEditingMeeting(undefined);
       reload();
@@ -544,6 +562,9 @@ function Meetings({ session }: { session: DashboardSession }) {
   function startEditing(meeting: ScheduledMeeting) {
     setEditingMeeting(meeting);
     setFormState(meetingToFormState(meeting));
+    setSelectedMeetingDate(meeting.meetingDate);
+    setCalendarMonth(meeting.meetingDate.slice(0, 7));
+    setMeetingViewTab("form");
     setMessage(undefined);
   }
 
@@ -553,81 +574,85 @@ function Meetings({ session }: { session: DashboardSession }) {
     setMessage(undefined);
   }
 
+  function startCreating() {
+    setEditingMeeting(undefined);
+    setFormState(emptyMeetingForm());
+    setMessage(undefined);
+    setMeetingViewTab("form");
+  }
+
+  const meetingForm = (
+    <form className="meeting-form" onSubmit={submitMeeting}>
+      <label className="field-label">
+        <span>Date</span>
+        <input value={formState.meetingDate} onChange={(event) => setFormState({ ...formState, meetingDate: event.target.value })} type="date" required />
+      </label>
+      <label className="field-label wide-field">
+        <span>Title</span>
+        <input value={formState.title} onChange={(event) => setFormState({ ...formState, title: event.target.value })} placeholder={defaultMeetingTitle} required />
+      </label>
+      <label className="inline-check required-toggle">
+        <input type="checkbox" checked={formState.required} onChange={(event) => setFormState({ ...formState, required: event.target.checked })} />
+        Required attendance
+      </label>
+      <label className="field-label">
+        <span>Start time</span>
+        <input value={formState.startTime} onChange={(event) => setFormState({ ...formState, startTime: event.target.value })} type="time" required />
+      </label>
+      <label className="field-label">
+        <span>End time</span>
+        <input value={formState.endTime} onChange={(event) => setFormState({ ...formState, endTime: event.target.value })} type="time" required />
+      </label>
+      {editingMeeting ? (
+        <label className="field-label notes-field">
+          <span>Notes</span>
+          <textarea value={formState.notes} onChange={(event) => setFormState({ ...formState, notes: event.target.value })} rows={3} placeholder="Optional context" />
+        </label>
+      ) : null}
+      {!editingMeeting ? (
+        <label className="inline-check repeat-toggle">
+          <input type="checkbox" checked={formState.repeats} onChange={(event) => setFormState({ ...formState, repeats: event.target.checked })} />
+          Repeats
+        </label>
+      ) : null}
+      {formState.repeats && !editingMeeting ? (
+        <div className="recurrence-options">
+          <label className="field-label">
+            <span>First date</span>
+            <input value={formState.startDate} onChange={(event) => setFormState({ ...formState, startDate: event.target.value })} type="date" required />
+          </label>
+          <label className="field-label">
+            <span>Last date</span>
+            <input value={formState.endDate} onChange={(event) => setFormState({ ...formState, endDate: event.target.value })} type="date" required />
+          </label>
+          <fieldset className="weekday-picker">
+            <legend>Repeats on</legend>
+            {weekdayOptions.map((weekday) => (
+              <label key={weekday.value}>
+                <input
+                  type="checkbox"
+                  checked={formState.weekdays.includes(weekday.value)}
+                  onChange={() => setFormState({ ...formState, weekdays: toggleWeekday(formState.weekdays, weekday.value) })}
+                />
+                {weekday.label}
+              </label>
+            ))}
+          </fieldset>
+          {recurringPreview ? <p className={`recurrence-preview ${recurringPreview.kind}`}>{recurringPreview.text}</p> : null}
+        </div>
+      ) : null}
+      <div className="toolbar compact form-actions">
+        <button disabled={saving || (formState.repeats && recurringPreview?.createCount === 0)}>{saving ? "Saving..." : editingMeeting ? "Save changes" : formState.repeats ? "Create repeating meetings" : "Add meeting"}</button>
+        {editingMeeting ? <button type="button" onClick={cancelEditing} disabled={saving}>Cancel</button> : null}
+      </div>
+    </form>
+  );
+
   return (
     <>
       <section>
-        <h2>{editingMeeting ? "Edit Meeting" : "Add Meeting"}</h2>
-        <form className="meeting-form" onSubmit={submitMeeting}>
-          <label className="field-label">
-            <span>Date</span>
-            <input value={formState.meetingDate} onChange={(event) => setFormState({ ...formState, meetingDate: event.target.value })} type="date" required />
-          </label>
-          <label className="field-label wide-field">
-            <span>Title</span>
-            <input value={formState.title} onChange={(event) => setFormState({ ...formState, title: event.target.value })} placeholder={defaultMeetingTitle} required />
-          </label>
-          <label className="inline-check required-toggle">
-            <input type="checkbox" checked={formState.required} onChange={(event) => setFormState({ ...formState, required: event.target.checked })} />
-            Required attendance
-          </label>
-          <label className="field-label">
-            <span>Start time</span>
-            <input value={formState.startTime} onChange={(event) => setFormState({ ...formState, startTime: event.target.value })} type="time" required />
-          </label>
-          <label className="field-label">
-            <span>End time</span>
-            <input value={formState.endTime} onChange={(event) => setFormState({ ...formState, endTime: event.target.value })} type="time" required />
-          </label>
-          {editingMeeting ? (
-            <label className="field-label notes-field">
-              <span>Notes</span>
-              <textarea value={formState.notes} onChange={(event) => setFormState({ ...formState, notes: event.target.value })} rows={3} placeholder="Optional context" />
-            </label>
-          ) : null}
-          {!editingMeeting ? (
-            <label className="inline-check repeat-toggle">
-              <input type="checkbox" checked={formState.repeats} onChange={(event) => setFormState({ ...formState, repeats: event.target.checked })} />
-              Repeats
-            </label>
-          ) : null}
-          {formState.repeats && !editingMeeting ? (
-            <div className="recurrence-options">
-              <label className="field-label">
-                <span>First date</span>
-                <input value={formState.startDate} onChange={(event) => setFormState({ ...formState, startDate: event.target.value })} type="date" required />
-              </label>
-              <label className="field-label">
-                <span>Last date</span>
-                <input value={formState.endDate} onChange={(event) => setFormState({ ...formState, endDate: event.target.value })} type="date" required />
-              </label>
-              <fieldset className="weekday-picker">
-                <legend>Repeats on</legend>
-                {weekdayOptions.map((weekday) => (
-                  <label key={weekday.value}>
-                    <input
-                      type="checkbox"
-                      checked={formState.weekdays.includes(weekday.value)}
-                      onChange={() => setFormState({ ...formState, weekdays: toggleWeekday(formState.weekdays, weekday.value) })}
-                    />
-                    {weekday.label}
-                  </label>
-                ))}
-              </fieldset>
-              {recurringPreview ? <p className={`recurrence-preview ${recurringPreview.kind}`}>{recurringPreview.text}</p> : null}
-            </div>
-          ) : null}
-          <div className="toolbar compact form-actions">
-            <button disabled={saving || (formState.repeats && recurringPreview?.createCount === 0)}>{saving ? "Saving..." : editingMeeting ? "Save changes" : formState.repeats ? "Create repeating meetings" : "Add meeting"}</button>
-            {editingMeeting ? <button type="button" onClick={cancelEditing} disabled={saving}>Cancel</button> : null}
-          </div>
-        </form>
-        {message ? <p className={`notice ${message.kind}`}>{message.text}</p> : null}
-        {error ? <p className="error">{error}</p> : null}
-      </section>
-
-      <section>
         <div className="section-heading">
-          <h2>Scheduled Meetings</h2>
+          <h2>Meetings</h2>
           <button type="button" onClick={() => {
             reload();
             reloadMeetingSummary();
@@ -635,29 +660,45 @@ function Meetings({ session }: { session: DashboardSession }) {
             reloadSelectedAbsences();
           }}>Refresh</button>
         </div>
+        <div className="meeting-tabs" role="tablist" aria-label="Meeting views">
+          <button type="button" role="tab" aria-selected={meetingViewTab === "calendar"} className={meetingViewTab === "calendar" ? "active" : ""} onClick={() => setMeetingViewTab("calendar")}>Calendar</button>
+          <button type="button" role="tab" aria-selected={meetingViewTab === "all"} className={meetingViewTab === "all" ? "active" : ""} onClick={() => setMeetingViewTab("all")}>All Meetings</button>
+          <button type="button" role="tab" aria-selected={meetingViewTab === "form"} className={meetingViewTab === "form" ? "active" : ""} onClick={startCreating}>{editingMeeting ? "Edit Meeting" : "Add Meeting"}</button>
+        </div>
+        {message ? <p className={`notice ${message.kind}`}>{message.text}</p> : null}
+        {error ? <p className="error">{error}</p> : null}
         {meetingSummaryError ? <p className="error">{meetingSummaryError}</p> : null}
-        {meetings.length > 0 ? (
-          <MeetingCalendar
-            month={calendarMonth || meetings[0]?.meetingDate.slice(0, 7) || localDateInputValue().slice(0, 7)}
-            meetings={meetings}
-            summariesByDate={meetingSummaryByDate}
-            selectedMeetingDate={selectedMeetingDate}
-            onMonthChange={setCalendarMonth}
-            onSelectMeeting={setSelectedMeetingDate}
-          />
+
+        {meetingViewTab === "calendar" ? (
+          <>
+            {meetings.length > 0 ? (
+              <MeetingCalendar
+                month={calendarMonth || meetings[0]?.meetingDate.slice(0, 7) || localDateInputValue().slice(0, 7)}
+                meetings={meetings}
+                summariesByDate={meetingSummaryByDate}
+                selectedMeetingDate={selectedMeetingDate}
+                onMonthChange={setCalendarMonth}
+                onSelectMeeting={setSelectedMeetingDate}
+              />
+            ) : <p className="empty-state">No scheduled meetings yet.</p>}
+            <MeetingDetails
+              meeting={selectedMeeting}
+              summary={selectedMeetingSummary}
+              presence={selectedPresence}
+              absences={selectedAbsences}
+              presentRows={presentRows}
+              presenceError={selectedPresenceError}
+              absencesError={selectedAbsencesError}
+              saving={saving}
+              onEdit={startEditing}
+              onDelete={deleteMeeting}
+            />
+          </>
         ) : null}
-        <MeetingDetails
-          meeting={selectedMeeting}
-          summary={selectedMeetingSummary}
-          presence={selectedPresence}
-          absences={selectedAbsences}
-          presentRows={presentRows}
-          presenceError={selectedPresenceError}
-          absencesError={selectedAbsencesError}
-        />
-        {meetings.length === 0 ? <p className="empty-state">No scheduled meetings yet.</p> : null}
-        {meetings.length > 0 ? (
-          <div className="meeting-table-wrap">
+
+        {meetingViewTab === "all" ? (
+          meetings.length > 0 ? (
+            <div className="meeting-table-wrap">
             <table className="meeting-table">
               <thead>
                 <tr>
@@ -702,6 +743,14 @@ function Meetings({ session }: { session: DashboardSession }) {
               </tbody>
             </table>
           </div>
+          ) : <p className="empty-state">No scheduled meetings yet.</p>
+        ) : null}
+
+        {meetingViewTab === "form" ? (
+          <>
+            <h3>{editingMeeting ? "Edit Meeting" : "Add Meeting"}</h3>
+            {meetingForm}
+          </>
         ) : null}
       </section>
     </>
@@ -774,7 +823,10 @@ function MeetingDetails({
   absences,
   presentRows,
   presenceError,
-  absencesError
+  absencesError,
+  saving,
+  onEdit,
+  onDelete
 }: {
   meeting?: ScheduledMeeting;
   summary?: MeetingSummaryReportRow;
@@ -783,9 +835,12 @@ function MeetingDetails({
   presentRows: Array<Record<string, unknown>>;
   presenceError?: string;
   absencesError?: string;
+  saving: boolean;
+  onEdit: (meeting: ScheduledMeeting) => void;
+  onDelete: (meeting: ScheduledMeeting) => void;
 }) {
   if (!meeting) {
-    return <p className="empty-state">Select a meeting on the calendar or table to see attendance details.</p>;
+    return <p className="empty-state">Select a meeting on the calendar to see attendance details.</p>;
   }
   const meetingPresentRows = presentRows.map((row) => ({
     ...row,
@@ -800,7 +855,11 @@ function MeetingDetails({
           <h3>{meeting.title}</h3>
           <p className="report-context">{meeting.meetingDate}{meetingTimeRange(meeting) ? `, ${meetingTimeRange(meeting)}` : ""}</p>
         </div>
-        <MeetingRequirementBadge required={meeting.required} />
+        <div className="meeting-detail-actions">
+          <MeetingRequirementBadge required={meeting.required} />
+          <button type="button" onClick={() => onEdit(meeting)} disabled={saving}>Edit</button>
+          <button type="button" onClick={() => onDelete(meeting)} disabled={saving}>Delete</button>
+        </div>
       </div>
       <p className="report-context">
         {meeting.required

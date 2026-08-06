@@ -288,6 +288,14 @@ textarea {
   min-width: 860px;
 }
 
+.meeting-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+  min-width: 0;
+}
+
 .meeting-calendar {
   display: grid;
   gap: 12px;
@@ -416,6 +424,15 @@ textarea {
 
 .meeting-details .section-heading {
   align-items: start;
+}
+
+.meeting-detail-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+  min-width: 0;
 }
 
 .meeting-details h3 {
@@ -711,6 +728,10 @@ pre {
   .calendar-toolbar {
     align-items: start;
     flex-direction: column;
+  }
+
+  .meeting-detail-actions {
+    justify-content: flex-start;
   }
 
   .calendar-grid {
