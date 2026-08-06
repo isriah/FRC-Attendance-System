@@ -7,7 +7,7 @@ export interface ReportDateRange {
 }
 
 export interface PresenceReportRow {
-  studentId: string;
+  memberId: string;
   firstName: string;
   lastName: string;
   status: "signed_in" | "signed_out" | "not_seen";
@@ -20,14 +20,14 @@ export interface AttendanceSessionReportRow {
   meeting_title: string | null;
   required: number;
   has_attendance: number;
-  student_id: string | null;
+  member_id: string | null;
   check_in_at: string | null;
   check_out_at: string | null;
   status: "open" | "closed" | "scheduled";
 }
 
 export interface MemberAttendanceReport {
-  studentId: string;
+  memberId: string;
   firstName: string;
   lastName: string;
   startDate?: string;
@@ -65,14 +65,14 @@ export interface MeetingAbsenceReport {
   endsAt?: string;
   absentCount: number;
   rows: Array<{
-    studentId: string;
+    memberId: string;
     firstName: string;
     lastName: string;
   }>;
 }
 
 export interface RosterAttendanceSummaryRow {
-  studentId: string;
+  memberId: string;
   firstName: string;
   lastName: string;
   requiredMeetings: number;
@@ -132,7 +132,7 @@ export async function buildAttendanceSessionReport(env: Env, range: ReportDateRa
     meeting_title: session.meeting_title,
     required: Number(session.required),
     has_attendance: 1,
-    student_id: session.student_id,
+    member_id: session.student_id,
     check_in_at: session.check_in_at,
     check_out_at: session.check_out_at,
     status: session.status
@@ -144,14 +144,14 @@ export async function buildAttendanceSessionReport(env: Env, range: ReportDateRa
       meeting_title: meeting.title,
       required: Number(meeting.required),
       has_attendance: 0,
-      student_id: null,
+      member_id: null,
       check_in_at: null,
       check_out_at: null,
       status: "scheduled"
     }));
 
   return [...sessionRows, ...zeroScanRows]
-    .sort((left, right) => right.meeting_date.localeCompare(left.meeting_date) || String(left.student_id ?? "").localeCompare(String(right.student_id ?? "")))
+    .sort((left, right) => right.meeting_date.localeCompare(left.meeting_date) || String(left.member_id ?? "").localeCompare(String(right.member_id ?? "")))
     .slice(0, limit);
 }
 
@@ -231,7 +231,7 @@ export async function buildPresenceReport(env: Env, date = meetingDateForTimesta
   const rows: PresenceReportRow[] = students.results.map((student) => {
     const session = sessionsByStudent.get(student.student_id);
     return {
-      studentId: student.student_id,
+      memberId: student.student_id,
       firstName: student.first_name,
       lastName: student.last_name,
       status: session ? session.status === "open" ? "signed_in" : "signed_out" : "not_seen",
@@ -275,7 +275,7 @@ export async function buildMeetingAbsenceReport(env: Env, meetingDate: string): 
     ? activeStudents.results
       .filter((student) => !presentIds.has(student.student_id))
       .map((student) => ({
-        studentId: student.student_id,
+        memberId: student.student_id,
         firstName: student.first_name,
         lastName: student.last_name
       }))
@@ -303,7 +303,7 @@ export async function buildRosterAttendanceSummary(env: Env, range: ReportDateRa
   return Promise.all(activeStudents.results.map(async (student) => {
     const report = await buildMemberAttendanceReport(env, student.student_id, range);
     return {
-      studentId: report.studentId,
+      memberId: report.memberId,
       firstName: report.firstName,
       lastName: report.lastName,
       requiredMeetings: report.totalMeetings,
@@ -317,10 +317,10 @@ export async function buildRosterAttendanceSummary(env: Env, range: ReportDateRa
   }));
 }
 
-export async function buildMemberAttendanceReport(env: Env, studentId: string, range: ReportDateRange = {}): Promise<MemberAttendanceReport> {
+export async function buildMemberAttendanceReport(env: Env, memberId: string, range: ReportDateRange = {}): Promise<MemberAttendanceReport> {
   const student = await env.DB.prepare(
     "SELECT student_id, first_name, last_name FROM students WHERE student_id = ?"
-  ).bind(studentId).first<{ student_id: string; first_name: string; last_name: string }>();
+  ).bind(memberId).first<{ student_id: string; first_name: string; last_name: string }>();
   if (!student) throw Object.assign(new Error("Member not found"), { status: 404 });
 
   const meetingDates = await requiredMeetingDates(env, range);
@@ -332,7 +332,7 @@ export async function buildMemberAttendanceReport(env: Env, studentId: string, r
       ${whereDateRange("meeting_date", range, "AND")}
       ORDER BY meeting_date
     `
-  ).bind(studentId, ...dateRangeParams(range)).all<{ meeting_date: string; status: "open" | "closed"; check_in_at: string }>();
+  ).bind(memberId, ...dateRangeParams(range)).all<{ meeting_date: string; status: "open" | "closed"; check_in_at: string }>();
 
   const allDates = [...new Set(meetingDates.map((row) => row.meeting_date))];
   const allDateSet = new Set(allDates);
@@ -346,7 +346,7 @@ export async function buildMemberAttendanceReport(env: Env, studentId: string, r
   }, undefined);
 
   return {
-    studentId: student.student_id,
+    memberId: student.student_id,
     firstName: student.first_name,
     lastName: student.last_name,
     startDate: range.startDate,

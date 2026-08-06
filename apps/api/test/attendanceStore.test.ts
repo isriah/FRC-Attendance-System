@@ -9,14 +9,14 @@ describe("kiosk sync acknowledgements", () => {
 
     const first = await syncKioskEvents(env, "bench-01", [{
       localEventId: "scan-1",
-      studentId: "100001",
+      memberId: "100001",
       occurredAt: "2026-01-02T20:00:00.000Z",
       source: "fingerprint"
     }]);
 
     expect(first.acknowledgements?.[0]).toMatchObject({
       localEventId: "scan-1",
-      studentId: "100001",
+      memberId: "100001",
       status: "accepted",
       displayName: "Bench Student",
       action: "check_in",
@@ -28,7 +28,7 @@ describe("kiosk sync acknowledgements", () => {
 
     const second = await syncKioskEvents(env, "bench-01", [{
       localEventId: "scan-2",
-      studentId: "100001",
+      memberId: "100001",
       occurredAt: "2026-01-02T22:00:00.000Z",
       source: "fingerprint"
     }]);
@@ -49,21 +49,21 @@ describe("kiosk sync acknowledgements", () => {
 
     await syncKioskEvents(env, "bench-01", [{
       localEventId: "scan-1",
-      studentId: "100001",
+      memberId: "100001",
       occurredAt: "2026-01-02T20:00:00.000Z",
       source: "fingerprint"
     }]);
 
     const duplicate = await syncKioskEvents(env, "bench-01", [{
       localEventId: "scan-duplicate",
-      studentId: "100001",
+      memberId: "100001",
       occurredAt: "2026-01-02T20:00:30.000Z",
       source: "fingerprint"
     }]);
 
     expect(duplicate.acknowledgements?.[0]).toMatchObject({
       localEventId: "scan-duplicate",
-      studentId: "100001",
+      memberId: "100001",
       status: "duplicate",
       displayName: "Bench Student",
       kioskMessage: "Already recorded",
@@ -77,20 +77,20 @@ describe("kiosk sync acknowledgements", () => {
 
     await syncKioskEvents(env, "bench-01", [{
       localEventId: "bench-arrive",
-      studentId: "100001",
+      memberId: "100001",
       occurredAt: "2026-01-02T20:00:00.000Z",
       source: "fingerprint"
     }]);
     await syncKioskEvents(env, "door-02", [{
       localEventId: "door-leave",
-      studentId: "100001",
+      memberId: "100001",
       occurredAt: "2026-01-02T22:00:00.000Z",
       source: "fingerprint"
     }]);
 
     const delayedDuplicate = await syncKioskEvents(env, "pit-01", [{
       localEventId: "pit-delayed-duplicate",
-      studentId: "100001",
+      memberId: "100001",
       occurredAt: "2026-01-02T20:00:30.000Z",
       source: "fingerprint"
     }]);
@@ -99,7 +99,7 @@ describe("kiosk sync acknowledgements", () => {
     expect(delayedDuplicate.duplicates).toHaveLength(1);
     expect(delayedDuplicate.acknowledgements?.[0]).toMatchObject({
       localEventId: "pit-delayed-duplicate",
-      studentId: "100001",
+      memberId: "100001",
       status: "duplicate",
       kioskMessage: "Already recorded"
     });
@@ -110,14 +110,14 @@ describe("kiosk sync acknowledgements", () => {
 
     await syncKioskEvents(env, "bench-01", [{
       localEventId: "bench-member-one",
-      studentId: "100001",
+      memberId: "100001",
       occurredAt: "2026-01-02T20:00:00.000Z",
       source: "fingerprint"
     }]);
 
     const differentMember = await syncKioskEvents(env, "door-02", [{
       localEventId: "door-member-two",
-      studentId: "100003",
+      memberId: "100003",
       occurredAt: "2026-01-02T20:00:30.000Z",
       source: "fingerprint"
     }]);
@@ -126,7 +126,7 @@ describe("kiosk sync acknowledgements", () => {
     expect(differentMember.duplicates).toHaveLength(0);
     expect(differentMember.acknowledgements?.[0]).toMatchObject({
       localEventId: "door-member-two",
-      studentId: "100003",
+      memberId: "100003",
       status: "accepted",
       displayName: "Second Student",
       action: "check_in"
@@ -165,14 +165,14 @@ describe("kiosk sync acknowledgements", () => {
 
     await syncKioskEvents(env, "door-02", [{
       localEventId: "door-jan-3",
-      studentId: "100001",
+      memberId: "100001",
       occurredAt: "2026-01-03T05:00:30.000Z",
       source: "fingerprint"
     }]);
 
     const delayedPreviousDate = await syncKioskEvents(env, "bench-01", [{
       localEventId: "bench-jan-2",
-      studentId: "100001",
+      memberId: "100001",
       occurredAt: "2026-01-03T04:59:30.000Z",
       source: "fingerprint"
     }]);
@@ -181,7 +181,7 @@ describe("kiosk sync acknowledgements", () => {
     expect(delayedPreviousDate.duplicates).toHaveLength(0);
     expect(delayedPreviousDate.acknowledgements?.[0]).toMatchObject({
       localEventId: "bench-jan-2",
-      studentId: "100001",
+      memberId: "100001",
       status: "accepted",
       action: "check_in",
       kioskMessage: "Welcome, Bench Student"
@@ -220,20 +220,20 @@ describe("kiosk sync acknowledgements", () => {
 
     await syncKioskEvents(env, "bench-01", [{
       localEventId: "bench-arrive",
-      studentId: "100001",
+      memberId: "100001",
       occurredAt: "2026-01-02T20:00:00.000Z",
       source: "fingerprint"
     }]);
     await syncKioskEvents(env, "door-02", [{
       localEventId: "door-leave",
-      studentId: "100001",
+      memberId: "100001",
       occurredAt: "2026-01-02T22:00:00.000Z",
       source: "fingerprint"
     }]);
 
     await syncKioskEvents(env, "pit-01", [{
       localEventId: "pit-delayed-duplicate",
-      studentId: "100001",
+      memberId: "100001",
       occurredAt: "2026-01-02T20:01:00.000Z",
       source: "fingerprint"
     }]);
@@ -263,14 +263,14 @@ describe("kiosk sync acknowledgements", () => {
 
     const rejected = await syncKioskEvents(env, "bench-01", [{
       localEventId: "scan-inactive",
-      studentId: "100002",
+      memberId: "100002",
       occurredAt: "2026-01-02T20:00:00.000Z",
       source: "fingerprint"
     }]);
 
     expect(rejected.acknowledgements?.[0]).toMatchObject({
       localEventId: "scan-inactive",
-      studentId: "100002",
+      memberId: "100002",
       status: "rejected",
       displayName: "Inactive Member",
       kioskMessage: "Roster issue",
@@ -284,14 +284,14 @@ describe("kiosk sync acknowledgements", () => {
 
     await syncKioskEvents(env, "pit-01", [{
       localEventId: "pit-late-checkout",
-      studentId: "100001",
+      memberId: "100001",
       occurredAt: "2026-01-02T22:00:00.000Z",
       source: "fingerprint"
     }]);
 
     await syncKioskEvents(env, "bench-01", [{
       localEventId: "bench-early-checkin",
-      studentId: "100001",
+      memberId: "100001",
       occurredAt: "2026-01-02T20:00:00.000Z",
       source: "fingerprint"
     }]);
@@ -322,7 +322,7 @@ describe("kiosk sync acknowledgements", () => {
 
     await syncKioskEvents(env, "door-02", [{
       localEventId: "door-return",
-      studentId: "100001",
+      memberId: "100001",
       occurredAt: "2026-01-02T22:30:00.000Z",
       source: "fingerprint"
     }]);
@@ -330,13 +330,13 @@ describe("kiosk sync acknowledgements", () => {
     await syncKioskEvents(env, "bench-01", [
       {
         localEventId: "bench-arrive",
-        studentId: "100001",
+        memberId: "100001",
         occurredAt: "2026-01-02T20:00:00.000Z",
         source: "fingerprint"
       },
       {
         localEventId: "bench-leave",
-        studentId: "100001",
+        memberId: "100001",
         occurredAt: "2026-01-02T21:00:00.000Z",
         source: "fingerprint"
       }
@@ -373,13 +373,13 @@ describe("kiosk sync acknowledgements", () => {
     await syncKioskEvents(env, "door-02", [
       {
         localEventId: "door-bench-student-out",
-        studentId: "100001",
+        memberId: "100001",
         occurredAt: "2026-01-02T22:00:00.000Z",
         source: "fingerprint"
       },
       {
         localEventId: "door-second-student-out",
-        studentId: "100003",
+        memberId: "100003",
         occurredAt: "2026-01-02T22:15:00.000Z",
         source: "fingerprint"
       }
@@ -388,13 +388,13 @@ describe("kiosk sync acknowledgements", () => {
     const delayedReplay = await syncKioskEvents(env, "bench-01", [
       {
         localEventId: "bench-bench-student-in",
-        studentId: "100001",
+        memberId: "100001",
         occurredAt: "2026-01-02T20:00:00.000Z",
         source: "fingerprint"
       },
       {
         localEventId: "bench-second-student-in",
-        studentId: "100003",
+        memberId: "100003",
         occurredAt: "2026-01-02T20:10:00.000Z",
         source: "fingerprint"
       }
@@ -403,14 +403,14 @@ describe("kiosk sync acknowledgements", () => {
     expect(delayedReplay.acknowledgements).toEqual([
       expect.objectContaining({
         localEventId: "bench-bench-student-in",
-        studentId: "100001",
+        memberId: "100001",
         status: "accepted",
         action: "check_in",
         kioskMessage: "Welcome, Bench Student"
       }),
       expect.objectContaining({
         localEventId: "bench-second-student-in",
-        studentId: "100003",
+        memberId: "100003",
         status: "accepted",
         action: "check_in",
         kioskMessage: "Welcome, Second Student"
@@ -450,14 +450,14 @@ describe("kiosk sync acknowledgements", () => {
 
     await syncKioskEvents(env, "pit-01", [{
       localEventId: "pit-late-checkout",
-      studentId: "100001",
+      memberId: "100001",
       occurredAt: "2026-01-02T22:00:00.000Z",
       source: "fingerprint"
     }]);
 
     const delayed = await syncKioskEvents(env, "bench-01", [{
       localEventId: "bench-early-checkin",
-      studentId: "100001",
+      memberId: "100001",
       occurredAt: "2026-01-02T20:00:00.000Z",
       source: "fingerprint"
     }]);
@@ -477,20 +477,20 @@ describe("kiosk sync acknowledgements", () => {
 
     await syncKioskEvents(env, "pit-01", [{
       localEventId: "pit-late-checkout",
-      studentId: "100001",
+      memberId: "100001",
       occurredAt: "2026-01-02T22:00:00.000Z",
       source: "fingerprint"
     }]);
     await syncKioskEvents(env, "bench-01", [{
       localEventId: "bench-early-checkin",
-      studentId: "100001",
+      memberId: "100001",
       occurredAt: "2026-01-02T20:00:00.000Z",
       source: "fingerprint"
     }]);
 
     const replay = await syncKioskEvents(env, "pit-01", [{
       localEventId: "pit-late-checkout",
-      studentId: "100001",
+      memberId: "100001",
       occurredAt: "2026-01-02T22:00:00.000Z",
       source: "fingerprint"
     }]);

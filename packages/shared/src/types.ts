@@ -4,8 +4,8 @@ export type ScanEventStatus = "accepted" | "duplicate" | "rejected";
 
 export type SessionStatus = "open" | "closed";
 
-export interface Student {
-  studentId: string;
+export interface Member {
+  memberId: string;
   firstName: string;
   lastName: string;
   email?: string;
@@ -28,7 +28,7 @@ export interface Kiosk {
 }
 
 export interface FingerprintEnrollment {
-  studentId: string;
+  memberId: string;
   kioskId: string;
   templateSlot: number;
   fingerLabel?: string;
@@ -40,7 +40,7 @@ export interface ScanEvent {
   id: string;
   kioskId: string;
   localEventId: string;
-  studentId: string;
+  memberId: string;
   occurredAt: string;
   syncedAt?: string;
   source: AttendanceSource;
@@ -49,7 +49,7 @@ export interface ScanEvent {
 
 export interface KioskScanAcknowledgement {
   localEventId: string;
-  studentId: string;
+  memberId: string;
   status: ScanEventStatus;
   displayName?: string;
   action?: "check_in" | "check_out";
@@ -62,7 +62,7 @@ export interface KioskScanAcknowledgement {
 
 export interface ManualEvent {
   id: string;
-  studentId: string;
+  memberId: string;
   occurredAt: string;
   action: "check_in" | "check_out";
   reason: string;
@@ -71,7 +71,7 @@ export interface ManualEvent {
 
 export interface AttendanceSession {
   id: string;
-  studentId: string;
+  memberId: string;
   meetingDate: string;
   checkInAt: string;
   checkOutAt?: string;
@@ -93,7 +93,8 @@ export interface ScheduledMeeting {
 
 export interface KioskSyncEventInput {
   localEventId: string;
-  studentId: string;
+  memberId?: string;
+  studentId?: string;
   occurredAt: string;
   source: "fingerprint";
 }

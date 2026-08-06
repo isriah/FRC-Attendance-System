@@ -23,12 +23,12 @@ describe("offline scan queue restart and reconnect behavior", () => {
 
     expect(restartedQueue.pending()).toMatchObject([
       {
-        studentId: "100001",
+        memberId: "100001",
         occurredAt: "2026-05-28T15:00:00.000Z",
         source: "fingerprint"
       },
       {
-        studentId: "100002",
+        memberId: "100002",
         occurredAt: "2026-05-28T15:01:00.000Z",
         source: "fingerprint"
       }
@@ -52,7 +52,7 @@ describe("offline scan queue restart and reconnect behavior", () => {
             id: `bench-01:${event.localEventId}`,
             kioskId: "bench-01",
             localEventId: event.localEventId,
-            studentId: event.studentId,
+            memberId: event.memberId,
             occurredAt: event.occurredAt,
             source: "fingerprint",
             status: "accepted"

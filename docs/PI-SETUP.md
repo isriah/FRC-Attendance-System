@@ -169,14 +169,14 @@ For v1, the roster only needs:
 
 ```text
 memberId,firstName,lastName
-100001,Bench,Student
+100001,Bench,Member
 ```
 
 Open the dashboard at `http://<pi-hostname-or-ip>:5174`, go to the roster tab, and paste CSV with those three columns. The central API stores `memberId` as `student_id` for attendance-event compatibility.
 
 ## 10. Bench Fingerprint Mapping
 
-Fingerprint templates stay on the sensor. The kiosk SQLite DB stores only the mapping from sensor template slot to Student ID.
+Fingerprint templates stay on the sensor. The kiosk SQLite DB stores only the mapping from sensor template slot to Member ID. Existing local columns are still named `student_id` for compatibility.
 
 The normal path is the dashboard:
 
@@ -186,12 +186,12 @@ The normal path is the dashboard:
 
 The dashboard shows the current local slot mappings, warns before overwriting an occupied slot, can save a mapping without touching the sensor, and can remove a mapping while leaving the sensor template intact. The dashboard temporarily stops the kiosk scanning service, runs enrollment against the local reader, saves the slot mapping, and restarts scanning.
 
-To enroll a new finger into slot `1` and map it to student `100001`:
+To enroll a new finger into slot `1` and map it to member `100001`:
 
 ```bash
 cd ~/FRC-Attendance-System
 npm --workspace @frc-attendance/kiosk run fingerprint:enroll -- \
-  --student-id 100001 \
+  --member-id 100001 \
   --slot 1 \
   --finger-label right-index
 ```
@@ -200,7 +200,7 @@ To map an already-enrolled slot without touching the sensor:
 
 ```bash
 npm --workspace @frc-attendance/kiosk run fingerprint:map -- \
-  --student-id 100001 \
+  --member-id 100001 \
   --slot 1 \
   --finger-label right-index
 ```
@@ -208,7 +208,7 @@ npm --workspace @frc-attendance/kiosk run fingerprint:map -- \
 For the original bench test, slot `1` maps to:
 
 ```text
-template slot 1 -> student 100001
+template slot 1 -> member 100001
 ```
 
 The mapping is stored in:

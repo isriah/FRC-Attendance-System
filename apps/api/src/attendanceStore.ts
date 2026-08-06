@@ -13,7 +13,8 @@ export async function syncKioskEvents(env: Env, kioskId: string, events: KioskSy
   const duplicateWindow = Number(env.DUPLICATE_WINDOW_SECONDS || "90") * 1000 || DEFAULT_DUPLICATE_WINDOW_MS;
   const now = new Date().toISOString();
 
-  for (const input of events) {
+  for (const rawInput of events) {
+    const input = normalizeKioskSyncEvent(rawInput);
     const existing = await env.DB.prepare(
       "SELECT id, kiosk_id, local_event_id, student_id, occurred_at, synced_at, source, status FROM scan_events WHERE kiosk_id = ? AND local_event_id = ?"
     ).bind(kioskId, input.localEventId).first<{
@@ -41,9 +42,9 @@ export async function syncKioskEvents(env: Env, kioskId: string, events: KioskSy
       continue;
     }
 
-    const student = await env.DB.prepare("SELECT active FROM students WHERE student_id = ?").bind(input.studentId).first<{ active: number }>();
+    const student = await env.DB.prepare("SELECT active FROM students WHERE student_id = ?").bind(input.memberId).first<{ active: number }>();
     if (!student || !student.active) {
-      const reason = "student is not active in roster";
+      const reason = "member is not active in roster";
       rejected.push({ ...input, reason });
       await insertScanEvent(env, kioskId, input, now, "rejected", reason);
       acknowledgementInputs.push({ input, status: "rejected", reason });
@@ -56,7 +57,7 @@ export async function syncKioskEvents(env: Env, kioskId: string, events: KioskSy
       : await env.DB.prepare(
         "SELECT id, kiosk_id, local_event_id, student_id, occurred_at, synced_at, source, status FROM scan_events WHERE student_id = ? AND status = 'accepted' AND occurred_at BETWEEN ? AND ? ORDER BY occurred_at DESC"
       ).bind(
-        input.studentId,
+        input.memberId,
         new Date(occurredAtMs - duplicateWindow).toISOString(),
         new Date(occurredAtMs + duplicateWindow).toISOString()
       ).all<Parameters<typeof rowToScanEvent>[0]>();
@@ -86,11 +87,11 @@ export async function syncKioskEvents(env: Env, kioskId: string, events: KioskSy
   };
 }
 
-export async function addManualEvent(env: Env, input: { studentId: string; occurredAt: string; action: "check_in" | "check_out"; reason: string; adminEmail: string }) {
+export async function addManualEvent(env: Env, input: { memberId: string; occurredAt: string; action: "check_in" | "check_out"; reason: string; adminEmail: string }) {
   const id = crypto.randomUUID();
   await env.DB.prepare(
     "INSERT INTO manual_events (id, student_id, occurred_at, action, reason, admin_email) VALUES (?, ?, ?, ?, ?, ?)"
-  ).bind(id, input.studentId, input.occurredAt, input.action, input.reason, input.adminEmail).run();
+  ).bind(id, input.memberId, input.occurredAt, input.action, input.reason, input.adminEmail).run();
   await rebuildAttendanceSessions(env);
   return { id, ...input };
 }
@@ -104,10 +105,10 @@ export async function rebuildAttendanceSessions(env: Env): Promise<void> {
   ).all<{ id: string; student_id: string; occurred_at: string; action: "check_in" | "check_out"; reason: string; admin_email: string }>();
 
   const sessions = deriveAttendanceSessions(
-    scans.results.map((row) => ({ id: row.id, studentId: row.student_id, occurredAt: row.occurred_at, status: row.status })),
+    scans.results.map((row) => ({ id: row.id, memberId: row.student_id, occurredAt: row.occurred_at, status: row.status })),
     manual.results.map((row) => ({
       id: row.id,
-      studentId: row.student_id,
+      memberId: row.student_id,
       occurredAt: row.occurred_at,
       action: row.action,
       reason: row.reason,
@@ -123,7 +124,7 @@ export async function rebuildAttendanceSessions(env: Env): Promise<void> {
         "INSERT INTO attendance_sessions (id, student_id, meeting_date, check_in_at, check_out_at, status, source_event_ids, rebuilt_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
       ).bind(
         session.id,
-        session.studentId,
+        session.memberId,
         session.meetingDate,
         session.checkInAt,
         session.checkOutAt ?? null,
@@ -138,7 +139,7 @@ export async function rebuildAttendanceSessions(env: Env): Promise<void> {
 async function insertScanEvent(
   env: Env,
   kioskId: string,
-  input: KioskSyncEventInput,
+  input: NormalizedKioskSyncEventInput,
   syncedAt: string,
   status: "accepted" | "duplicate" | "rejected",
   rejectionReason?: string
@@ -146,8 +147,8 @@ async function insertScanEvent(
   const id = eventId(kioskId, input.localEventId);
   await env.DB.prepare(
     "INSERT INTO scan_events (id, kiosk_id, local_event_id, student_id, occurred_at, synced_at, source, status, rejection_reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
-  ).bind(id, kioskId, input.localEventId, input.studentId, input.occurredAt, syncedAt, "fingerprint", status, rejectionReason ?? null).run();
-  return { id, kioskId, localEventId: input.localEventId, studentId: input.studentId, occurredAt: input.occurredAt, syncedAt, source: "fingerprint", status };
+  ).bind(id, kioskId, input.localEventId, input.memberId, input.occurredAt, syncedAt, "fingerprint", status, rejectionReason ?? null).run();
+  return { id, kioskId, localEventId: input.localEventId, memberId: input.memberId, occurredAt: input.occurredAt, syncedAt, source: "fingerprint", status };
 }
 
 function rowToScanEvent(row: {
@@ -164,7 +165,7 @@ function rowToScanEvent(row: {
     id: row.id,
     kioskId: row.kiosk_id,
     localEventId: row.local_event_id,
-    studentId: row.student_id,
+    memberId: row.student_id,
     occurredAt: row.occurred_at,
     syncedAt: row.synced_at,
     source: row.source,
@@ -175,16 +176,16 @@ function rowToScanEvent(row: {
 async function buildAcknowledgement(env: Env, acknowledgement: AcknowledgementInput): Promise<KioskScanAcknowledgement> {
   const student = await env.DB.prepare(
     "SELECT first_name, last_name FROM students WHERE student_id = ?"
-  ).bind(acknowledgement.input.studentId).first<{ first_name: string; last_name: string }>();
+  ).bind(acknowledgement.input.memberId).first<{ first_name: string; last_name: string }>();
   const displayName = student ? `${student.first_name} ${student.last_name}` : undefined;
-  const attendance = await attendanceSummary(env, acknowledgement.input.studentId);
-  const memberLabel = displayName ?? `Member ${acknowledgement.input.studentId}`;
+  const attendance = await attendanceSummary(env, acknowledgement.input.memberId);
+  const memberLabel = displayName ?? `Member ${acknowledgement.input.memberId}`;
   const scannedAt = formatKioskTime(acknowledgement.input.occurredAt, env.TIME_ZONE);
 
   if (acknowledgement.status === "duplicate") {
     return {
       localEventId: acknowledgement.input.localEventId,
-      studentId: acknowledgement.input.studentId,
+      memberId: acknowledgement.input.memberId,
       status: "duplicate",
       displayName,
       attendanceRate: attendance.rate,
@@ -196,12 +197,12 @@ async function buildAcknowledgement(env: Env, acknowledgement: AcknowledgementIn
   }
 
   if (acknowledgement.status === "rejected") {
-    const rosterMessage = acknowledgement.reason === "student is not active in roster"
+    const rosterMessage = acknowledgement.reason === "member is not active in roster" || acknowledgement.reason === "student is not active in roster"
       ? "Member is not active in the roster."
       : "Scan could not be accepted.";
     return {
       localEventId: acknowledgement.input.localEventId,
-      studentId: acknowledgement.input.studentId,
+      memberId: acknowledgement.input.memberId,
       status: "rejected",
       displayName,
       attendanceRate: attendance.rate,
@@ -216,32 +217,32 @@ async function buildAcknowledgement(env: Env, acknowledgement: AcknowledgementIn
   const greeting = acknowledgement.action === "check_out" ? "Goodbye" : "Welcome";
   return {
     localEventId: acknowledgement.input.localEventId,
-    studentId: acknowledgement.input.studentId,
+    memberId: acknowledgement.input.memberId,
     status: "accepted",
     displayName,
     action: acknowledgement.action,
     attendanceRate: attendance.rate,
     attendanceSummary: attendance.summary,
-    kioskMessage: `${greeting}, ${displayName ?? acknowledgement.input.studentId}`,
+    kioskMessage: `${greeting}, ${displayName ?? acknowledgement.input.memberId}`,
     kioskDetail: [`${actionLabel} at ${scannedAt}`, attendance.summary].filter(Boolean).join(" - "),
-    message: acknowledgement.action === "check_out" ? `Goodbye, ${displayName ?? acknowledgement.input.studentId}` : `Welcome, ${displayName ?? acknowledgement.input.studentId}`
+    message: acknowledgement.action === "check_out" ? `Goodbye, ${displayName ?? acknowledgement.input.memberId}` : `Welcome, ${displayName ?? acknowledgement.input.memberId}`
   };
 }
 
-async function actionForAcceptedScan(env: Env, kioskId: string, input: KioskSyncEventInput): Promise<"check_in" | "check_out"> {
+async function actionForAcceptedScan(env: Env, kioskId: string, input: NormalizedKioskSyncEventInput): Promise<"check_in" | "check_out"> {
   const meetingDate = meetingDateForTimestamp(input.occurredAt, env.TIME_ZONE);
   const rows = await env.DB.prepare(
     "SELECT id, occurred_at FROM scan_events WHERE student_id = ? AND status = 'accepted' ORDER BY occurred_at ASC, id ASC"
-  ).bind(input.studentId).all<{ id: string; occurred_at: string }>();
+  ).bind(input.memberId).all<{ id: string; occurred_at: string }>();
   const acceptedForMeeting = rows.results.filter((row) => meetingDateForTimestamp(row.occurred_at, env.TIME_ZONE) === meetingDate);
   const index = acceptedForMeeting.findIndex((row) => row.id === eventId(kioskId, input.localEventId));
   const actionIndex = index >= 0 ? index : acceptedForMeeting.length - 1;
   return actionIndex % 2 === 0 ? "check_in" : "check_out";
 }
 
-async function attendanceSummary(env: Env, studentId: string): Promise<{ rate: number | null; summary?: string }> {
+async function attendanceSummary(env: Env, memberId: string): Promise<{ rate: number | null; summary?: string }> {
   try {
-    const report = await buildMemberAttendanceReport(env, studentId);
+    const report = await buildMemberAttendanceReport(env, memberId);
     if (report.attendanceRate === null) return { rate: null };
     return {
       rate: report.attendanceRate,
@@ -251,6 +252,19 @@ async function attendanceSummary(env: Env, studentId: string): Promise<{ rate: n
     return { rate: null };
   }
 }
+
+function normalizeKioskSyncEvent(input: KioskSyncEventInput): NormalizedKioskSyncEventInput {
+  const memberId = input.memberId ?? input.studentId;
+  if (!memberId?.trim()) throw Object.assign(new Error("memberId is required"), { status: 400 });
+  return {
+    localEventId: input.localEventId,
+    memberId: memberId.trim(),
+    occurredAt: input.occurredAt,
+    source: input.source
+  };
+}
+
+type NormalizedKioskSyncEventInput = KioskSyncEventInput & { memberId: string };
 
 function formatKioskTime(occurredAt: string, timeZone?: string): string {
   try {
@@ -269,7 +283,7 @@ function formatKioskTime(occurredAt: string, timeZone?: string): string {
 }
 
 interface AcknowledgementInput {
-  input: KioskSyncEventInput;
+  input: NormalizedKioskSyncEventInput;
   status: ScanEventStatus;
   reason?: string;
   action?: "check_in" | "check_out";

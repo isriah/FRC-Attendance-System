@@ -100,7 +100,7 @@ ensureColumn("students", "email", "TEXT");
 async function seedBenchData() {
   db.prepare(`
     INSERT INTO students (student_id, first_name, last_name, active)
-    VALUES ('100001', 'Bench', 'Student', 1)
+    VALUES ('100001', 'Bench', 'Member', 1)
     ON CONFLICT(student_id) DO UPDATE SET active = 1
   `).run();
 
@@ -213,16 +213,17 @@ const server = createServer(async (request, response) => {
       return;
     }
 
-    if (request.method === "GET" && request.url === "/admin/students") {
+    if (request.method === "GET" && (request.url === "/admin/members" || request.url === "/admin/students")) {
       const students = db.prepare("SELECT student_id, first_name, last_name, email, active FROM students ORDER BY last_name, first_name").all();
-      sendJson(response, 200, { students });
+      const members = students.map(rowToMember);
+      sendJson(response, 200, request.url === "/admin/members" ? { members } : { students, members });
       return;
     }
 
-    const adminStudentEmail = request.url?.match(/^\/admin\/students\/([^/]+)\/email$/);
+    const adminStudentEmail = request.url?.match(/^\/admin\/(?:members|students)\/([^/]+)\/email$/);
     if (adminStudentEmail && request.method === "PUT") {
       const memberId = adminStudentEmail[1];
-      if (!memberId) throw httpError(400, "Student id is required");
+      if (!memberId) throw httpError(400, "Member id is required");
       const body = await readBody<{ email?: string | null }>(request);
       sendJson(response, 200, updateStudentEmail(decodeURIComponent(memberId), body.email ?? null));
       return;
@@ -350,8 +351,9 @@ const server = createServer(async (request, response) => {
 
     if (request.method === "GET" && request.url?.startsWith("/admin/reports/member")) {
       const url = new URL(request.url, `http://${request.headers.host ?? "localhost"}`);
+      const memberId = url.searchParams.get("memberId") ?? url.searchParams.get("studentId") ?? undefined;
       sendJson(response, 200, buildMemberAttendanceReport(
-        requireNonEmptyString(url.searchParams.get("studentId") ?? undefined, "studentId"),
+        requireNonEmptyString(memberId, "memberId"),
         benchReportDateRangeFromUrl(url)
       ));
       return;
@@ -372,7 +374,7 @@ const server = createServer(async (request, response) => {
 
 server.listen(port, "0.0.0.0", () => {
   console.log(`Bench API listening on http://localhost:${port}`);
-  console.log(`Seeded student 100001, kiosk bench-01, token dev-token`);
+  console.log(`Seeded member 100001, kiosk bench-01, token dev-token`);
 });
 
 async function requireKiosk(authHeader: string | undefined): Promise<string> {
@@ -406,6 +408,17 @@ function updateKioskHealth(report: KioskHealthReport) {
   );
 }
 
+function rowToMember(row: unknown) {
+  const member = row as { student_id: string; first_name: string; last_name: string; email?: string | null; active: number };
+  return {
+    memberId: member.student_id,
+    firstName: member.first_name,
+    lastName: member.last_name,
+    email: member.email ?? null,
+    active: Boolean(member.active)
+  };
+}
+
 function ensureColumn(table: string, column: string, definition: string) {
   const rows = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
   if (rows.some((row) => row.name === column)) return;
@@ -437,14 +450,15 @@ function syncRoster(members: RosterMemberInput[]) {
   });
   transaction();
 
-  return { synced: seen.size, deactivatedMissingStudents: normalizedMembers.length > 0 };
+  const deactivatedMissingMembers = normalizedMembers.length > 0;
+  return { synced: seen.size, deactivatedMissingMembers, deactivatedMissingStudents: deactivatedMissingMembers };
 }
 
 function updateStudentEmail(memberId: string, email: string | null) {
   const normalizedMemberId = requireNonEmptyString(memberId, "memberId");
   const normalizedEmail = normalizeOptionalEmail(email ?? undefined);
   const result = db.prepare("UPDATE students SET email = ? WHERE student_id = ?").run(normalizedEmail ?? null, normalizedMemberId);
-  if (result.changes === 0) throw httpError(404, "Student not found");
+  if (result.changes === 0) throw httpError(404, "Member not found");
   return { memberId: normalizedMemberId, email: normalizedEmail ?? null };
 }
 
@@ -678,7 +692,7 @@ async function enrollFingerprint(input: { memberId: string; slot: number; finger
     await runCommand("systemctl", ["--user", "stop", "frc-kiosk-service"]);
     const result = await runCommand("python3", [
       resolve(repoRoot, "apps/kiosk/enroll_fingerprint.py"),
-      "--student-id",
+      "--member-id",
       memberId,
       "--slot",
       String(slot),
@@ -862,7 +876,8 @@ function syncKioskEvents(kioskId: string, body: KioskSyncRequest) {
   const acknowledgements: KioskScanAcknowledgement[] = [];
   const now = new Date().toISOString();
 
-  for (const input of body.events) {
+  for (const rawInput of body.events) {
+    const input = normalizeKioskSyncEvent(rawInput);
     const existing = db.prepare("SELECT * FROM scan_events WHERE kiosk_id = ? AND local_event_id = ?").get(kioskId, input.localEventId) as DbScanEvent | undefined;
     if (existing) {
       const event = rowToScanEvent(existing);
@@ -873,15 +888,15 @@ function syncKioskEvents(kioskId: string, body: KioskSyncRequest) {
       continue;
     }
 
-    const student = db.prepare("SELECT active FROM students WHERE student_id = ?").get(input.studentId) as { active: number } | undefined;
+    const student = db.prepare("SELECT active FROM students WHERE student_id = ?").get(input.memberId) as { active: number } | undefined;
     if (!student?.active) {
-      rejected.push({ ...input, reason: "student is not active in roster" });
-      insertScanEvent(kioskId, input, now, "rejected", "student is not active in roster");
-      acknowledgements.push(buildAcknowledgement(input, "rejected", "student is not active in roster"));
+      rejected.push({ ...input, reason: "member is not active in roster" });
+      insertScanEvent(kioskId, input, now, "rejected", "member is not active in roster");
+      acknowledgements.push(buildAcknowledgement(input, "rejected", "member is not active in roster"));
       continue;
     }
 
-    const previous = db.prepare("SELECT * FROM scan_events WHERE student_id = ? AND status = 'accepted' ORDER BY occurred_at DESC LIMIT 1").get(input.studentId) as DbScanEvent | undefined;
+    const previous = db.prepare("SELECT * FROM scan_events WHERE student_id = ? AND status = 'accepted' ORDER BY occurred_at DESC LIMIT 1").get(input.memberId) as DbScanEvent | undefined;
     if (isDuplicateScan(previous ? rowToScanEvent(previous) : undefined, input, DEFAULT_DUPLICATE_WINDOW_MS)) {
       const event = insertScanEvent(kioskId, input, now, "duplicate", "duplicate scan window");
       duplicates.push(event);
@@ -899,21 +914,34 @@ function syncKioskEvents(kioskId: string, body: KioskSyncRequest) {
   return { accepted, duplicates, rejected, acknowledgements };
 }
 
+function normalizeKioskSyncEvent(input: KioskSyncRequest["events"][number]): NormalizedKioskSyncEventInput {
+  const memberId = input.memberId ?? input.studentId;
+  if (!memberId?.trim()) throw httpError(400, "memberId is required");
+  return {
+    localEventId: input.localEventId,
+    memberId: memberId.trim(),
+    occurredAt: input.occurredAt,
+    source: input.source
+  };
+}
+
+type NormalizedKioskSyncEventInput = KioskSyncRequest["events"][number] & { memberId: string };
+
 function buildAcknowledgement(
-  input: KioskSyncRequest["events"][number],
+  input: NormalizedKioskSyncEventInput,
   status: "accepted" | "duplicate" | "rejected",
   reason?: string
 ): KioskScanAcknowledgement {
-  const student = db.prepare("SELECT first_name, last_name FROM students WHERE student_id = ?").get(input.studentId) as { first_name: string; last_name: string } | undefined;
+  const student = db.prepare("SELECT first_name, last_name FROM students WHERE student_id = ?").get(input.memberId) as { first_name: string; last_name: string } | undefined;
   const displayName = student ? `${student.first_name} ${student.last_name}` : undefined;
-  const attendance = student ? buildBenchAttendanceSummary(input.studentId) : { rate: null };
-  const memberLabel = displayName ?? `Member ${input.studentId}`;
+  const attendance = student ? buildBenchAttendanceSummary(input.memberId) : { rate: null };
+  const memberLabel = displayName ?? `Member ${input.memberId}`;
   const scannedAt = formatKioskTime(input.occurredAt);
 
   if (status === "duplicate") {
     return {
       localEventId: input.localEventId,
-      studentId: input.studentId,
+      memberId: input.memberId,
       status,
       displayName,
       attendanceRate: attendance.rate,
@@ -925,10 +953,10 @@ function buildAcknowledgement(
   }
 
   if (status === "rejected") {
-    const rosterMessage = reason === "student is not active in roster" ? "Member is not active in the roster." : "Scan could not be accepted.";
+    const rosterMessage = reason === "member is not active in roster" || reason === "student is not active in roster" ? "Member is not active in the roster." : "Scan could not be accepted.";
     return {
       localEventId: input.localEventId,
-      studentId: input.studentId,
+      memberId: input.memberId,
       status,
       displayName,
       attendanceRate: attendance.rate,
@@ -939,26 +967,26 @@ function buildAcknowledgement(
     };
   }
 
-  const action = nextAcceptedScanAction(input.studentId, input.occurredAt);
+  const action = nextAcceptedScanAction(input.memberId, input.occurredAt);
   const actionLabel = action === "check_out" ? "Checked out" : "Checked in";
   const greeting = action === "check_out" ? "Goodbye" : "Welcome";
   return {
     localEventId: input.localEventId,
-    studentId: input.studentId,
+    memberId: input.memberId,
     status,
     displayName,
     action,
     attendanceRate: attendance.rate,
     attendanceSummary: attendance.summary,
-    kioskMessage: `${greeting}, ${displayName ?? input.studentId}`,
+    kioskMessage: `${greeting}, ${displayName ?? input.memberId}`,
     kioskDetail: [`${actionLabel} at ${scannedAt}`, attendance.summary].filter(Boolean).join(" - "),
-    message: action === "check_in" ? `Welcome, ${displayName ?? input.studentId}` : `Goodbye, ${displayName ?? input.studentId}`
+    message: action === "check_in" ? `Welcome, ${displayName ?? input.memberId}` : `Goodbye, ${displayName ?? input.memberId}`
   };
 }
 
-function nextAcceptedScanAction(studentId: string, occurredAt: string): "check_in" | "check_out" {
+function nextAcceptedScanAction(memberId: string, occurredAt: string): "check_in" | "check_out" {
   const meetingDate = meetingDateForTimestamp(occurredAt);
-  const count = db.prepare("SELECT COUNT(*) AS count FROM scan_events WHERE student_id = ? AND status = 'accepted' AND date(occurred_at) = ?").get(studentId, meetingDate) as { count: number };
+  const count = db.prepare("SELECT COUNT(*) AS count FROM scan_events WHERE student_id = ? AND status = 'accepted' AND date(occurred_at) = ?").get(memberId, meetingDate) as { count: number };
   return count.count % 2 === 1 ? "check_in" : "check_out";
 }
 
@@ -967,7 +995,7 @@ function displayStateForAcknowledgement(acknowledgement: KioskScanAcknowledgemen
     return {
       status: "duplicate",
       message: acknowledgement.kioskMessage ?? "Already recorded",
-      detail: acknowledgement.kioskDetail ?? acknowledgement.displayName ?? `Member ${acknowledgement.studentId}`
+      detail: acknowledgement.kioskDetail ?? acknowledgement.displayName ?? `Member ${acknowledgement.memberId}`
     };
   }
 
@@ -982,12 +1010,12 @@ function displayStateForAcknowledgement(acknowledgement: KioskScanAcknowledgemen
   return {
     status: acknowledgement.action === "check_out" ? "goodbye" : "welcome",
     message: acknowledgement.kioskMessage ?? (acknowledgement.action === "check_out" ? "Goodbye" : "Welcome"),
-    detail: acknowledgement.kioskDetail ?? [acknowledgement.displayName ?? `Member ${acknowledgement.studentId}`, acknowledgement.attendanceSummary].filter(Boolean).join(" - ")
+    detail: acknowledgement.kioskDetail ?? [acknowledgement.displayName ?? `Member ${acknowledgement.memberId}`, acknowledgement.attendanceSummary].filter(Boolean).join(" - ")
   };
 }
 
-function buildBenchAttendanceSummary(studentId: string): { rate: number | null; summary?: string } {
-  const report = buildMemberAttendanceReport(studentId);
+function buildBenchAttendanceSummary(memberId: string): { rate: number | null; summary?: string } {
+  const report = buildMemberAttendanceReport(memberId);
   if (report.attendanceRate === null) return { rate: null };
   return {
     rate: report.attendanceRate,
@@ -1021,11 +1049,11 @@ function buildPresenceReport(date = meetingDateForTimestamp(new Date().toISOStri
   const students = db.prepare(
     "SELECT student_id, first_name, last_name FROM students WHERE active = 1 ORDER BY last_name, first_name"
   ).all() as Array<{ student_id: string; first_name: string; last_name: string }>;
-  const sessionsByStudent = new Map(deriveBenchSessions().filter((session) => session.meetingDate === date).map((session) => [session.studentId, session]));
+  const sessionsByStudent = new Map(deriveBenchSessions().filter((session) => session.meetingDate === date).map((session) => [session.memberId, session]));
   const rows = students.map((student) => {
     const session = sessionsByStudent.get(student.student_id);
     return {
-      studentId: student.student_id,
+      memberId: student.student_id,
       firstName: student.first_name,
       lastName: student.last_name,
       status: session ? session.status === "open" ? "signed_in" : "signed_out" : "not_seen",
@@ -1050,14 +1078,14 @@ interface BenchReportDateRange {
   endDate?: string;
 }
 
-function buildMemberAttendanceReport(studentId: string, range: BenchReportDateRange = {}) {
-  const student = db.prepare("SELECT student_id, first_name, last_name FROM students WHERE student_id = ?").get(studentId) as { student_id: string; first_name: string; last_name: string } | undefined;
+function buildMemberAttendanceReport(memberId: string, range: BenchReportDateRange = {}) {
+  const student = db.prepare("SELECT student_id, first_name, last_name FROM students WHERE student_id = ?").get(memberId) as { student_id: string; first_name: string; last_name: string } | undefined;
   if (!student) throw httpError(404, "Member not found");
 
   const sessions = deriveBenchSessions().filter((session) => isDateInRange(session.meetingDate, range));
   const allDates = benchReportMeetingDates(range);
   const allDateSet = new Set(allDates);
-  const studentSessions = sessions.filter((session) => session.studentId === studentId);
+  const studentSessions = sessions.filter((session) => session.memberId === memberId);
   const presentDates = [...new Set(studentSessions.map((session) => session.meetingDate))].filter((date) => allDateSet.has(date));
   const presentDateSet = new Set(presentDates);
   const absentDates = allDates.filter((date) => !presentDateSet.has(date));
@@ -1067,7 +1095,7 @@ function buildMemberAttendanceReport(studentId: string, range: BenchReportDateRa
   }, undefined);
 
   return {
-    studentId: student.student_id,
+    memberId: student.student_id,
     firstName: student.first_name,
     lastName: student.last_name,
     startDate: range.startDate,
@@ -1095,7 +1123,7 @@ function buildBenchAttendanceSessionReport(range: BenchReportDateRange = {}, lim
   const sessionRows = sessions.map((session) => {
     const meeting = meetingsByDate.get(session.meetingDate);
     return {
-      student_id: session.studentId,
+      member_id: session.memberId,
       meeting_date: session.meetingDate,
       meeting_title: meeting?.title ?? null,
       required: meeting?.required ?? 1,
@@ -1108,7 +1136,7 @@ function buildBenchAttendanceSessionReport(range: BenchReportDateRange = {}, lim
   const zeroScanRows = meetings
     .filter((meeting) => !sessionDates.has(meeting.meeting_date))
     .map((meeting) => ({
-      student_id: null,
+      member_id: null,
       meeting_date: meeting.meeting_date,
       meeting_title: meeting.title,
       required: meeting.required,
@@ -1119,7 +1147,7 @@ function buildBenchAttendanceSessionReport(range: BenchReportDateRange = {}, lim
     }));
 
   return [...sessionRows, ...zeroScanRows]
-    .sort((left, right) => right.meeting_date.localeCompare(left.meeting_date) || String(left.student_id ?? "").localeCompare(String(right.student_id ?? "")))
+    .sort((left, right) => right.meeting_date.localeCompare(left.meeting_date) || String(left.member_id ?? "").localeCompare(String(right.member_id ?? "")))
     .slice(0, limit);
 }
 
@@ -1133,7 +1161,7 @@ function buildBenchMeetingSummaryReport(range: BenchReportDateRange = {}, limit 
   }>).filter((meeting) => isDateInRange(meeting.meeting_date, range));
   const sessions = deriveBenchSessions().filter((session) => isDateInRange(session.meetingDate, range));
   const activeStudentRows = db.prepare("SELECT student_id FROM students WHERE active = 1").all() as Array<{ student_id: string }>;
-  const activeStudentIds = new Set(activeStudentRows.map((student) => student.student_id));
+  const activememberIds = new Set(activeStudentRows.map((student) => student.student_id));
   const meetingsByDate = new Map(meetings.map((meeting) => [meeting.meeting_date, meeting]));
   const sessionsByDate = sessions.reduce<Map<string, { presentCount: number; activePresentCount: number; openCheckIns: number; presentStudents: Set<string>; activePresentStudents: Set<string> }>>((groups, session) => {
     const group = groups.get(session.meetingDate) ?? {
@@ -1143,12 +1171,12 @@ function buildBenchMeetingSummaryReport(range: BenchReportDateRange = {}, limit 
       presentStudents: new Set<string>(),
       activePresentStudents: new Set<string>()
     };
-    if (!group.presentStudents.has(session.studentId)) {
-      group.presentStudents.add(session.studentId);
+    if (!group.presentStudents.has(session.memberId)) {
+      group.presentStudents.add(session.memberId);
       group.presentCount += 1;
     }
-    if (activeStudentIds.has(session.studentId) && !group.activePresentStudents.has(session.studentId)) {
-      group.activePresentStudents.add(session.studentId);
+    if (activememberIds.has(session.memberId) && !group.activePresentStudents.has(session.memberId)) {
+      group.activePresentStudents.add(session.memberId);
       group.activePresentCount += 1;
     }
     if (session.status === "open") group.openCheckIns += 1;
@@ -1191,7 +1219,7 @@ function buildBenchMeetingAbsenceReport(meetingDate: string) {
     starts_at: string | null;
     ends_at: string | null;
   } | undefined;
-  const presentIds = new Set(deriveBenchSessions().filter((session) => session.meetingDate === date).map((session) => session.studentId));
+  const presentIds = new Set(deriveBenchSessions().filter((session) => session.meetingDate === date).map((session) => session.memberId));
   const required = meeting ? Boolean(meeting.required) : !benchHasScheduledMeetings() && presentIds.size > 0;
   const students = db.prepare("SELECT student_id, first_name, last_name FROM students WHERE active = 1 ORDER BY last_name, first_name").all() as Array<{
     student_id: string;
@@ -1201,7 +1229,7 @@ function buildBenchMeetingAbsenceReport(meetingDate: string) {
   const rows = required
     ? students
       .filter((student) => !presentIds.has(student.student_id))
-      .map((student) => ({ studentId: student.student_id, firstName: student.first_name, lastName: student.last_name }))
+      .map((student) => ({ memberId: student.student_id, firstName: student.first_name, lastName: student.last_name }))
     : [];
 
   return {
@@ -1220,7 +1248,7 @@ function buildBenchRosterAttendanceSummary(range: BenchReportDateRange = {}) {
   return activeStudents.map((student) => {
     const report = buildMemberAttendanceReport(student.student_id, range);
     return {
-      studentId: report.studentId,
+      memberId: report.memberId,
       firstName: report.firstName,
       lastName: report.lastName,
       requiredMeetings: report.totalMeetings,
@@ -1269,12 +1297,12 @@ function buildBenchLegacySheetExport(range: BenchReportDateRange = {}) {
       MeetingAbsences: requiredMeetingAbsences.flatMap((meeting) => meeting.rows.map((student) => [
         formatLegacyDate(meeting.meetingDate),
         meeting.title ?? "Required attendance",
-        student.studentId,
+        student.memberId,
         student.firstName,
         student.lastName
       ])),
       RosterAttendance: rosterAttendance.map((report) => [
-        report.studentId,
+        report.memberId,
         report.firstName,
         report.lastName,
         report.requiredMeetings,
@@ -1285,14 +1313,14 @@ function buildBenchLegacySheetExport(range: BenchReportDateRange = {}) {
         report.openSessionWarning ? "open check-in" : ""
       ]),
       AttendanceLogIn: sessions.map((session) => [
-        session.studentId,
+        session.memberId,
         formatLegacyDate(session.meetingDate),
         formatLegacyTime(session.checkInAt)
       ]),
       AttendanceLogOut: sessions
         .filter((session) => Boolean(session.checkOutAt))
         .map((session) => [
-          session.studentId,
+          session.memberId,
           formatLegacyDate(session.meetingDate),
           formatLegacyTime(session.checkOutAt as string)
         ]),
@@ -1305,7 +1333,7 @@ function buildBenchLegacySheetExport(range: BenchReportDateRange = {}) {
         sessionCountsByDate.get(meeting.meeting_date) ?? 0
       ]),
       MemberAttendanceSummary: rosterAttendance.map((report) => [
-        report.studentId,
+        report.memberId,
         report.firstName,
         report.lastName,
         report.requiredMeetings,
@@ -1357,7 +1385,7 @@ function deriveBenchSessions(): AttendanceSession[] {
     occurred_at: string;
     status: "accepted";
   }>;
-  return deriveAttendanceSessions(rows.map((row) => ({ id: row.id, studentId: row.student_id, occurredAt: row.occurred_at, status: row.status })));
+  return deriveAttendanceSessions(rows.map((row) => ({ id: row.id, memberId: row.student_id, occurredAt: row.occurred_at, status: row.status })));
 }
 
 function setDisplayState(state: Omit<KioskDisplayState, "updatedAt">) {
@@ -1379,7 +1407,7 @@ function currentDisplayState(): KioskDisplayState {
 
 function insertScanEvent(
   kioskId: string,
-  input: KioskSyncRequest["events"][number],
+  input: NormalizedKioskSyncEventInput,
   syncedAt: string,
   status: "accepted" | "duplicate" | "rejected",
   rejectionReason?: string
@@ -1388,8 +1416,8 @@ function insertScanEvent(
   db.prepare(`
     INSERT INTO scan_events (id, kiosk_id, local_event_id, student_id, occurred_at, synced_at, source, status, rejection_reason)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, kioskId, input.localEventId, input.studentId, input.occurredAt, syncedAt, input.source, status, rejectionReason ?? null);
-  return { id, kioskId, localEventId: input.localEventId, studentId: input.studentId, occurredAt: input.occurredAt, syncedAt, source: input.source, status };
+  `).run(id, kioskId, input.localEventId, input.memberId, input.occurredAt, syncedAt, input.source, status, rejectionReason ?? null);
+  return { id, kioskId, localEventId: input.localEventId, memberId: input.memberId, occurredAt: input.occurredAt, syncedAt, source: input.source, status };
 }
 
 function rowToScanEvent(row: DbScanEvent): ScanEvent {
@@ -1397,7 +1425,7 @@ function rowToScanEvent(row: DbScanEvent): ScanEvent {
     id: row.id,
     kioskId: row.kiosk_id,
     localEventId: row.local_event_id,
-    studentId: row.student_id,
+    memberId: row.student_id,
     occurredAt: row.occurred_at,
     syncedAt: row.synced_at,
     source: "fingerprint",

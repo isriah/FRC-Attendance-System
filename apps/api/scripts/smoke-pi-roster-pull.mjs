@@ -74,8 +74,8 @@ const pullResult = await requestJson(benchApiBaseUrl + "/admin/roster/pull-produ
 assert(pullResult?.synced === productionRoster.members.length, "Pull synced " + pullResult?.synced + ", expected " + productionRoster.members.length);
 assert(pullResult?.source === remoteApiBaseUrl, "Pull source " + pullResult?.source + " did not match " + remoteApiBaseUrl);
 
-const localStudents = await requestJson(benchApiBaseUrl + "/admin/students");
-assert(Array.isArray(localStudents?.students), "Local students response did not include students");
+const localMembers = await requestJson(benchApiBaseUrl + "/admin/members");
+assert(Array.isArray(localMembers?.members), "Local members response did not include members");
 
 const expected = productionRoster.members
   .map((member) => ({
@@ -85,12 +85,12 @@ const expected = productionRoster.members
   }))
   .sort((a, b) => rosterKey(a).localeCompare(rosterKey(b)));
 
-const actual = localStudents.students
-  .filter((student) => Number(student.active) === 1)
-  .map((student) => ({
-    memberId: String(student.student_id),
-    firstName: String(student.first_name),
-    lastName: String(student.last_name)
+const actual = localMembers.members
+  .filter((member) => Boolean(member.active))
+  .map((member) => ({
+    memberId: String(member.memberId),
+    firstName: String(member.firstName),
+    lastName: String(member.lastName)
   }))
   .sort((a, b) => rosterKey(a).localeCompare(rosterKey(b)));
 

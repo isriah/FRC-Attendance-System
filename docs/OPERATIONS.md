@@ -92,7 +92,7 @@ npm --workspace @frc-attendance/api run dev:bench
 
 It listens on `http://localhost:8787` and seeds:
 
-- student `100001`
+- member `100001`
 - kiosk `bench-01`
 - kiosk token `dev-token`
 
@@ -229,7 +229,7 @@ Current bench Pi production API validation:
   Environment=API_BASE_URL=https://frc-attendance-api.frc-attendance.workers.dev
   ```
 
-- Offline queue replay was validated by stopping `frc-kiosk-service`, inserting one pending local fingerprint scan for student `100001`, restarting the service, and confirming the local event `remote-replay-1de1a877-fa2c-482f-b388-335758e663de` was marked synced locally and inserted into remote D1 as an accepted `scan_events` row.
+- Offline queue replay was validated by stopping `frc-kiosk-service`, inserting one pending local fingerprint scan for member `100001`, restarting the service, and confirming the local event `remote-replay-1de1a877-fa2c-482f-b388-335758e663de` was marked synced locally and inserted into remote D1 as an accepted `scan_events` row.
 - The dashboard Kiosks tab can queue per-kiosk restart commands. Kiosk services poll `GET /kiosk/commands` with their kiosk token and execute only allowlisted local actions: restart display (`frc-kiosk-ui`), restart kiosk services (`frc-bench-api`, `frc-kiosk-ui`, `frc-dashboard-ui`, then `frc-kiosk-service`), or schedule a system reboot with `sudo -n /usr/bin/systemctl reboot`. Reboot commands require the narrow sudoers rule installed by `sudo bash apps/kiosk/scripts/install-reboot-sudoers.sh`.
 
 ## Pi User Services
@@ -277,11 +277,13 @@ STAT:OFFLINE
 MATCH:<student_id>,<template_slot>
 ```
 
+`student_id` in the bridge line is a retained compatibility storage/protocol name for the existing kiosk SQLite schema. Application JSON and dashboard copy use `memberId`.
+
 For bench testing, enroll or map a finger into slot `1`:
 
 ```bash
 npm --workspace @frc-attendance/kiosk run fingerprint:map -- \
-  --student-id 100001 \
+  --member-id 100001 \
   --slot 1
 ```
 
@@ -298,7 +300,7 @@ Expected while the API is not running:
 
 ```text
 Fingerprint reader online
-Queued scan <uuid> for student 100001
+Queued scan <uuid> for member 100001
 Offline or sync failed; scan remains cached: fetch failed
 ```
 
@@ -306,7 +308,9 @@ Set `FINGERPRINT_SIMULATE=true` to run without hardware. Repeated matches for th
 
 ## Roster Sync
 
-The member Google Sheet remains authoritative for active members and stable Member IDs. The API currently accepts normalized roster rows at `POST /admin/roster/sync` with `memberId`, `firstName`, `lastName`, and optional `email`; the next implementation step is wiring this endpoint to a Google Sheets reader or an Apps Script push.
+The member Google Sheet remains authoritative for active members and stable Member IDs. The API currently accepts normalized roster rows at `POST /admin/roster/sync` with `memberId`, `firstName`, `lastName`, and optional `email`; `studentId` is still accepted as a backwards-compatible input alias. The next implementation step is wiring this endpoint to a Google Sheets reader or an Apps Script push.
+
+The API and dashboard expose member-facing roster/report fields as `memberId`. Existing D1 and kiosk SQLite tables/columns named `students` and `student_id` remain compatibility storage names and should not be migrated casually.
 
 Removed roster entries are deactivated in D1 rather than deleted.
 

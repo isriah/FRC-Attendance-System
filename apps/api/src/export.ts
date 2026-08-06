@@ -51,7 +51,7 @@ export async function buildLegacySheetExport(env: Env, range: ReportDateRange = 
     sessionCountsByDate.get(meeting.meeting_date) ?? 0
   ]);
   const rosterAttendanceRows = rosterAttendance.map((report) => [
-    report.studentId,
+    report.memberId,
     report.firstName,
     report.lastName,
     report.requiredMeetings,
@@ -76,7 +76,7 @@ export async function buildLegacySheetExport(env: Env, range: ReportDateRange = 
   const meetingAbsenceRows = requiredMeetingAbsences.flatMap((meeting) => meeting.rows.map((student) => [
     formatLegacyDate(meeting.meetingDate),
     meeting.title ?? "Required attendance",
-    student.studentId,
+    student.memberId,
     student.firstName,
     student.lastName
   ]));
@@ -90,7 +90,7 @@ export async function buildLegacySheetExport(env: Env, range: ReportDateRange = 
       AttendanceLogIn: logInRows,
       AttendanceLogOut: logOutRows,
       ScheduledMeetings: meetingRows,
-      MemberAttendanceSummary: rosterAttendanceRows
+    MemberAttendanceSummary: rosterAttendanceRows
     }
   };
 }

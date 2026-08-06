@@ -17,7 +17,7 @@ export class SyncClient {
       },
       body: JSON.stringify({
         kioskId: this.config.kioskId,
-        events: events.map(({ localEventId, studentId, occurredAt, source }) => ({ localEventId, studentId, occurredAt, source }))
+        events: events.map(({ localEventId, memberId, occurredAt, source }) => ({ localEventId, memberId, occurredAt, source }))
       })
     });
 

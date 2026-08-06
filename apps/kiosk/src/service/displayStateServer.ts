@@ -68,13 +68,13 @@ export class DisplayStateServer {
     this.set(displayStateForAcknowledgement(acknowledgement));
   }
 
-  setSyncResult(localEventId: string, studentId: string, result: KioskSyncResult): void {
+  setSyncResult(localEventId: string, memberId: string, result: KioskSyncResult): void {
     const accepted = result.accepted.find((event) => event.localEventId === localEventId);
     if (accepted) {
       this.set({
         status: "welcome",
         message: "Scan accepted",
-        detail: `Member ${studentId}`
+        detail: `Member ${memberId}`
       });
       return;
     }
@@ -84,7 +84,7 @@ export class DisplayStateServer {
       this.set({
         status: "duplicate",
         message: "Already recorded",
-        detail: `Member ${studentId}`
+        detail: `Member ${memberId}`
       });
       return;
     }
@@ -135,7 +135,7 @@ export function displayStateForAcknowledgement(acknowledgement: KioskScanAcknowl
     return {
       status: "duplicate",
       message: acknowledgement.kioskMessage ?? baseDisplayState("duplicate").message,
-      detail: acknowledgement.kioskDetail ?? acknowledgement.displayName ?? `Member ${acknowledgement.studentId}`
+      detail: acknowledgement.kioskDetail ?? acknowledgement.displayName ?? `Member ${acknowledgement.memberId}`
     };
   }
 
@@ -150,7 +150,7 @@ export function displayStateForAcknowledgement(acknowledgement: KioskScanAcknowl
   return {
     status: acknowledgement.action === "check_out" ? "goodbye" : "welcome",
     message: acknowledgement.kioskMessage ?? baseDisplayState(acknowledgement.action === "check_out" ? "goodbye" : "welcome").message,
-    detail: acknowledgement.kioskDetail ?? [acknowledgement.displayName ?? `Member ${acknowledgement.studentId}`, acknowledgement.attendanceSummary].filter(Boolean).join(" - ")
+    detail: acknowledgement.kioskDetail ?? [acknowledgement.displayName ?? `Member ${acknowledgement.memberId}`, acknowledgement.attendanceSummary].filter(Boolean).join(" - ")
   };
 }
 

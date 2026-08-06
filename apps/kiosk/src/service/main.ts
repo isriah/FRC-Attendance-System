@@ -21,10 +21,10 @@ display.start(config.displayStatePort);
 
 bridge.on("bridge-event", async (event: FingerprintBridgeEvent) => {
   if (event.type === "match") {
-    const local = queue.addFingerprintScan(event.studentId);
+    const local = queue.addFingerprintScan(event.memberId);
     updateDisplayHealth();
-    display.setProcessing(`Member ${event.studentId}`);
-    console.log(`Queued scan ${local.localEventId} for student ${event.studentId}`);
+    display.setProcessing(`Member ${event.memberId}`);
+    console.log(`Queued scan ${local.localEventId} for member ${event.memberId}`);
     try {
       const result = await sync.flushPending();
       const acknowledgement = result?.acknowledgements?.find((ack) => ack.localEventId === local.localEventId);
@@ -33,7 +33,7 @@ bridge.on("bridge-event", async (event: FingerprintBridgeEvent) => {
         bridge.setLedState(ledStateForAcknowledgement(acknowledgement));
         console.log(`Scan acknowledged: ${acknowledgement.message}`);
       } else if (result) {
-        display.setSyncResult(local.localEventId, event.studentId, result);
+        display.setSyncResult(local.localEventId, event.memberId, result);
         const ledState = ledStateForSyncResult(local.localEventId, result);
         if (ledState) bridge.setLedState(ledState);
       }

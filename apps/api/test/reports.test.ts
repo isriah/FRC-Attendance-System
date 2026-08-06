@@ -28,7 +28,7 @@ describe("report builders", () => {
     expect(report.counts).toEqual({ signedIn: 1, signedOut: 1, notSeen: 1 });
     expect(report.rows).toEqual([
       {
-        studentId: "100002",
+        memberId: "100002",
         firstName: "Drive",
         lastName: "Captain",
         status: "signed_out",
@@ -36,7 +36,7 @@ describe("report builders", () => {
         checkOutAt: "2026-01-02T22:00:00.000Z"
       },
       {
-        studentId: "100003",
+        memberId: "100003",
         firstName: "Pit",
         lastName: "Lead",
         status: "not_seen",
@@ -44,7 +44,7 @@ describe("report builders", () => {
         checkOutAt: undefined
       },
       {
-        studentId: "100001",
+        memberId: "100001",
         firstName: "Bench",
         lastName: "Student",
         status: "signed_in",
@@ -65,7 +65,7 @@ describe("report builders", () => {
     const report = await buildMemberAttendanceReport(env, "100001");
 
     expect(report).toMatchObject({
-      studentId: "100001",
+      memberId: "100001",
       firstName: "Bench",
       lastName: "Student",
       totalMeetings: 2,
@@ -146,7 +146,7 @@ describe("report builders", () => {
         meeting_title: "Optional Outreach",
         required: 0,
         has_attendance: 0,
-        student_id: null,
+        member_id: null,
         check_in_at: null,
         check_out_at: null,
         status: "scheduled"
@@ -156,7 +156,7 @@ describe("report builders", () => {
         meeting_title: "Required Shop",
         required: 1,
         has_attendance: 1,
-        student_id: "100001",
+        member_id: "100001",
         check_in_at: "2026-01-02T20:00:00.000Z",
         check_out_at: null,
         status: "open"
@@ -262,7 +262,7 @@ describe("report builders", () => {
       startsAt: undefined,
       endsAt: undefined,
       absentCount: 1,
-      rows: [{ studentId: "100002", firstName: "Drive", lastName: "Captain" }]
+      rows: [{ memberId: "100002", firstName: "Drive", lastName: "Captain" }]
     });
   });
 
@@ -306,7 +306,7 @@ describe("report builders", () => {
     });
     expect(rosterSummary).toEqual([
       {
-        studentId: "100002",
+        memberId: "100002",
         firstName: "Drive",
         lastName: "Captain",
         requiredMeetings: 2,
@@ -318,7 +318,7 @@ describe("report builders", () => {
         openSessionWarning: true
       },
       {
-        studentId: "100001",
+        memberId: "100001",
         firstName: "Bench",
         lastName: "Student",
         requiredMeetings: 2,
@@ -390,15 +390,15 @@ function createTestEnv(): Env {
   } as unknown as Env;
 }
 
-function insertStudent(env: Env, studentId: string, firstName: string, lastName: string, active = 1) {
+function insertStudent(env: Env, memberId: string, firstName: string, lastName: string, active = 1) {
   return env.DB.prepare("INSERT INTO students (student_id, first_name, last_name, active) VALUES (?, ?, ?, ?)")
-    .bind(studentId, firstName, lastName, active)
+    .bind(memberId, firstName, lastName, active)
     .run();
 }
 
 function insertSession(
   env: Env,
-  studentId: string,
+  memberId: string,
   meetingDate: string,
   checkInAt: string,
   checkOutAt: string | null,
@@ -407,8 +407,8 @@ function insertSession(
   return env.DB.prepare(
     "INSERT INTO attendance_sessions (id, student_id, meeting_date, check_in_at, check_out_at, status, source_event_ids, rebuilt_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
   ).bind(
-    `${studentId}-${meetingDate}-${checkInAt}`,
-    studentId,
+    `${memberId}-${meetingDate}-${checkInAt}`,
+    memberId,
     meetingDate,
     checkInAt,
     checkOutAt,

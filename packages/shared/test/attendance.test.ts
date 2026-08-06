@@ -2,11 +2,11 @@ import { describe, expect, it } from "vitest";
 import { deriveAttendanceSessions, isDuplicateScan, meetingDateForTimestamp } from "../src/attendance";
 import type { ScanEvent } from "../src/types";
 
-const scan = (id: string, studentId: string, occurredAt: string): ScanEvent => ({
+const scan = (id: string, memberId: string, occurredAt: string): ScanEvent => ({
   id,
   kioskId: "kiosk-a",
   localEventId: id,
-  studentId,
+  memberId,
   occurredAt,
   source: "fingerprint",
   status: "accepted"
@@ -19,8 +19,8 @@ describe("attendance rules", () => {
 
   it("suppresses scans within the duplicate window", () => {
     const previous = scan("a", "123", "2026-01-01T20:00:00.000Z");
-    expect(isDuplicateScan(previous, { studentId: "123", occurredAt: "2026-01-01T20:01:00.000Z" })).toBe(true);
-    expect(isDuplicateScan(previous, { studentId: "123", occurredAt: "2026-01-01T20:02:00.000Z" })).toBe(false);
+    expect(isDuplicateScan(previous, { memberId: "123", occurredAt: "2026-01-01T20:01:00.000Z" })).toBe(true);
+    expect(isDuplicateScan(previous, { memberId: "123", occurredAt: "2026-01-01T20:02:00.000Z" })).toBe(false);
   });
 
   it("auto toggles check-in and check-out sessions", () => {
@@ -31,7 +31,7 @@ describe("attendance rules", () => {
 
     expect(sessions).toHaveLength(1);
     expect(sessions[0]).toMatchObject({
-      studentId: "123",
+      memberId: "123",
       status: "closed",
       checkInAt: "2026-01-01T20:00:00.000Z",
       checkOutAt: "2026-01-01T22:00:00.000Z"

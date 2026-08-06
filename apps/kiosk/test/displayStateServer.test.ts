@@ -6,7 +6,7 @@ describe("display state acknowledgements", () => {
   it("shows accepted check-ins as welcome messages", () => {
     expect(displayStateForAcknowledgement({
       localEventId: "local-1",
-      studentId: "100001",
+      memberId: "100001",
       status: "accepted",
       action: "check_in",
       displayName: "Bench Student",
@@ -24,7 +24,7 @@ describe("display state acknowledgements", () => {
   it("shows duplicate scans without changing attendance action", () => {
     expect(displayStateForAcknowledgement({
       localEventId: "local-2",
-      studentId: "100001",
+      memberId: "100001",
       status: "duplicate",
       displayName: "Bench Student",
       kioskMessage: "Already recorded",
@@ -40,7 +40,7 @@ describe("display state acknowledgements", () => {
   it("shows accepted check-outs as goodbye messages", () => {
     expect(displayStateForAcknowledgement({
       localEventId: "local-out",
-      studentId: "1234",
+      memberId: "1234",
       status: "accepted",
       action: "check_out",
       displayName: "Test Person",
@@ -58,7 +58,7 @@ describe("display state acknowledgements", () => {
   it("shows rejected scans with the acknowledgement message", () => {
     expect(displayStateForAcknowledgement({
       localEventId: "local-rejected",
-      studentId: "qa-inactive",
+      memberId: "qa-inactive",
       status: "rejected",
       kioskMessage: "Roster issue",
       kioskDetail: "Member qa-inactive - Member is not active in the roster.",
@@ -73,7 +73,7 @@ describe("display state acknowledgements", () => {
   it("falls back to locally composed acknowledgement messages for older APIs", () => {
     expect(displayStateForAcknowledgement({
       localEventId: "local-old",
-      studentId: "100001",
+      memberId: "100001",
       status: "accepted",
       action: "check_in",
       displayName: "Bench Student",
@@ -93,7 +93,7 @@ describe("display state acknowledgements", () => {
         id: "bench-01:local-3",
         kioskId: "bench-01",
         localEventId: "local-3",
-        studentId: "100001",
+        memberId: "100001",
         occurredAt: new Date().toISOString(),
         source: "fingerprint",
         status: "accepted"

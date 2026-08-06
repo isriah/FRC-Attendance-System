@@ -61,10 +61,11 @@ export default {
         return json(await syncRoster(env, body.members));
       }
 
-      if (route === "GET /admin/students") {
+      if (route === "GET /admin/members" || route === "GET /admin/students") {
         await requireAdmin(request, env);
         const rows = await env.DB.prepare("SELECT student_id, first_name, last_name, email, active, roster_synced_at FROM students ORDER BY last_name, first_name").all();
-        return json({ students: rows.results });
+        const members = rows.results.map(rowToMember);
+        return json(route === "GET /admin/members" ? { members } : { students: rows.results, members });
       }
 
       if (route === "GET /admin/admin-users") {
@@ -81,11 +82,11 @@ export default {
         return json(await upsertAdminUser(env, decodeURIComponent(email), body));
       }
 
-      const adminStudentEmail = url.pathname.match(/^\/admin\/students\/([^/]+)\/email$/);
-      if (request.method === "PUT" && adminStudentEmail) {
+      const adminMemberEmail = url.pathname.match(/^\/admin\/(?:members|students)\/([^/]+)\/email$/);
+      if (request.method === "PUT" && adminMemberEmail) {
         await requireAdmin(request, env);
-        const memberId = adminStudentEmail[1];
-        if (!memberId) throw Object.assign(new Error("Student id is required"), { status: 400 });
+        const memberId = adminMemberEmail[1];
+        if (!memberId) throw Object.assign(new Error("Member id is required"), { status: 400 });
         const body = await readJson<{ email?: string | null }>(request);
         return json(await updateStudentEmail(env, decodeURIComponent(memberId), body.email ?? null));
       }
@@ -159,9 +160,10 @@ export default {
 
       if (route === "POST /admin/manual-events") {
         const admin = await requireAdmin(request, env);
-        const body = await readJson<{ studentId: string; occurredAt: string; action: "check_in" | "check_out"; reason: string }>(request);
+        const body = await readJson<{ memberId?: string; studentId?: string; occurredAt: string; action: "check_in" | "check_out"; reason: string }>(request);
+        const memberId = body.memberId ?? body.studentId;
         return json(await addManualEvent(env, {
-          studentId: requireNonEmptyString(body.studentId, "studentId"),
+          memberId: requireNonEmptyString(memberId, "memberId"),
           occurredAt: requireIsoTimestamp(body.occurredAt, "occurredAt"),
           action: body.action,
           reason: requireNonEmptyString(body.reason, "reason"),
@@ -174,7 +176,7 @@ export default {
         const rows = await env.DB.prepare(
           "SELECT id, kiosk_id, local_event_id, student_id, occurred_at, synced_at, source, status, rejection_reason FROM scan_events ORDER BY occurred_at DESC LIMIT 250"
         ).all();
-        return json({ events: rows.results });
+        return json({ events: rows.results.map(rowToScanEventResponse) });
       }
 
       if (route === "GET /admin/reports/sessions") {
@@ -204,9 +206,10 @@ export default {
 
       if (route === "GET /admin/reports/member") {
         await requireAdmin(request, env);
+        const memberId = url.searchParams.get("memberId") ?? url.searchParams.get("studentId") ?? undefined;
         return json(await buildMemberAttendanceReport(
           env,
-          requireNonEmptyString(url.searchParams.get("studentId") ?? undefined, "studentId"),
+          requireNonEmptyString(memberId, "memberId"),
           reportDateRangeFromSearchParams(url.searchParams)
         ));
       }
@@ -242,4 +245,29 @@ async function updateKioskHealth(env: Env, report: KioskHealthReport) {
     report.lastSyncError ?? null,
     report.kioskId
   ).run();
+}
+
+function rowToMember(row: Record<string, unknown>) {
+  return {
+    memberId: String(row.student_id),
+    firstName: String(row.first_name),
+    lastName: String(row.last_name),
+    email: row.email ?? null,
+    active: Boolean(row.active),
+    rosterSyncedAt: row.roster_synced_at ?? null
+  };
+}
+
+function rowToScanEventResponse(row: Record<string, unknown>) {
+  return {
+    id: row.id,
+    kioskId: row.kiosk_id,
+    localEventId: row.local_event_id,
+    memberId: row.student_id,
+    occurredAt: row.occurred_at,
+    syncedAt: row.synced_at,
+    source: row.source,
+    status: row.status,
+    rejectionReason: row.rejection_reason
+  };
 }

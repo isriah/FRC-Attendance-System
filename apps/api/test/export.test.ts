@@ -108,15 +108,15 @@ function createTestEnv(): Env {
   } as unknown as Env;
 }
 
-function insertStudent(env: Env, studentId: string, firstName: string, lastName: string, active = 1) {
+function insertStudent(env: Env, memberId: string, firstName: string, lastName: string, active = 1) {
   return env.DB.prepare("INSERT INTO students (student_id, first_name, last_name, active) VALUES (?, ?, ?, ?)")
-    .bind(studentId, firstName, lastName, active)
+    .bind(memberId, firstName, lastName, active)
     .run();
 }
 
 function insertSession(
   env: Env,
-  studentId: string,
+  memberId: string,
   meetingDate: string,
   checkInAt: string,
   checkOutAt: string | null,
@@ -125,8 +125,8 @@ function insertSession(
   return env.DB.prepare(
     "INSERT INTO attendance_sessions (id, student_id, meeting_date, check_in_at, check_out_at, status, source_event_ids, rebuilt_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
   ).bind(
-    `${studentId}-${meetingDate}-${checkInAt}`,
-    studentId,
+    `${memberId}-${meetingDate}-${checkInAt}`,
+    memberId,
     meetingDate,
     checkInAt,
     checkOutAt,

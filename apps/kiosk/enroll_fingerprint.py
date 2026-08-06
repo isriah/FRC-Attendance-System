@@ -91,7 +91,7 @@ def enroll_sensor_slot(finger, slot: int):
     set_semantic_led(finger, "enroll_success")
 
 
-def save_mapping(db_path: str, student_id: str, slot: int, finger_label: str | None):
+def save_mapping(db_path: str, member_id: str, slot: int, finger_label: str | None):
     enrolled_at = datetime.now(timezone.utc).isoformat()
     resolved_db_path = resolve_db_path(db_path)
     resolved_db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -130,7 +130,7 @@ def save_mapping(db_path: str, student_id: str, slot: int, finger_label: str | N
               enrolled_at = excluded.enrolled_at,
               deleted_at = NULL
             """,
-            (student_id, slot, finger_label, enrolled_at),
+            (member_id, slot, finger_label, enrolled_at),
         )
 
 
@@ -151,8 +151,8 @@ def resolve_db_path(db_path: str) -> Path:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Enroll or map an R503 fingerprint slot to a student ID.")
-    parser.add_argument("--student-id", required=True)
+    parser = argparse.ArgumentParser(description="Enroll or map an R503 fingerprint slot to a member ID.")
+    parser.add_argument("--member-id", "--student-id", dest="member_id", required=True)
     parser.add_argument("--slot", required=True, type=int)
     parser.add_argument("--finger-label", default=None)
     parser.add_argument("--db", default="./kiosk-cache.sqlite")
@@ -169,8 +169,8 @@ def main():
         finger = connect_reader(args.port, args.baudrate)
         enroll_sensor_slot(finger, args.slot)
 
-    save_mapping(args.db, args.student_id, args.slot, args.finger_label)
-    print(f"Mapped fingerprint slot {args.slot} to student {args.student_id}")
+    save_mapping(args.db, args.member_id, args.slot, args.finger_label)
+    print(f"Mapped fingerprint slot {args.slot} to member {args.member_id}")
 
 
 if __name__ == "__main__":

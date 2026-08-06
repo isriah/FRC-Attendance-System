@@ -1,6 +1,14 @@
 import type { Env } from "./env";
 
 export interface RosterMemberInput {
+  memberId?: string;
+  studentId?: string;
+  firstName: string;
+  lastName: string;
+  email?: string;
+}
+
+interface NormalizedRosterMemberInput {
   memberId: string;
   firstName: string;
   lastName: string;
@@ -38,7 +46,8 @@ export async function syncRoster(env: Env, members: RosterMemberInput[]) {
     .bind(`Synced ${normalizedMembers.length} roster members`, new Date().toISOString(), syncId)
     .run();
 
-  return { synced: normalizedMembers.length, deactivatedMissingStudents: seen.size > 0 };
+  const deactivatedMissingMembers = seen.size > 0;
+  return { synced: normalizedMembers.length, deactivatedMissingMembers, deactivatedMissingStudents: deactivatedMissingMembers };
 }
 
 export async function listActiveRoster(env: Env) {
@@ -67,18 +76,18 @@ export async function updateStudentEmail(env: Env, memberId: string, email: stri
     "UPDATE students SET email = ? WHERE student_id = ?"
   ).bind(normalizedEmail ?? null, normalizedMemberId).run();
   const changes = (result as D1Result & { changes?: number }).meta?.changes ?? (result as D1Result & { changes?: number }).changes;
-  if (changes === 0) throw Object.assign(new Error("Student not found"), { status: 404 });
+  if (changes === 0) throw Object.assign(new Error("Member not found"), { status: 404 });
   return { memberId: normalizedMemberId, email: normalizedEmail ?? null };
 }
 
-export function normalizeRosterMembers(members: RosterMemberInput[] | undefined): RosterMemberInput[] {
+export function normalizeRosterMembers(members: RosterMemberInput[] | undefined): NormalizedRosterMemberInput[] {
   if (!Array.isArray(members)) throw Object.assign(new Error("members must be an array"), { status: 400 });
   if (members.length === 0) throw Object.assign(new Error("Roster sync requires at least one member"), { status: 400 });
 
   const seen = new Set<string>();
   const seenEmails = new Set<string>();
   return members.map((member, index) => {
-    const memberId = requireRosterString(member?.memberId, `members[${index}].memberId`);
+    const memberId = requireRosterString(member?.memberId ?? member?.studentId, `members[${index}].memberId`);
     const firstName = requireRosterString(member?.firstName, `members[${index}].firstName`);
     const lastName = requireRosterString(member?.lastName, `members[${index}].lastName`);
     const email = normalizeOptionalRosterEmail(member?.email);
@@ -90,7 +99,7 @@ export function normalizeRosterMembers(members: RosterMemberInput[] | undefined)
   });
 }
 
-async function hashRosterRow(member: RosterMemberInput): Promise<string> {
+async function hashRosterRow(member: NormalizedRosterMemberInput): Promise<string> {
   const bytes = new TextEncoder().encode(`${member.memberId}|${member.firstName}|${member.lastName}|${member.email ?? ""}`);
   const digest = await crypto.subtle.digest("SHA-256", bytes);
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");

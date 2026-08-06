@@ -10,14 +10,14 @@ type KioskCommandAction = "restart_display" | "restart_services" | "reboot_syste
 type KioskCommandStatus = "pending" | "running" | "completed" | "failed";
 type KioskHealthStatus = "online" | "degraded" | "offline" | "unknown";
 
-interface StudentRow {
+interface MemberRow {
   [key: string]: unknown;
-  student_id: string;
-  first_name: string;
-  last_name: string;
+  memberId: string;
+  firstName: string;
+  lastName: string;
   email?: string | null;
-  active: number;
-  roster_synced_at?: string | null;
+  active: boolean;
+  rosterSyncedAt?: string | null;
 }
 
 interface KioskRow {
@@ -264,12 +264,12 @@ function Overview({ session }: { session: DashboardSession }) {
 }
 
 function Roster({ session }: { session: DashboardSession }) {
-  const { data, error, reload } = useApi<{ students: StudentRow[] }>("/admin/students", session);
+  const { data, error, reload } = useApi<{ members: MemberRow[] }>("/admin/members", session);
   const { data: enrollmentData, error: enrollmentError, reload: reloadEnrollments } = useOptionalApi<{ enrollments: FingerprintEnrollment[] }>(
     fingerprintEnrollmentAvailable ? "/admin/fingerprint/enrollments" : undefined,
     session
   );
-  const [importText, setImportText] = useState("memberId,firstName,lastName,email\n100001,Bench,Student,bench@example.org");
+  const [importText, setImportText] = useState("memberId,firstName,lastName,email\n100001,Bench,Member,bench@example.org");
   const [importMessage, setImportMessage] = useState<string>();
   const [emailDrafts, setEmailDrafts] = useState<Record<string, string>>({});
   const [emailMessage, setEmailMessage] = useState<{ kind: "success" | "error"; text: string }>();
@@ -281,12 +281,12 @@ function Roster({ session }: { session: DashboardSession }) {
   const [confirmOverwrite, setConfirmOverwrite] = useState(false);
   const [enrollMessage, setEnrollMessage] = useState<{ kind: "info" | "success" | "error"; text: string }>();
   const [enrolling, setEnrolling] = useState(false);
-  const activeStudents = data?.students.filter((student) => student.active) ?? [];
+  const activeMembers = data?.members.filter((member) => member.active) ?? [];
   const enrollments = enrollmentData?.enrollments ?? [];
   const nextOpenSlot = nextAvailableFingerprintSlot(enrollments);
   const selectedSlot = Number(enrollSlot);
   const occupiedEnrollment = enrollments.find((enrollment) => enrollment.slot === selectedSlot);
-  const selectedEnrollmentMember = activeStudents.find((student) => student.student_id === enrollMemberId);
+  const selectedEnrollmentMember = activeMembers.find((member) => member.memberId === enrollMemberId);
   const overwriteBlocked = Boolean(occupiedEnrollment && !confirmOverwrite);
 
   useEffect(() => {
@@ -299,23 +299,23 @@ function Roster({ session }: { session: DashboardSession }) {
   }, [enrollSlot, enrollMemberId]);
 
   useEffect(() => {
-    if (!data?.students) return;
+    if (!data?.members) return;
     setEmailDrafts((drafts) => {
       const next = { ...drafts };
-      for (const student of data.students) {
-        if (next[student.student_id] === undefined) next[student.student_id] = student.email ?? "";
+      for (const member of data.members) {
+        if (next[member.memberId] === undefined) next[member.memberId] = member.email ?? "";
       }
       return next;
     });
-  }, [data?.students]);
+  }, [data?.members]);
 
-  async function saveStudentEmail(student: StudentRow) {
-    const email = emailDrafts[student.student_id]?.trim() ?? "";
-    setSavingEmailFor(student.student_id);
+  async function saveMemberEmail(member: MemberRow) {
+    const email = emailDrafts[member.memberId]?.trim() ?? "";
+    setSavingEmailFor(member.memberId);
     setEmailMessage(undefined);
     try {
-      await apiPut(`/admin/students/${encodeURIComponent(student.student_id)}/email`, { email: email || null }, session);
-      setEmailMessage({ kind: "success", text: `Saved email for ${student.first_name} ${student.last_name}.` });
+      await apiPut(`/admin/members/${encodeURIComponent(member.memberId)}/email`, { email: email || null }, session);
+      setEmailMessage({ kind: "success", text: `Saved email for ${member.firstName} ${member.lastName}.` });
       reload();
     } catch (error) {
       setEmailMessage({ kind: "error", text: friendlyDashboardError(error) });
@@ -354,7 +354,7 @@ function Roster({ session }: { session: DashboardSession }) {
         fingerLabel: enrollFingerLabel,
         confirmOverwrite
       }, session);
-      const memberName = selectedEnrollmentMember ? `${selectedEnrollmentMember.first_name} ${selectedEnrollmentMember.last_name}` : enrollMemberId;
+      const memberName = selectedEnrollmentMember ? `${selectedEnrollmentMember.firstName} ${selectedEnrollmentMember.lastName}` : enrollMemberId;
       setEnrollMessage({
         kind: "success",
         text: mapOnly
@@ -426,11 +426,11 @@ function Roster({ session }: { session: DashboardSession }) {
         </p>
         {emailMessage ? <p className={`notice ${emailMessage.kind}`}>{emailMessage.text}</p> : null}
         <RosterEmailTable
-          students={data?.students ?? []}
+          members={data?.members ?? []}
           drafts={emailDrafts}
           savingFor={savingEmailFor}
-          onDraftChange={(studentId, email) => setEmailDrafts((drafts) => ({ ...drafts, [studentId]: email }))}
-          onSave={saveStudentEmail}
+          onDraftChange={(memberId, email) => setEmailDrafts((drafts) => ({ ...drafts, [memberId]: email }))}
+          onSave={saveMemberEmail}
         />
       </section>
       <section>
@@ -446,9 +446,9 @@ function Roster({ session }: { session: DashboardSession }) {
         }}>
           <select value={enrollMemberId} onChange={(event) => setEnrollMemberId(event.target.value)} required>
             <option value="">Select member</option>
-            {activeStudents.map((student) => (
-              <option key={student.student_id} value={student.student_id}>
-                {student.student_id} - {student.first_name} {student.last_name}
+            {activeMembers.map((member) => (
+              <option key={member.memberId} value={member.memberId}>
+                {member.memberId} - {member.firstName} {member.lastName}
               </option>
             ))}
           </select>
@@ -480,31 +480,31 @@ function Roster({ session }: { session: DashboardSession }) {
           <FingerprintEnrollmentTable enrollments={enrollments} onDelete={deleteEnrollment} deleting={enrolling} />
         ) : null}
       </section>
-      <Table title="Roster" error={error} rows={data?.students ?? []} columns={["student_id", "first_name", "last_name", "email", "active"]} />
+      <Table title="Roster" error={error} rows={data?.members ?? []} columns={["memberId", "firstName", "lastName", "email", "active"]} />
     </>
   );
 }
 
 function RosterEmailTable({
-  students,
+  members,
   drafts,
   savingFor,
   onDraftChange,
   onSave
 }: {
-  students: StudentRow[];
+  members: MemberRow[];
   drafts: Record<string, string>;
   savingFor?: string;
-  onDraftChange: (studentId: string, email: string) => void;
-  onSave: (student: StudentRow) => void;
+  onDraftChange: (memberId: string, email: string) => void;
+  onSave: (member: MemberRow) => void;
 }) {
-  if (students.length === 0) return <p className="empty-state">No roster members yet.</p>;
+  if (members.length === 0) return <p className="empty-state">No roster members yet.</p>;
   return (
     <div className="data-table-wrap">
       <table className="data-table roster-email-table">
         <thead>
           <tr>
-            <th>User ID</th>
+            <th>Member ID</th>
             <th>First Name</th>
             <th>Last Name</th>
             <th>Email</th>
@@ -513,23 +513,23 @@ function RosterEmailTable({
           </tr>
         </thead>
         <tbody>
-          {students.map((student) => (
-            <tr key={student.student_id}>
-              <td>{student.student_id}</td>
-              <td>{student.first_name}</td>
-              <td>{student.last_name}</td>
+          {members.map((member) => (
+            <tr key={member.memberId}>
+              <td>{member.memberId}</td>
+              <td>{member.firstName}</td>
+              <td>{member.lastName}</td>
               <td>
                 <input
                   type="email"
-                  value={drafts[student.student_id] ?? student.email ?? ""}
-                  onChange={(event) => onDraftChange(student.student_id, event.target.value)}
+                  value={drafts[member.memberId] ?? member.email ?? ""}
+                  onChange={(event) => onDraftChange(member.memberId, event.target.value)}
                   placeholder="name@example.org"
                 />
               </td>
-              <td>{student.active ? "Yes" : "No"}</td>
+              <td>{member.active ? "Yes" : "No"}</td>
               <td>
-                <button type="button" disabled={savingFor === student.student_id} onClick={() => onSave(student)}>
-                  {savingFor === student.student_id ? "Saving..." : "Save"}
+                <button type="button" disabled={savingFor === member.memberId} onClick={() => onSave(member)}>
+                  {savingFor === member.memberId ? "Saving..." : "Save"}
                 </button>
               </td>
             </tr>
@@ -1167,7 +1167,7 @@ function MeetingDetails({
             <span>{presence ? meetingPresentRows.length : "..."}</span>
           </div>
           <p className="empty-state">{presentStateText}</p>
-          <DataTable rows={meetingPresentRows} columns={["studentId", "firstName", "lastName", "checkInAt", "checkOutAt"]} density="compact" />
+          <DataTable rows={meetingPresentRows} columns={["memberId", "firstName", "lastName", "checkInAt", "checkOutAt"]} density="compact" />
         </div>
         <div>
           <div className="meeting-detail-subheading">
@@ -1176,7 +1176,7 @@ function MeetingDetails({
           </div>
           <p className="empty-state">{absentStateText}</p>
           {meeting.required ? (
-            <DataTable rows={absentRows} columns={["studentId", "firstName", "lastName"]} density="compact" />
+            <DataTable rows={absentRows} columns={["memberId", "firstName", "lastName"]} density="compact" />
           ) : (
             <p className="notice info">Track attendance here as present-only participation; use required meetings for absence accountability.</p>
           )}
@@ -1316,11 +1316,11 @@ function StatusBadge({ status }: { status: KioskCommandStatus | KioskHealthStatu
 
 function Events({ session }: { session: DashboardSession }) {
   const { data, error } = useApi<{ events: Array<Record<string, unknown>> }>("/admin/events", session);
-  return <Table title="Recent scan events" error={error} rows={data?.events ?? []} columns={["student_id", "kiosk_id", "occurred_at", "status", "rejection_reason"]} />;
+  return <Table title="Recent scan events" error={error} rows={data?.events ?? []} columns={["memberId", "kioskId", "occurredAt", "status", "rejectionReason"]} />;
 }
 
 function Reports({ session }: { session: DashboardSession }) {
-  const { data: students } = useApi<{ students: StudentRow[] }>("/admin/students", session);
+  const { data: members } = useApi<{ members: MemberRow[] }>("/admin/members", session);
   const { data: meetingData } = useApi<{ meetings: ScheduledMeeting[] }>("/admin/meetings", session);
   const [reportStartDate, setReportStartDate] = useState("");
   const [reportEndDate, setReportEndDate] = useState("");
@@ -1333,10 +1333,10 @@ function Reports({ session }: { session: DashboardSession }) {
   const { data: sessionRows, error: sessionError, reload: reloadSessions } = useApi<{ sessions: Array<Record<string, unknown>> }>(`/admin/reports/sessions${reportQuery}`, session);
   const { data: presence, error: presenceError, reload: reloadPresence } = useApi<PresenceReport>(`/admin/reports/presence?date=${presenceDate}`, session);
   const { data: memberReport, error: memberError, reload: reloadMember } = useOptionalApi<MemberAttendanceReport>(
-    selectedMemberId ? `/admin/reports/member?studentId=${encodeURIComponent(selectedMemberId)}${reportQuery.replace("?", "&")}` : undefined,
+    selectedMemberId ? `/admin/reports/member?memberId=${encodeURIComponent(selectedMemberId)}${reportQuery.replace("?", "&")}` : undefined,
     session
   );
-  const activeStudents = students?.students.filter((student) => student.active) ?? [];
+  const activeMembers = members?.members.filter((member) => member.active) ?? [];
   const meetingRows = meetingSummary?.meetings ?? [];
   const absenceDate = meetingRows.some((meeting) => meeting.meetingDate === selectedMeetingDate) ? selectedMeetingDate : meetingRows[0]?.meetingDate ?? "";
   const { data: absences, error: absencesError, reload: reloadAbsences } = useOptionalApi<MeetingAbsenceReport>(
@@ -1410,7 +1410,7 @@ function Reports({ session }: { session: DashboardSession }) {
             : "Pick a meeting to see the active members who missed it."}
         </p>
         {absencesError ? <p className="error">{absencesError}</p> : null}
-        <DataTable rows={absences?.rows ?? []} columns={["studentId", "firstName", "lastName"]} />
+        <DataTable rows={absences?.rows ?? []} columns={["memberId", "firstName", "lastName"]} />
       </section>
 
       <section>
@@ -1432,7 +1432,7 @@ function Reports({ session }: { session: DashboardSession }) {
         </div>
         <DataTable
           rows={presence?.rows ?? []}
-          columns={["studentId", "firstName", "lastName", "status", "checkInAt", "checkOutAt"]}
+          columns={["memberId", "firstName", "lastName", "status", "checkInAt", "checkOutAt"]}
         />
       </section>
 
@@ -1441,9 +1441,9 @@ function Reports({ session }: { session: DashboardSession }) {
         <div className="toolbar wrap">
           <select value={selectedMemberId} onChange={(event) => setSelectedMemberId(event.target.value)}>
             <option value="">Select member</option>
-            {activeStudents.map((student) => (
-              <option key={student.student_id} value={student.student_id}>
-                {student.student_id} - {student.first_name} {student.last_name}
+            {activeMembers.map((member) => (
+              <option key={member.memberId} value={member.memberId}>
+                {member.memberId} - {member.firstName} {member.lastName}
               </option>
             ))}
           </select>
@@ -1479,7 +1479,7 @@ function Reports({ session }: { session: DashboardSession }) {
         {rosterSummaryError ? <p className="error">{rosterSummaryError}</p> : null}
         <DataTable
           rows={(rosterSummary?.members ?? []).map((member) => ({
-            studentId: member.studentId,
+            memberId: member.memberId,
             firstName: member.firstName,
             lastName: member.lastName,
             requiredMeetings: member.requiredMeetings,
@@ -1489,7 +1489,7 @@ function Reports({ session }: { session: DashboardSession }) {
             lastSeenAt: member.lastSeenAt ?? "",
             openCheckIns: member.openSessionWarning ? member.openSessionDates.join(", ") : ""
           }))}
-          columns={["studentId", "firstName", "lastName", "requiredMeetings", "present", "missed", "attendance", "lastSeenAt", "openCheckIns"]}
+          columns={["memberId", "firstName", "lastName", "requiredMeetings", "present", "missed", "attendance", "lastSeenAt", "openCheckIns"]}
         />
       </section>
 
@@ -1508,7 +1508,7 @@ function Reports({ session }: { session: DashboardSession }) {
         reloadRosterSummary();
         reloadAbsences();
       }}>
-        <input name="studentId" placeholder="Student ID" required />
+        <input name="memberId" placeholder="Member ID" required />
         <input name="occurredAt" type="datetime-local" required />
         <select name="action" defaultValue="check_in">
           <option value="check_in">Check in</option>
@@ -1517,7 +1517,7 @@ function Reports({ session }: { session: DashboardSession }) {
         <input name="reason" placeholder="Correction reason" required />
         <button>Add manual event</button>
       </form>
-      <Table title="Attendance session audit" error={sessionError} rows={sessionRows?.sessions ?? []} columns={["meeting_date", "meeting_title", "required", "has_attendance", "student_id", "check_in_at", "check_out_at", "status"]} />
+      <Table title="Attendance session audit" error={sessionError} rows={sessionRows?.sessions ?? []} columns={["meeting_date", "meeting_title", "required", "has_attendance", "member_id", "check_in_at", "check_out_at", "status"]} />
     </>
   );
 }
@@ -1879,7 +1879,7 @@ interface MeetingAbsenceReport {
 }
 
 interface MemberAttendanceReport {
-  studentId: string;
+  memberId: string;
   firstName: string;
   lastName: string;
   startDate?: string;
@@ -1895,7 +1895,7 @@ interface MemberAttendanceReport {
 }
 
 interface RosterAttendanceSummaryRow {
-  studentId: string;
+  memberId: string;
   firstName: string;
   lastName: string;
   requiredMeetings: number;
@@ -2027,20 +2027,24 @@ function columnLabel(column: string) {
     last_name: "Last Name",
     meeting_date: "Meeting Date",
     meeting_title: "Meeting",
+    memberId: "Member ID",
+    member_id: "Member ID",
     note: "Note",
     occurred_at: "Occurred At",
+    occurredAt: "Occurred At",
     openCheckIns: "Open Check-Ins",
     openSessionDates: "Open Check-Ins",
     present: "Present",
     presentDates: "Present Dates",
     rejection_reason: "Rejection Reason",
+    rejectionReason: "Rejection Reason",
     required: "Required",
     requiredMeetings: "Required Meetings",
     scheduled: "Scheduled",
     status: "Status",
-    studentId: "User ID",
-    studentID: "User ID",
-    student_id: "User ID",
+    studentId: "Member ID",
+    studentID: "Member ID",
+    student_id: "Member ID",
     time: "Time",
     title: "Title"
   };

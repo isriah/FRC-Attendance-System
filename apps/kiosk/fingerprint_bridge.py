@@ -11,11 +11,11 @@ from pathlib import Path
 # The kiosk service expects newline-delimited messages:
 # STAT:ONLINE
 # STAT:OFFLINE
-# MATCH:<student_id>,<template_slot>
+# MATCH:<member_id>,<template_slot>
 # NO_MATCH
 #
 # Fingerprint templates stay on the sensor. This bridge maps template slots to
-# student IDs from the local kiosk SQLite database. Environment mappings are
+# member IDs from the local kiosk SQLite database. Environment mappings are
 # still supported as an override for quick bench tests.
 
 
@@ -129,11 +129,11 @@ def simulate_loop():
     import json
 
     emit("STAT:ONLINE")
-    demo_students = json.loads(os.environ.get("FINGERPRINT_DEMO_STUDENTS", '["100001", "100002"]'))
+    demo_members = json.loads(os.environ.get("FINGERPRINT_DEMO_MEMBERS", os.environ.get("FINGERPRINT_DEMO_STUDENTS", '["100001", "100002"]')))
     slot = 1
     while True:
         time.sleep(10)
-        emit(f"MATCH:{random.choice(demo_students)},{slot}")
+        emit(f"MATCH:{random.choice(demo_members)},{slot}")
         slot += 1
 
 

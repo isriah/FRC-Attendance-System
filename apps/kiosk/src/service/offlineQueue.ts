@@ -2,6 +2,7 @@ import Database from "better-sqlite3";
 import type { KioskSyncEventInput } from "@frc-attendance/shared";
 
 export interface LocalScanEvent extends KioskSyncEventInput {
+  memberId: string;
   syncedAt?: string;
   syncError?: string;
 }
@@ -37,16 +38,16 @@ export class OfflineQueue {
     `);
   }
 
-  addFingerprintScan(studentId: string, occurredAt = new Date().toISOString()): LocalScanEvent {
+  addFingerprintScan(memberId: string, occurredAt = new Date().toISOString()): LocalScanEvent {
     const event: LocalScanEvent = {
       localEventId: crypto.randomUUID(),
-      studentId,
+      memberId,
       occurredAt,
       source: "fingerprint"
     };
     this.db.prepare(
       "INSERT INTO local_scan_events (local_event_id, student_id, occurred_at, source) VALUES (?, ?, ?, ?)"
-    ).run(event.localEventId, event.studentId, event.occurredAt, event.source);
+    ).run(event.localEventId, event.memberId, event.occurredAt, event.source);
     return event;
   }
 
@@ -90,7 +91,7 @@ function rowToEvent(row: {
 }): LocalScanEvent {
   return {
     localEventId: row.local_event_id,
-    studentId: row.student_id,
+    memberId: row.student_id,
     occurredAt: row.occurred_at,
     source: row.source,
     syncedAt: row.synced_at,

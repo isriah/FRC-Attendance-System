@@ -20,15 +20,15 @@ export function meetingDateForTimestamp(isoTimestamp: string, timeZone = "Americ
   return `${year}-${month}-${day}`;
 }
 
-export function isDuplicateScan(previous: ScanEvent | undefined, next: Pick<ScanEvent, "studentId" | "occurredAt">, windowMs = DEFAULT_DUPLICATE_WINDOW_MS): boolean {
+export function isDuplicateScan(previous: ScanEvent | undefined, next: Pick<ScanEvent, "memberId" | "occurredAt">, windowMs = DEFAULT_DUPLICATE_WINDOW_MS): boolean {
   if (!previous) return false;
-  if (previous.studentId !== next.studentId) return false;
+  if (previous.memberId !== next.memberId) return false;
   const delta = Math.abs(new Date(next.occurredAt).getTime() - new Date(previous.occurredAt).getTime());
   return delta <= windowMs;
 }
 
 export function deriveAttendanceSessions(
-  events: Array<Pick<ScanEvent, "id" | "studentId" | "occurredAt" | "status">>,
+  events: Array<Pick<ScanEvent, "id" | "memberId" | "occurredAt" | "status">>,
   manualEvents: ManualEvent[] = [],
   timeZone = "America/New_York"
 ): AttendanceSession[] {
@@ -37,13 +37,13 @@ export function deriveAttendanceSessions(
       .filter((event) => event.status === "accepted")
       .map((event) => ({
         id: event.id,
-        studentId: event.studentId,
+        memberId: event.memberId,
         occurredAt: event.occurredAt,
         forcedAction: undefined as ManualEvent["action"] | undefined
       })),
     ...manualEvents.map((event) => ({
       id: event.id,
-      studentId: event.studentId,
+      memberId: event.memberId,
       occurredAt: event.occurredAt,
       forcedAction: event.action
     }))
@@ -53,26 +53,26 @@ export function deriveAttendanceSessions(
   });
 
   const sessions: AttendanceSession[] = [];
-  const openByStudentDate = new Map<string, AttendanceSession>();
+  const openByMemberDate = new Map<string, AttendanceSession>();
 
   for (const event of normalized) {
     const meetingDate = meetingDateForTimestamp(event.occurredAt, timeZone);
-    const key = `${event.studentId}:${meetingDate}`;
-    const open = openByStudentDate.get(key);
+    const key = `${event.memberId}:${meetingDate}`;
+    const open = openByMemberDate.get(key);
     const shouldCheckOut = event.forcedAction === "check_out" || (!event.forcedAction && Boolean(open));
 
     if (shouldCheckOut && open) {
       open.checkOutAt = event.occurredAt;
       open.status = "closed";
       open.sourceEventIds.push(event.id);
-      openByStudentDate.delete(key);
+      openByMemberDate.delete(key);
       continue;
     }
 
     if (event.forcedAction === "check_out" && !open) {
       sessions.push({
-        id: `session:${event.studentId}:${meetingDate}:${event.id}`,
-        studentId: event.studentId,
+        id: `session:${event.memberId}:${meetingDate}:${event.id}`,
+        memberId: event.memberId,
         meetingDate,
         checkInAt: event.occurredAt,
         checkOutAt: event.occurredAt,
@@ -83,15 +83,15 @@ export function deriveAttendanceSessions(
     }
 
     const session: AttendanceSession = {
-      id: `session:${event.studentId}:${meetingDate}:${event.id}`,
-      studentId: event.studentId,
+      id: `session:${event.memberId}:${meetingDate}:${event.id}`,
+      memberId: event.memberId,
       meetingDate,
       checkInAt: event.occurredAt,
       status: "open",
       sourceEventIds: [event.id]
     };
     sessions.push(session);
-    openByStudentDate.set(key, session);
+    openByMemberDate.set(key, session);
   }
 
   return sessions;

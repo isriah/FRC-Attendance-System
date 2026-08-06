@@ -4,7 +4,7 @@ import { ledStateForAcknowledgement, ledStateForSyncResult } from "../src/servic
 
 const ack = (overrides: Partial<KioskScanAcknowledgement>): KioskScanAcknowledgement => ({
   localEventId: "local-1",
-  studentId: "1234",
+  memberId: "1234",
   status: "accepted",
   action: "check_in",
   message: "ok",
@@ -15,7 +15,7 @@ const scan = (localEventId: string, status: ScanEvent["status"]): ScanEvent => (
   id: `bench-01:${localEventId}`,
   kioskId: "bench-01",
   localEventId,
-  studentId: "1234",
+  memberId: "1234",
   occurredAt: "2026-05-31T12:00:00.000Z",
   source: "fingerprint",
   status
@@ -36,7 +36,7 @@ describe("kiosk LED state decisions", () => {
     const result: KioskSyncResult = {
       accepted: [scan("accepted-1", "accepted")],
       duplicates: [scan("duplicate-1", "duplicate")],
-      rejected: [{ localEventId: "rejected-1", studentId: "1234", occurredAt: "2026-05-31T12:00:00.000Z", source: "fingerprint", reason: "student is not active in roster" }]
+      rejected: [{ localEventId: "rejected-1", memberId: "1234", occurredAt: "2026-05-31T12:00:00.000Z", source: "fingerprint", reason: "member is not active in roster" }]
     };
 
     expect(ledStateForSyncResult("accepted-1", result)).toBe("welcome");

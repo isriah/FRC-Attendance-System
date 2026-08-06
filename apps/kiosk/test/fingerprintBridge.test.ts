@@ -11,6 +11,6 @@ describe("fingerprint bridge parser", () => {
   });
 
   it("parses fingerprint matches", () => {
-    expect(parseBridgeLine("MATCH:100001,7")).toEqual({ type: "match", studentId: "100001", templateSlot: 7 });
+    expect(parseBridgeLine("MATCH:100001,7")).toEqual({ type: "match", memberId: "100001", templateSlot: 7 });
   });
 });

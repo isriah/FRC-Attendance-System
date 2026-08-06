@@ -6,7 +6,7 @@ import { kioskStates, type KioskStateId } from "../kioskStates";
 export type FingerprintBridgeEvent =
   | { type: "status"; online: boolean }
   | { type: "state"; state: KioskStateId }
-  | { type: "match"; studentId: string; templateSlot: number }
+  | { type: "match"; memberId: string; templateSlot: number }
   | { type: "no-match" }
   | { type: "error"; message: string };
 
@@ -49,9 +49,9 @@ export function parseBridgeLine(line: string): FingerprintBridgeEvent {
     return { type: "error", message: `unknown kiosk state: ${value}` };
   }
   if (type === "MATCH") {
-    const [studentId, slot] = value.split(",");
-    if (!studentId || !slot) return { type: "error", message: `invalid match line: ${line}` };
-    return { type: "match", studentId, templateSlot: Number(slot) };
+    const [memberId, slot] = value.split(",");
+    if (!memberId || !slot) return { type: "error", message: `invalid match line: ${line}` };
+    return { type: "match", memberId, templateSlot: Number(slot) };
   }
   if (type === "NO_MATCH") return { type: "no-match" };
   return { type: "error", message: `unknown bridge line: ${line}` };

@@ -16,7 +16,7 @@ describe("roster sync", () => {
       { memberId: "100002", firstName: "Grace", lastName: "Murray Hopper" }
     ]);
 
-    expect(second).toMatchObject({ synced: 1, deactivatedMissingStudents: true });
+    expect(second).toMatchObject({ synced: 1, deactivatedMissingMembers: true, deactivatedMissingStudents: true });
 
     const roster = await listActiveRoster(env);
     expect(roster.members).toEqual([
@@ -74,8 +74,8 @@ describe("roster sync", () => {
   });
 });
 
-async function expectStudentEmail(env: Env, studentId: string, email: string | null) {
-  const row = await env.DB.prepare("SELECT email FROM students WHERE student_id = ?").bind(studentId).first<{ email: string | null }>();
+async function expectStudentEmail(env: Env, memberId: string, email: string | null) {
+  const row = await env.DB.prepare("SELECT email FROM students WHERE student_id = ?").bind(memberId).first<{ email: string | null }>();
   expect(row?.email ?? null).toBe(email);
 }
 
