@@ -1,14 +1,14 @@
 import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 import type { Env } from "../src/env";
-import { listActiveRoster, normalizeRosterMembers, syncRoster } from "../src/roster";
+import { listActiveRoster, normalizeRosterMembers, syncRoster, updateStudentEmail } from "../src/roster";
 
 describe("roster sync", () => {
   it("normalizes rows, deactivates missing members, and exports active roster", async () => {
     const env = createRosterTestEnv();
 
     await syncRoster(env, [
-      { memberId: " 100001 ", firstName: " Ada ", lastName: " Lovelace " },
+      { memberId: " 100001 ", firstName: " Ada ", lastName: " Lovelace ", email: " ADA@Example.ORG " },
       { memberId: "100002", firstName: "Grace", lastName: "Hopper" }
     ]);
 
@@ -27,14 +27,39 @@ describe("roster sync", () => {
     expect(inactive?.active).toBe(0);
   });
 
+  it("stores, preserves, and clears member email associations", async () => {
+    const env = createRosterTestEnv();
+
+    await syncRoster(env, [
+      { memberId: "100001", firstName: "Ada", lastName: "Lovelace", email: "ADA@Example.ORG" }
+    ]);
+    await expectStudentEmail(env, "100001", "ada@example.org");
+
+    await syncRoster(env, [
+      { memberId: "100001", firstName: "Ada", lastName: "Byron" }
+    ]);
+    await expectStudentEmail(env, "100001", "ada@example.org");
+
+    await updateStudentEmail(env, "100001", "");
+    await expectStudentEmail(env, "100001", null);
+  });
+
   it("rejects empty and duplicate roster inputs", () => {
     expect(() => normalizeRosterMembers([])).toThrow("Roster sync requires at least one member");
     expect(() => normalizeRosterMembers([
       { memberId: "100001", firstName: "Bench", lastName: "Student" },
       { memberId: " 100001 ", firstName: "Bench", lastName: "Student" }
     ])).toThrow("Duplicate roster memberId: 100001");
+    expect(() => normalizeRosterMembers([
+      { memberId: "100001", firstName: "Bench", lastName: "Student", email: "not-an-email" }
+    ])).toThrow("email must be a valid email address");
   });
 });
+
+async function expectStudentEmail(env: Env, studentId: string, email: string | null) {
+  const row = await env.DB.prepare("SELECT email FROM students WHERE student_id = ?").bind(studentId).first<{ email: string | null }>();
+  expect(row?.email ?? null).toBe(email);
+}
 
 function createRosterTestEnv(): Env {
   const sqlite = new Database(":memory:");
@@ -43,6 +68,7 @@ function createRosterTestEnv(): Env {
       student_id TEXT PRIMARY KEY,
       first_name TEXT NOT NULL,
       last_name TEXT NOT NULL,
+      email TEXT,
       active INTEGER NOT NULL DEFAULT 1,
       roster_hash TEXT,
       roster_synced_at TEXT NOT NULL

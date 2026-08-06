@@ -4,6 +4,7 @@ export interface RosterMemberInput {
   memberId: string;
   firstName: string;
   lastName: string;
+  email?: string;
 }
 
 export async function syncRoster(env: Env, members: RosterMemberInput[]) {
@@ -21,8 +22,8 @@ export async function syncRoster(env: Env, members: RosterMemberInput[]) {
     const rosterHash = await hashRosterRow(member);
     statements.push(
       env.DB.prepare(
-        "INSERT INTO students (student_id, first_name, last_name, active, roster_hash, roster_synced_at) VALUES (?, ?, ?, 1, ?, ?) ON CONFLICT(student_id) DO UPDATE SET first_name = excluded.first_name, last_name = excluded.last_name, active = 1, roster_hash = excluded.roster_hash, roster_synced_at = excluded.roster_synced_at"
-      ).bind(member.memberId, member.firstName, member.lastName, rosterHash, syncedAt)
+        "INSERT INTO students (student_id, first_name, last_name, email, active, roster_hash, roster_synced_at) VALUES (?, ?, ?, ?, 1, ?, ?) ON CONFLICT(student_id) DO UPDATE SET first_name = excluded.first_name, last_name = excluded.last_name, email = COALESCE(excluded.email, students.email), active = 1, roster_hash = excluded.roster_hash, roster_synced_at = excluded.roster_synced_at"
+      ).bind(member.memberId, member.firstName, member.lastName, member.email ?? null, rosterHash, syncedAt)
     );
   }
 
@@ -57,6 +58,17 @@ export async function listActiveRoster(env: Env) {
   };
 }
 
+export async function updateStudentEmail(env: Env, memberId: string, email: string | null) {
+  const normalizedMemberId = requireRosterString(memberId, "memberId");
+  const normalizedEmail = normalizeOptionalRosterEmail(email ?? undefined);
+  const result = await env.DB.prepare(
+    "UPDATE students SET email = ? WHERE student_id = ?"
+  ).bind(normalizedEmail ?? null, normalizedMemberId).run();
+  const changes = (result as D1Result & { changes?: number }).meta?.changes ?? (result as D1Result & { changes?: number }).changes;
+  if (changes === 0) throw Object.assign(new Error("Student not found"), { status: 404 });
+  return { memberId: normalizedMemberId, email: normalizedEmail ?? null };
+}
+
 export function normalizeRosterMembers(members: RosterMemberInput[] | undefined): RosterMemberInput[] {
   if (!Array.isArray(members)) throw Object.assign(new Error("members must be an array"), { status: 400 });
   if (members.length === 0) throw Object.assign(new Error("Roster sync requires at least one member"), { status: 400 });
@@ -66,14 +78,15 @@ export function normalizeRosterMembers(members: RosterMemberInput[] | undefined)
     const memberId = requireRosterString(member?.memberId, `members[${index}].memberId`);
     const firstName = requireRosterString(member?.firstName, `members[${index}].firstName`);
     const lastName = requireRosterString(member?.lastName, `members[${index}].lastName`);
+    const email = normalizeOptionalRosterEmail(member?.email);
     if (seen.has(memberId)) throw Object.assign(new Error(`Duplicate roster memberId: ${memberId}`), { status: 400 });
     seen.add(memberId);
-    return { memberId, firstName, lastName };
+    return email ? { memberId, firstName, lastName, email } : { memberId, firstName, lastName };
   });
 }
 
 async function hashRosterRow(member: RosterMemberInput): Promise<string> {
-  const bytes = new TextEncoder().encode(`${member.memberId}|${member.firstName}|${member.lastName}`);
+  const bytes = new TextEncoder().encode(`${member.memberId}|${member.firstName}|${member.lastName}|${member.email ?? ""}`);
   const digest = await crypto.subtle.digest("SHA-256", bytes);
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
@@ -81,5 +94,14 @@ async function hashRosterRow(member: RosterMemberInput): Promise<string> {
 function requireRosterString(value: string | undefined, name: string) {
   const trimmed = value?.trim();
   if (!trimmed) throw Object.assign(new Error(`${name} is required`), { status: 400 });
+  return trimmed;
+}
+
+function normalizeOptionalRosterEmail(value: string | undefined) {
+  const trimmed = value?.trim().toLowerCase();
+  if (!trimmed) return undefined;
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+    throw Object.assign(new Error("email must be a valid email address"), { status: 400 });
+  }
   return trimmed;
 }

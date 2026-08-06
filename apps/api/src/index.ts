@@ -7,7 +7,7 @@ import { errorResponse, json, noContent, optionsResponse, readJson } from "./htt
 import { claimPendingKioskCommands, completeKioskCommand, createKioskCommand, listRecentKioskCommands, requireKioskCommandAction } from "./kioskCommands";
 import { createScheduledMeeting, deleteScheduledMeeting, listScheduledMeetings, updateScheduledMeeting, type ScheduledMeetingInput } from "./meetings";
 import { buildAttendanceSessionReport, buildMeetingAbsenceReport, buildMeetingSummaryReport, buildMemberAttendanceReport, buildPresenceReport, buildRosterAttendanceSummary, reportDateRangeFromSearchParams } from "./reports";
-import { listActiveRoster, syncRoster, type RosterMemberInput } from "./roster";
+import { listActiveRoster, syncRoster, updateStudentEmail, type RosterMemberInput } from "./roster";
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -63,8 +63,17 @@ export default {
 
       if (route === "GET /admin/students") {
         await requireAdmin(request, env);
-        const rows = await env.DB.prepare("SELECT student_id, first_name, last_name, active, roster_synced_at FROM students ORDER BY last_name, first_name").all();
+        const rows = await env.DB.prepare("SELECT student_id, first_name, last_name, email, active, roster_synced_at FROM students ORDER BY last_name, first_name").all();
         return json({ students: rows.results });
+      }
+
+      const adminStudentEmail = url.pathname.match(/^\/admin\/students\/([^/]+)\/email$/);
+      if (request.method === "PUT" && adminStudentEmail) {
+        await requireAdmin(request, env);
+        const memberId = adminStudentEmail[1];
+        if (!memberId) throw Object.assign(new Error("Student id is required"), { status: 400 });
+        const body = await readJson<{ email?: string | null }>(request);
+        return json(await updateStudentEmail(env, decodeURIComponent(memberId), body.email ?? null));
       }
 
       if (route === "POST /admin/kiosks") {

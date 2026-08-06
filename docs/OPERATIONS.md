@@ -175,6 +175,8 @@ The dashboard login UI follows the same boundary: when `VITE_GOOGLE_CLIENT_ID` i
 
 For local development only, if no Google client ID is configured, the dashboard can send an `x-admin-email` header and the API will still enforce the configured allowlist.
 
+Dashboard roster records can store an optional member email for user association and future OAuth policy work. That member email does not currently grant dashboard admin access by itself; production OAuth authorization still requires `GOOGLE_ALLOWED_EMAILS` or `GOOGLE_ALLOWED_DOMAIN` to allow the signed-in Google email.
+
 ## Kiosk Provisioning
 
 1. Register a kiosk from the dashboard or by calling `POST /admin/kiosks`.
@@ -292,7 +294,7 @@ Set `FINGERPRINT_SIMULATE=true` to run without hardware. Repeated matches for th
 
 ## Roster Sync
 
-The member Google Sheet remains authoritative for active members and stable Member IDs. The API currently accepts normalized roster rows at `POST /admin/roster/sync` with `memberId`, `firstName`, and `lastName`; the next implementation step is wiring this endpoint to a Google Sheets reader or an Apps Script push.
+The member Google Sheet remains authoritative for active members and stable Member IDs. The API currently accepts normalized roster rows at `POST /admin/roster/sync` with `memberId`, `firstName`, `lastName`, and optional `email`; the next implementation step is wiring this endpoint to a Google Sheets reader or an Apps Script push.
 
 Removed roster entries are deactivated in D1 rather than deleted.
 

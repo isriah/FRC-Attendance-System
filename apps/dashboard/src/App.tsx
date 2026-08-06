@@ -5,9 +5,20 @@ import "./styles.css";
 
 type Tab = "overview" | "roster" | "meetings" | "kiosks" | "events" | "reports" | "export";
 type MeetingViewTab = "calendar" | "all" | "form";
+type ThemeMode = "themed" | "light" | "dark";
 type KioskCommandAction = "restart_display" | "restart_services" | "reboot_system";
 type KioskCommandStatus = "pending" | "running" | "completed" | "failed";
 type KioskHealthStatus = "online" | "degraded" | "offline" | "unknown";
+
+interface StudentRow {
+  [key: string]: unknown;
+  student_id: string;
+  first_name: string;
+  last_name: string;
+  email?: string | null;
+  active: number;
+  roster_synced_at?: string | null;
+}
 
 interface KioskRow {
   kiosk_id: string;
@@ -89,6 +100,12 @@ const weekdayOptions = [
 function App() {
   const [session, setSession] = useState<DashboardSession>(readStoredSession);
   const [tab, setTab] = useState<Tab>("overview");
+  const [themeMode, setThemeMode] = useState<ThemeMode>(readStoredThemeMode);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = themeMode;
+    localStorage.setItem("dashboardThemeMode", themeMode);
+  }, [themeMode]);
 
   if (!session.email || (googleAuthEnabled && !session.idToken)) {
     return <Login onLocalLogin={(email) => {
@@ -96,7 +113,7 @@ function App() {
       setSession({ email });
     }} onGoogleLogin={(googleSession) => {
       setSession(googleSession);
-    }} />;
+    }} themeMode={themeMode} onThemeChange={setThemeMode} />;
   }
 
   return (
@@ -111,6 +128,7 @@ function App() {
       </aside>
       <section className="content">
         <header>
+          <ThemeControl value={themeMode} onChange={setThemeMode} />
           <span>{session.email}</span>
           <button onClick={() => {
             localStorage.removeItem("adminEmail");
@@ -130,7 +148,30 @@ function App() {
   );
 }
 
-function Login({ onLocalLogin, onGoogleLogin }: { onLocalLogin: (email: string) => void; onGoogleLogin: (session: DashboardSession) => void }) {
+function ThemeControl({ value, onChange }: { value: ThemeMode; onChange: (value: ThemeMode) => void }) {
+  return (
+    <label className="theme-control">
+      <span>Theme</span>
+      <select value={value} onChange={(event) => onChange(event.target.value as ThemeMode)}>
+        <option value="themed">Themed</option>
+        <option value="light">Light</option>
+        <option value="dark">Dark</option>
+      </select>
+    </label>
+  );
+}
+
+function Login({
+  onLocalLogin,
+  onGoogleLogin,
+  themeMode,
+  onThemeChange
+}: {
+  onLocalLogin: (email: string) => void;
+  onGoogleLogin: (session: DashboardSession) => void;
+  themeMode: ThemeMode;
+  onThemeChange: (value: ThemeMode) => void;
+}) {
   useEffect(() => {
     if (!googleClientId) return;
     const script = document.createElement("script");
@@ -171,6 +212,7 @@ function Login({ onLocalLogin, onGoogleLogin }: { onLocalLogin: (email: string) 
   if (googleAuthEnabled) {
     return (
       <main className="login">
+        <div className="login-theme"><ThemeControl value={themeMode} onChange={onThemeChange} /></div>
         <section className="login-panel">
           <h1>Attendance Admin</h1>
           <p>Sign in with the configured Google account to manage attendance.</p>
@@ -183,6 +225,7 @@ function Login({ onLocalLogin, onGoogleLogin }: { onLocalLogin: (email: string) 
 
   return (
     <main className="login">
+      <div className="login-theme"><ThemeControl value={themeMode} onChange={onThemeChange} /></div>
       <form onSubmit={(event: FormEvent<HTMLFormElement>) => {
         event.preventDefault();
         const form = new FormData(event.currentTarget);
@@ -213,13 +256,16 @@ function Overview({ session }: { session: DashboardSession }) {
 }
 
 function Roster({ session }: { session: DashboardSession }) {
-  const { data, error, reload } = useApi<{ students: Array<{ student_id: string; first_name: string; last_name: string; active: number }> }>("/admin/students", session);
+  const { data, error, reload } = useApi<{ students: StudentRow[] }>("/admin/students", session);
   const { data: enrollmentData, error: enrollmentError, reload: reloadEnrollments } = useOptionalApi<{ enrollments: FingerprintEnrollment[] }>(
     fingerprintEnrollmentAvailable ? "/admin/fingerprint/enrollments" : undefined,
     session
   );
-  const [importText, setImportText] = useState("memberId,firstName,lastName\n100001,Bench,Student");
+  const [importText, setImportText] = useState("memberId,firstName,lastName,email\n100001,Bench,Student,bench@example.org");
   const [importMessage, setImportMessage] = useState<string>();
+  const [emailDrafts, setEmailDrafts] = useState<Record<string, string>>({});
+  const [emailMessage, setEmailMessage] = useState<{ kind: "success" | "error"; text: string }>();
+  const [savingEmailFor, setSavingEmailFor] = useState<string>();
   const [pullingRoster, setPullingRoster] = useState(false);
   const [enrollMemberId, setEnrollMemberId] = useState("");
   const [enrollSlot, setEnrollSlot] = useState("");
@@ -243,6 +289,32 @@ function Roster({ session }: { session: DashboardSession }) {
   useEffect(() => {
     setConfirmOverwrite(false);
   }, [enrollSlot, enrollMemberId]);
+
+  useEffect(() => {
+    if (!data?.students) return;
+    setEmailDrafts((drafts) => {
+      const next = { ...drafts };
+      for (const student of data.students) {
+        if (next[student.student_id] === undefined) next[student.student_id] = student.email ?? "";
+      }
+      return next;
+    });
+  }, [data?.students]);
+
+  async function saveStudentEmail(student: StudentRow) {
+    const email = emailDrafts[student.student_id]?.trim() ?? "";
+    setSavingEmailFor(student.student_id);
+    setEmailMessage(undefined);
+    try {
+      await apiPut(`/admin/students/${encodeURIComponent(student.student_id)}/email`, { email: email || null }, session);
+      setEmailMessage({ kind: "success", text: `Saved email for ${student.first_name} ${student.last_name}.` });
+      reload();
+    } catch (error) {
+      setEmailMessage({ kind: "error", text: friendlyDashboardError(error) });
+    } finally {
+      setSavingEmailFor(undefined);
+    }
+  }
 
   async function submitFingerprintEnrollment(mapOnly = false) {
     if (!fingerprintEnrollmentAvailable) {
@@ -340,6 +412,20 @@ function Roster({ session }: { session: DashboardSession }) {
         </form>
       </section>
       <section>
+        <h2>Member Emails</h2>
+        <p className="notice info">
+          Member emails are stored on roster records for association. Google OAuth admin access still follows the Worker allowlist or allowed domain configuration.
+        </p>
+        {emailMessage ? <p className={`notice ${emailMessage.kind}`}>{emailMessage.text}</p> : null}
+        <RosterEmailTable
+          students={data?.students ?? []}
+          drafts={emailDrafts}
+          savingFor={savingEmailFor}
+          onDraftChange={(studentId, email) => setEmailDrafts((drafts) => ({ ...drafts, [studentId]: email }))}
+          onSave={saveStudentEmail}
+        />
+      </section>
+      <section>
         <h2>Fingerprint Enrollment</h2>
         {!fingerprintEnrollmentAvailable ? (
           <p className="notice info">
@@ -386,8 +472,63 @@ function Roster({ session }: { session: DashboardSession }) {
           <FingerprintEnrollmentTable enrollments={enrollments} onDelete={deleteEnrollment} deleting={enrolling} />
         ) : null}
       </section>
-      <Table title="Roster" error={error} rows={data?.students ?? []} columns={["student_id", "first_name", "last_name", "active"]} />
+      <Table title="Roster" error={error} rows={data?.students ?? []} columns={["student_id", "first_name", "last_name", "email", "active"]} />
     </>
+  );
+}
+
+function RosterEmailTable({
+  students,
+  drafts,
+  savingFor,
+  onDraftChange,
+  onSave
+}: {
+  students: StudentRow[];
+  drafts: Record<string, string>;
+  savingFor?: string;
+  onDraftChange: (studentId: string, email: string) => void;
+  onSave: (student: StudentRow) => void;
+}) {
+  if (students.length === 0) return <p className="empty-state">No roster members yet.</p>;
+  return (
+    <div className="data-table-wrap">
+      <table className="data-table roster-email-table">
+        <thead>
+          <tr>
+            <th>User ID</th>
+            <th>First Name</th>
+            <th>Last Name</th>
+            <th>Email</th>
+            <th>Active</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {students.map((student) => (
+            <tr key={student.student_id}>
+              <td>{student.student_id}</td>
+              <td>{student.first_name}</td>
+              <td>{student.last_name}</td>
+              <td>
+                <input
+                  type="email"
+                  value={drafts[student.student_id] ?? student.email ?? ""}
+                  onChange={(event) => onDraftChange(student.student_id, event.target.value)}
+                  placeholder="name@example.org"
+                />
+              </td>
+              <td>{student.active ? "Yes" : "No"}</td>
+              <td>
+                <button type="button" disabled={savingFor === student.student_id} onClick={() => onSave(student)}>
+                  {savingFor === student.student_id ? "Saving..." : "Save"}
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -894,7 +1035,7 @@ function MeetingDetails({
             <span>{presence ? meetingPresentRows.length : "..."}</span>
           </div>
           <p className="empty-state">{presentStateText}</p>
-          <DataTable rows={meetingPresentRows} columns={["studentId", "firstName", "lastName", "status", "checkInAt", "checkOutAt"]} />
+          <DataTable rows={meetingPresentRows} columns={["studentId", "firstName", "lastName", "checkInAt", "checkOutAt"]} density="compact" />
         </div>
         <div>
           <div className="meeting-detail-subheading">
@@ -903,7 +1044,7 @@ function MeetingDetails({
           </div>
           <p className="empty-state">{absentStateText}</p>
           {meeting.required ? (
-            <DataTable rows={absentRows} columns={["studentId", "firstName", "lastName"]} />
+            <DataTable rows={absentRows} columns={["studentId", "firstName", "lastName"]} density="compact" />
           ) : (
             <p className="notice info">Track attendance here as present-only participation; use required meetings for absence accountability.</p>
           )}
@@ -1047,7 +1188,7 @@ function Events({ session }: { session: DashboardSession }) {
 }
 
 function Reports({ session }: { session: DashboardSession }) {
-  const { data: students } = useApi<{ students: Array<{ student_id: string; first_name: string; last_name: string; active: number }> }>("/admin/students", session);
+  const { data: students } = useApi<{ students: StudentRow[] }>("/admin/students", session);
   const { data: meetingData } = useApi<{ meetings: ScheduledMeeting[] }>("/admin/meetings", session);
   const [reportStartDate, setReportStartDate] = useState("");
   const [reportEndDate, setReportEndDate] = useState("");
@@ -1287,11 +1428,11 @@ function Table({ title, rows, columns, error }: { title: string; rows: Array<Rec
   );
 }
 
-function DataTable({ rows, columns }: { rows: Array<Record<string, unknown>>; columns: string[] }) {
+function DataTable({ rows, columns, density = "regular" }: { rows: Array<Record<string, unknown>>; columns: string[]; density?: "regular" | "compact" }) {
   return (
     <div className="data-table-wrap">
-      <table className="data-table">
-        <thead><tr>{columns.map((column) => <th key={column}>{column}</th>)}</tr></thead>
+      <table className={`data-table ${density === "compact" ? "compact-data-table" : ""}`}>
+        <thead><tr>{columns.map((column) => <th key={column}>{columnLabel(column)}</th>)}</tr></thead>
         <tbody>
           {rows.map((row, index) => (
             <tr key={index}>{columns.map((column) => <td key={column}>{String(row[column] ?? "")}</td>)}</tr>
@@ -1342,13 +1483,15 @@ function parseRosterCsv(text: string) {
   const idIndex = hasHeader ? findHeaderIndex(header, ["memberid", "member id", "studentid", "student id", "id"]) : 0;
   const firstIndex = hasHeader ? findHeaderIndex(header, ["firstname", "first name", "first"]) : 1;
   const lastIndex = hasHeader ? findHeaderIndex(header, ["lastname", "last name", "last"]) : 2;
+  const emailIndex = hasHeader ? header.findIndex((cell) => ["email", "user email", "google email"].includes(cell)) : -1;
 
   return dataRows.map((row, index) => {
     const memberId = row[idIndex]?.trim();
     const firstName = row[firstIndex]?.trim();
     const lastName = row[lastIndex]?.trim();
+    const email = emailIndex >= 0 ? row[emailIndex]?.trim() : undefined;
     if (!memberId || !firstName || !lastName) throw new Error(`Roster row ${index + 1} must include member ID, first name, and last name`);
-    return { memberId, firstName, lastName };
+    return email ? { memberId, firstName, lastName, email } : { memberId, firstName, lastName };
   });
 }
 
@@ -1731,6 +1874,47 @@ function statusLabel(status: KioskCommandStatus | KioskHealthStatus | "active" |
   return "Failed";
 }
 
+function columnLabel(column: string) {
+  const labels: Record<string, string> = {
+    active: "Active",
+    absent: "Absent",
+    absentDates: "Absent Dates",
+    attendance: "Attendance",
+    attendanceRate: "Attendance",
+    checkInAt: "Time In",
+    checkOutAt: "Time Out",
+    check_in_at: "Time In",
+    check_out_at: "Time Out",
+    date: "Date",
+    email: "Email",
+    firstName: "First Name",
+    first_name: "First Name",
+    has_attendance: "Has Attendance",
+    lastName: "Last Name",
+    lastSeenAt: "Last Seen",
+    last_name: "Last Name",
+    meeting_date: "Meeting Date",
+    meeting_title: "Meeting",
+    note: "Note",
+    occurred_at: "Occurred At",
+    openCheckIns: "Open Check-Ins",
+    openSessionDates: "Open Check-Ins",
+    present: "Present",
+    presentDates: "Present Dates",
+    rejection_reason: "Rejection Reason",
+    required: "Required",
+    requiredMeetings: "Required Meetings",
+    scheduled: "Scheduled",
+    status: "Status",
+    studentId: "User ID",
+    studentID: "User ID",
+    student_id: "User ID",
+    time: "Time",
+    title: "Title"
+  };
+  return labels[column] ?? column.replace(/_/g, " ").replace(/([a-z])([A-Z])/g, "$1 $2").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
 function parseCsvLine(line: string) {
   const cells: string[] = [];
   let cell = "";
@@ -1766,6 +1950,11 @@ function readStoredSession(): DashboardSession {
     email: localStorage.getItem("adminEmail") ?? "",
     idToken
   };
+}
+
+function readStoredThemeMode(): ThemeMode {
+  const stored = localStorage.getItem("dashboardThemeMode");
+  return stored === "light" || stored === "dark" || stored === "themed" ? stored : "themed";
 }
 
 function decodeGooglePayload(encodedPayload: string): { email: string } {

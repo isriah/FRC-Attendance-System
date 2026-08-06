@@ -29,6 +29,7 @@ db.exec(`
     student_id TEXT PRIMARY KEY,
     first_name TEXT NOT NULL,
     last_name TEXT NOT NULL,
+    email TEXT,
     active INTEGER NOT NULL DEFAULT 1
   );
 
@@ -94,6 +95,7 @@ ensureColumn("kiosks", "reader_online", "INTEGER");
 ensureColumn("kiosks", "pending_scan_count", "INTEGER NOT NULL DEFAULT 0");
 ensureColumn("kiosks", "last_sync_at", "TEXT");
 ensureColumn("kiosks", "last_sync_error", "TEXT");
+ensureColumn("students", "email", "TEXT");
 
 async function seedBenchData() {
   db.prepare(`
@@ -212,8 +214,17 @@ const server = createServer(async (request, response) => {
     }
 
     if (request.method === "GET" && request.url === "/admin/students") {
-      const students = db.prepare("SELECT student_id, first_name, last_name, active FROM students ORDER BY last_name, first_name").all();
+      const students = db.prepare("SELECT student_id, first_name, last_name, email, active FROM students ORDER BY last_name, first_name").all();
       sendJson(response, 200, { students });
+      return;
+    }
+
+    const adminStudentEmail = request.url?.match(/^\/admin\/students\/([^/]+)\/email$/);
+    if (adminStudentEmail && request.method === "PUT") {
+      const memberId = adminStudentEmail[1];
+      if (!memberId) throw httpError(400, "Student id is required");
+      const body = await readBody<{ email?: string | null }>(request);
+      sendJson(response, 200, updateStudentEmail(decodeURIComponent(memberId), body.email ?? null));
       return;
     }
 
@@ -405,18 +416,19 @@ function syncRoster(members: RosterMemberInput[]) {
   const normalizedMembers = normalizeRosterMembers(members);
   const seen = new Set<string>();
   const upsert = db.prepare(`
-    INSERT INTO students (student_id, first_name, last_name, active)
-    VALUES (?, ?, ?, 1)
+    INSERT INTO students (student_id, first_name, last_name, email, active)
+    VALUES (?, ?, ?, ?, 1)
     ON CONFLICT(student_id) DO UPDATE SET
       first_name = excluded.first_name,
       last_name = excluded.last_name,
+      email = COALESCE(excluded.email, students.email),
       active = 1
   `);
 
   const transaction = db.transaction(() => {
     for (const member of normalizedMembers) {
       seen.add(member.memberId);
-      upsert.run(member.memberId, member.firstName, member.lastName);
+      upsert.run(member.memberId, member.firstName, member.lastName, member.email ?? null);
     }
     if (normalizedMembers.length > 0) {
       const deactivateMissing = db.prepare(`UPDATE students SET active = 0 WHERE student_id NOT IN (${normalizedMembers.map(() => "?").join(",")})`);
@@ -426,6 +438,14 @@ function syncRoster(members: RosterMemberInput[]) {
   transaction();
 
   return { synced: seen.size, deactivatedMissingStudents: normalizedMembers.length > 0 };
+}
+
+function updateStudentEmail(memberId: string, email: string | null) {
+  const normalizedMemberId = requireNonEmptyString(memberId, "memberId");
+  const normalizedEmail = normalizeOptionalEmail(email ?? undefined);
+  const result = db.prepare("UPDATE students SET email = ? WHERE student_id = ?").run(normalizedEmail ?? null, normalizedMemberId);
+  if (result.changes === 0) throw httpError(404, "Student not found");
+  return { memberId: normalizedMemberId, email: normalizedEmail ?? null };
 }
 
 function seedSampleMeetings() {
@@ -1458,6 +1478,15 @@ function httpError(status: number, message: string) {
 function requireNonEmptyString(value: unknown, name: string) {
   if (typeof value !== "string" || value.trim().length === 0) throw httpError(400, `${name} is required`);
   return value.trim();
+}
+
+function normalizeOptionalEmail(value: unknown) {
+  if (value === null || value === undefined) return undefined;
+  if (typeof value !== "string") throw httpError(400, "email must be a string");
+  const trimmed = value.trim().toLowerCase();
+  if (!trimmed) return undefined;
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) throw httpError(400, "email must be a valid email address");
+  return trimmed;
 }
 
 interface ScheduledMeetingInput {

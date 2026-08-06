@@ -8,6 +8,7 @@ export interface Student {
   studentId: string;
   firstName: string;
   lastName: string;
+  email?: string;
   active: boolean;
   rosterSyncedAt: string;
   rosterHash?: string;
