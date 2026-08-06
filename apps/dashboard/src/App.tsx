@@ -787,6 +787,11 @@ function MeetingDetails({
   if (!meeting) {
     return <p className="empty-state">Select a meeting on the calendar or table to see attendance details.</p>;
   }
+  const meetingPresentRows = presentRows.map((row) => ({
+    ...row,
+    checkInAt: typeof row.checkInAt === "string" ? formatTime(row.checkInAt) : row.checkInAt,
+    checkOutAt: typeof row.checkOutAt === "string" ? formatTime(row.checkOutAt) : row.checkOutAt
+  }));
 
   return (
     <div className="meeting-details">
@@ -813,7 +818,7 @@ function MeetingDetails({
       <div className="meeting-detail-grid">
         <div>
           <h3>Present Members</h3>
-          <DataTable rows={presentRows} columns={["studentId", "firstName", "lastName", "status", "checkInAt", "checkOutAt"]} />
+          <DataTable rows={meetingPresentRows} columns={["studentId", "firstName", "lastName", "status", "checkInAt", "checkOutAt"]} />
         </div>
         <div>
           <h3>{meeting.required ? "Absent Members" : "Optional Attendance"}</h3>
@@ -1617,10 +1622,11 @@ function formatDateTime(value?: string) {
 
 function formatTime(value?: string) {
   if (!value) return "";
+  const normalizedValue = /^\d{4}-\d{2}-\d{2}\+/.test(value) ? value.replace("+", "T") : value;
   return new Intl.DateTimeFormat(undefined, {
     hour: "numeric",
     minute: "2-digit"
-  }).format(new Date(value));
+  }).format(new Date(normalizedValue));
 }
 
 function kioskHealthStatus(kiosk: KioskRow): KioskHealthStatus {
