@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import { apiBaseUrl, apiDelete, apiGet, apiPost, apiPut, type DashboardSession } from "./api";
 import "./styles.css";
 
-type Tab = "overview" | "roster" | "meetings" | "kiosks" | "events" | "reports" | "export";
+type Tab = "overview" | "roster" | "admins" | "meetings" | "kiosks" | "events" | "reports" | "export";
 type MeetingViewTab = "calendar" | "all" | "form";
 type ThemeMode = "themed" | "light" | "dark";
 type KioskCommandAction = "restart_display" | "restart_services" | "reboot_system";
@@ -43,6 +43,13 @@ interface KioskCommandRow {
   claimedAt?: string;
   completedAt?: string;
   message?: string;
+}
+
+interface AdminUserRow {
+  email: string;
+  role: "mentor" | "admin";
+  active: boolean;
+  lastLoginAt?: string;
 }
 
 interface FingerprintEnrollment {
@@ -120,7 +127,7 @@ function App() {
     <main className="dashboard">
       <aside>
         <h1>Attendance Admin</h1>
-        {(["overview", "roster", "meetings", "kiosks", "events", "reports", "export"] as Tab[]).map((item) => (
+        {(["overview", "roster", "admins", "meetings", "kiosks", "events", "reports", "export"] as Tab[]).map((item) => (
           <button key={item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}>
             {item}
           </button>
@@ -138,6 +145,7 @@ function App() {
         </header>
         {tab === "overview" && <Overview session={session} />}
         {tab === "roster" && <Roster session={session} />}
+        {tab === "admins" && <AdminUsers session={session} />}
         {tab === "meetings" && <Meetings session={session} />}
         {tab === "kiosks" && <Kiosks session={session} />}
         {tab === "events" && <Events session={session} />}
@@ -414,7 +422,7 @@ function Roster({ session }: { session: DashboardSession }) {
       <section>
         <h2>Member Emails</h2>
         <p className="notice info">
-          Member emails are stored on roster records for association. Google OAuth admin access still follows the Worker allowlist or allowed domain configuration.
+          Member emails are stored on roster records for association. Dashboard login access is managed on the Admins tab.
         </p>
         {emailMessage ? <p className={`notice ${emailMessage.kind}`}>{emailMessage.text}</p> : null}
         <RosterEmailTable
@@ -529,6 +537,130 @@ function RosterEmailTable({
         </tbody>
       </table>
     </div>
+  );
+}
+
+function AdminUsers({ session }: { session: DashboardSession }) {
+  const { data, error, reload } = useApi<{ adminUsers: AdminUserRow[] }>("/admin/admin-users", session);
+  const [newEmail, setNewEmail] = useState("");
+  const [newRole, setNewRole] = useState<AdminUserRow["role"]>("mentor");
+  const [newActive, setNewActive] = useState(true);
+  const [drafts, setDrafts] = useState<Record<string, Pick<AdminUserRow, "role" | "active">>>({});
+  const [savingEmail, setSavingEmail] = useState<string>();
+  const [message, setMessage] = useState<{ kind: "success" | "error"; text: string }>();
+
+  useEffect(() => {
+    if (!data?.adminUsers) return;
+    setDrafts((current) => {
+      const next = { ...current };
+      for (const adminUser of data.adminUsers) {
+        if (!next[adminUser.email]) next[adminUser.email] = { role: adminUser.role, active: adminUser.active };
+      }
+      return next;
+    });
+  }, [data?.adminUsers]);
+
+  async function saveAdminUser(email: string, role: AdminUserRow["role"], active: boolean) {
+    const normalizedEmail = email.trim().toLowerCase();
+    setSavingEmail(normalizedEmail);
+    setMessage(undefined);
+    try {
+      await apiPut<AdminUserRow>(`/admin/admin-users/${encodeURIComponent(normalizedEmail)}`, { role, active }, session);
+      setMessage({ kind: "success", text: `Saved dashboard access for ${normalizedEmail}.` });
+      setNewEmail("");
+      setNewRole("mentor");
+      setNewActive(true);
+      reload();
+    } catch (error) {
+      setMessage({ kind: "error", text: friendlyDashboardError(error) });
+    } finally {
+      setSavingEmail(undefined);
+    }
+  }
+
+  return (
+    <>
+      <section>
+        <h2>Admin Users</h2>
+        <p className="notice info">
+          Active emails in this table can sign in with Google OAuth. Environment allowlist and domain settings still work as bootstrap access, and inactive rows stay blocked even if an env setting would otherwise allow them.
+        </p>
+        {message ? <p className={`notice ${message.kind}`}>{message.text}</p> : null}
+        {error ? <p className="error">{error}</p> : null}
+        <form className="admin-user-form" onSubmit={(event) => {
+          event.preventDefault();
+          saveAdminUser(newEmail, newRole, newActive);
+        }}>
+          <label className="field-label wide-field">
+            <span>Email</span>
+            <input value={newEmail} onChange={(event) => setNewEmail(event.target.value)} type="email" placeholder="mentor@example.org" required />
+          </label>
+          <label className="field-label">
+            <span>Role</span>
+            <select value={newRole} onChange={(event) => setNewRole(event.target.value as AdminUserRow["role"])}>
+              <option value="mentor">Mentor</option>
+              <option value="admin">Admin</option>
+            </select>
+          </label>
+          <label className="inline-check admin-active-toggle">
+            <input type="checkbox" checked={newActive} onChange={(event) => setNewActive(event.target.checked)} />
+            Active
+          </label>
+          <button disabled={savingEmail === newEmail.trim().toLowerCase()}>{savingEmail === newEmail.trim().toLowerCase() ? "Saving..." : "Save admin user"}</button>
+        </form>
+      </section>
+      <section>
+        <h2>Dashboard Access</h2>
+        {data?.adminUsers.length === 0 ? <p className="empty-state">No database-backed admin users yet. Bootstrap access can still come from Worker env settings.</p> : null}
+        <div className="data-table-wrap">
+          <table className="data-table admin-user-table">
+            <thead>
+              <tr>
+                <th>Email</th>
+                <th>Role</th>
+                <th>Active</th>
+                <th>Last Login</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(data?.adminUsers ?? []).map((adminUser) => {
+                const draft = drafts[adminUser.email] ?? { role: adminUser.role, active: adminUser.active };
+                return (
+                  <tr key={adminUser.email}>
+                    <td>{adminUser.email}</td>
+                    <td>
+                      <select value={draft.role} onChange={(event) => setDrafts((current) => ({
+                        ...current,
+                        [adminUser.email]: { ...draft, role: event.target.value as AdminUserRow["role"] }
+                      }))}>
+                        <option value="mentor">Mentor</option>
+                        <option value="admin">Admin</option>
+                      </select>
+                    </td>
+                    <td>
+                      <label className="inline-check compact-check">
+                        <input type="checkbox" checked={draft.active} onChange={(event) => setDrafts((current) => ({
+                          ...current,
+                          [adminUser.email]: { ...draft, active: event.target.checked }
+                        }))} />
+                        {draft.active ? "Active" : "Inactive"}
+                      </label>
+                    </td>
+                    <td>{adminUser.lastLoginAt ? formatDateTime(adminUser.lastLoginAt) : ""}</td>
+                    <td>
+                      <button type="button" disabled={savingEmail === adminUser.email} onClick={() => saveAdminUser(adminUser.email, draft.role, draft.active)}>
+                        {savingEmail === adminUser.email ? "Saving..." : "Save"}
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </>
   );
 }
 

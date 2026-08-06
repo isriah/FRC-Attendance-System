@@ -26,7 +26,7 @@ Before applying remote migrations or deploying the Worker, run:
 npm --workspace @frc-attendance/api run check:deploy-config
 ```
 
-This preflight fails until `apps/api/wrangler.toml` has a real D1 `database_id`, a production `GOOGLE_CLIENT_ID`, and either `GOOGLE_ALLOWED_EMAILS` or `GOOGLE_ALLOWED_DOMAIN`.
+This preflight fails until `apps/api/wrangler.toml` has a real D1 `database_id`, a production `GOOGLE_CLIENT_ID`, and either `GOOGLE_ALLOWED_EMAILS` or `GOOGLE_ALLOWED_DOMAIN` for bootstrap admin access.
 
 Before deploying production changes, run the full smoke checklist from the workstation:
 
@@ -54,8 +54,8 @@ This repeatable check verifies the production Worker `/health` response, verifie
 
    - `TIME_ZONE`: default `America/New_York`.
    - `GOOGLE_CLIENT_ID`: Google OAuth client ID for the dashboard.
-   - `GOOGLE_ALLOWED_EMAILS`: comma-separated mentor emails.
-   - `GOOGLE_ALLOWED_DOMAIN`: optional Google Workspace domain.
+   - `GOOGLE_ALLOWED_EMAILS`: comma-separated bootstrap mentor emails.
+   - `GOOGLE_ALLOWED_DOMAIN`: optional bootstrap Google Workspace domain.
    - `DUPLICATE_WINDOW_SECONDS`: default `90`.
 
 6. Deploy the Worker:
@@ -175,7 +175,17 @@ The dashboard login UI follows the same boundary: when `VITE_GOOGLE_CLIENT_ID` i
 
 For local development only, if no Google client ID is configured, the dashboard can send an `x-admin-email` header and the API will still enforce the configured allowlist.
 
-Dashboard roster records can store an optional member email for user association and future OAuth policy work. That member email does not currently grant dashboard admin access by itself; production OAuth authorization still requires `GOOGLE_ALLOWED_EMAILS` or `GOOGLE_ALLOWED_DOMAIN` to allow the signed-in Google email.
+Dashboard admin access is authorized when any of these are true:
+
+- the signed-in email is active in the D1 `admin_users` table
+- the signed-in email is listed in `GOOGLE_ALLOWED_EMAILS`
+- the signed-in email matches `GOOGLE_ALLOWED_DOMAIN`
+
+The env allowlist/domain are retained as bootstrap access so an existing deployment can create database-backed admins from the dashboard. If an email has an `admin_users` row with `active = 0`, that user is blocked even if an env allowlist or domain would otherwise match. Successful admin requests update `admin_users.last_login_at`; allowlisted/domain users without a row are inserted as active `mentor` users on first successful request.
+
+Dashboard admins can manage database-backed OAuth access from the Admins tab by email, active status, and `mentor`/`admin` role. The role is stored for policy and audit use; current dashboard routes require an authenticated active admin but do not yet restrict actions by role.
+
+Dashboard roster records can store an optional member email for user association. That member email does not grant dashboard admin access by itself; add the email on the Admins tab or keep it covered by the Worker env allowlist/domain.
 
 ## Kiosk Provisioning
 

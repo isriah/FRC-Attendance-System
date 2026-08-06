@@ -44,6 +44,24 @@ describe("roster sync", () => {
     await expectStudentEmail(env, "100001", null);
   });
 
+  it("rejects duplicate member email associations", async () => {
+    const env = createRosterTestEnv();
+
+    await syncRoster(env, [
+      { memberId: "100001", firstName: "Ada", lastName: "Lovelace", email: "ada@example.org" },
+      { memberId: "100002", firstName: "Grace", lastName: "Hopper" }
+    ]);
+
+    await expect(updateStudentEmail(env, "100002", "ADA@example.org")).rejects.toMatchObject({
+      message: "Email is already assigned to member 100001",
+      status: 409
+    });
+    expect(() => normalizeRosterMembers([
+      { memberId: "100001", firstName: "Ada", lastName: "Lovelace", email: "ada@example.org" },
+      { memberId: "100002", firstName: "Grace", lastName: "Hopper", email: "ADA@example.org" }
+    ])).toThrow("Duplicate roster email: ada@example.org");
+  });
+
   it("rejects empty and duplicate roster inputs", () => {
     expect(() => normalizeRosterMembers([])).toThrow("Roster sync requires at least one member");
     expect(() => normalizeRosterMembers([
@@ -73,6 +91,10 @@ function createRosterTestEnv(): Env {
       roster_hash TEXT,
       roster_synced_at TEXT NOT NULL
     );
+
+    CREATE UNIQUE INDEX students_email_unique_idx
+    ON students(email)
+    WHERE email IS NOT NULL;
 
     CREATE TABLE sync_log (
       id TEXT PRIMARY KEY,

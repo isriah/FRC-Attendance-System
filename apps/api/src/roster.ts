@@ -19,6 +19,7 @@ export async function syncRoster(env: Env, members: RosterMemberInput[]) {
 
   for (const member of normalizedMembers) {
     seen.add(member.memberId);
+    if (member.email) await requireUniqueStudentEmail(env, member.email, member.memberId);
     const rosterHash = await hashRosterRow(member);
     statements.push(
       env.DB.prepare(
@@ -61,6 +62,7 @@ export async function listActiveRoster(env: Env) {
 export async function updateStudentEmail(env: Env, memberId: string, email: string | null) {
   const normalizedMemberId = requireRosterString(memberId, "memberId");
   const normalizedEmail = normalizeOptionalRosterEmail(email ?? undefined);
+  if (normalizedEmail) await requireUniqueStudentEmail(env, normalizedEmail, normalizedMemberId);
   const result = await env.DB.prepare(
     "UPDATE students SET email = ? WHERE student_id = ?"
   ).bind(normalizedEmail ?? null, normalizedMemberId).run();
@@ -74,13 +76,16 @@ export function normalizeRosterMembers(members: RosterMemberInput[] | undefined)
   if (members.length === 0) throw Object.assign(new Error("Roster sync requires at least one member"), { status: 400 });
 
   const seen = new Set<string>();
+  const seenEmails = new Set<string>();
   return members.map((member, index) => {
     const memberId = requireRosterString(member?.memberId, `members[${index}].memberId`);
     const firstName = requireRosterString(member?.firstName, `members[${index}].firstName`);
     const lastName = requireRosterString(member?.lastName, `members[${index}].lastName`);
     const email = normalizeOptionalRosterEmail(member?.email);
     if (seen.has(memberId)) throw Object.assign(new Error(`Duplicate roster memberId: ${memberId}`), { status: 400 });
+    if (email && seenEmails.has(email)) throw Object.assign(new Error(`Duplicate roster email: ${email}`), { status: 409 });
     seen.add(memberId);
+    if (email) seenEmails.add(email);
     return email ? { memberId, firstName, lastName, email } : { memberId, firstName, lastName };
   });
 }
@@ -104,4 +109,11 @@ function normalizeOptionalRosterEmail(value: string | undefined) {
     throw Object.assign(new Error("email must be a valid email address"), { status: 400 });
   }
   return trimmed;
+}
+
+async function requireUniqueStudentEmail(env: Env, email: string, memberId: string) {
+  const existing = await env.DB.prepare(
+    "SELECT student_id FROM students WHERE email = ? AND student_id <> ?"
+  ).bind(email, memberId).first<{ student_id: string }>();
+  if (existing) throw Object.assign(new Error(`Email is already assigned to member ${existing.student_id}`), { status: 409 });
 }

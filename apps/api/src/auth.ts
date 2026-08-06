@@ -5,6 +5,15 @@ export interface AdminPrincipal {
   role: "mentor" | "admin";
 }
 
+export type AdminRole = AdminPrincipal["role"];
+
+export interface AdminUser {
+  email: string;
+  role: AdminRole;
+  active: boolean;
+  lastLoginAt?: string;
+}
+
 export async function sha256Hex(value: string): Promise<string> {
   const bytes = new TextEncoder().encode(value);
   const digest = await crypto.subtle.digest("SHA-256", bytes);
@@ -27,19 +36,65 @@ export async function requireAdmin(request: Request, env: Env): Promise<AdminPri
   const email = await resolveAdminEmail(request, env);
   if (!email) throw Object.assign(new Error("Missing admin identity"), { status: 401 });
 
+  const existing = await findAdminUser(env, email);
+  if (existing && !existing.active) throw Object.assign(new Error("Admin user is disabled"), { status: 403 });
+
   const allowedEmails = env.GOOGLE_ALLOWED_EMAILS.split(",").map((entry) => entry.trim().toLowerCase()).filter(Boolean);
   const allowedDomain = env.GOOGLE_ALLOWED_DOMAIN.trim().toLowerCase();
   const emailAllowed = allowedEmails.includes(email) || (allowedDomain.length > 0 && email.endsWith(`@${allowedDomain}`));
-  if (!emailAllowed) throw Object.assign(new Error("Admin email is not allowlisted"), { status: 403 });
-
-  const existing = await env.DB.prepare("SELECT role, active FROM admin_users WHERE email = ?").bind(email).first<{ role: "mentor" | "admin"; active: number }>();
-  if (existing && !existing.active) throw Object.assign(new Error("Admin user is disabled"), { status: 403 });
+  if (!existing?.active && !emailAllowed) throw Object.assign(new Error("Admin email is not allowlisted"), { status: 403 });
 
   const role = existing?.role ?? "mentor";
   await env.DB.prepare(
     "INSERT INTO admin_users (email, role, active, last_login_at) VALUES (?, ?, 1, ?) ON CONFLICT(email) DO UPDATE SET last_login_at = excluded.last_login_at"
   ).bind(email, role, new Date().toISOString()).run();
   return { email, role };
+}
+
+export async function listAdminUsers(env: Env): Promise<AdminUser[]> {
+  const rows = await env.DB.prepare(`
+    SELECT email, role, active, last_login_at
+    FROM admin_users
+    ORDER BY active DESC, email
+  `).all<{ email: string; role: AdminRole; active: number; last_login_at?: string | null }>();
+
+  return rows.results.map((row) => ({
+    email: row.email,
+    role: normalizeAdminRole(row.role),
+    active: row.active === 1,
+    lastLoginAt: row.last_login_at ?? undefined
+  }));
+}
+
+export async function upsertAdminUser(env: Env, email: string, input: { role?: unknown; active?: unknown }): Promise<AdminUser> {
+  const normalizedEmail = normalizeAdminEmail(email);
+  const role = normalizeAdminRole(input.role ?? "mentor");
+  const active = normalizeAdminActive(input.active);
+
+  await env.DB.prepare(`
+    INSERT INTO admin_users (email, role, active)
+    VALUES (?, ?, ?)
+    ON CONFLICT(email) DO UPDATE SET
+      role = excluded.role,
+      active = excluded.active
+  `).bind(normalizedEmail, role, active ? 1 : 0).run();
+
+  const row = await findAdminUser(env, normalizedEmail);
+  if (!row) throw Object.assign(new Error("Admin user was not saved"), { status: 500 });
+  return row;
+}
+
+async function findAdminUser(env: Env, email: string): Promise<AdminUser | undefined> {
+  const row = await env.DB.prepare("SELECT email, role, active, last_login_at FROM admin_users WHERE email = ?")
+    .bind(email)
+    .first<{ email: string; role: AdminRole; active: number; last_login_at?: string | null }>();
+  if (!row) return undefined;
+  return {
+    email: row.email,
+    role: normalizeAdminRole(row.role),
+    active: row.active === 1,
+    lastLoginAt: row.last_login_at ?? undefined
+  };
 }
 
 async function resolveAdminEmail(request: Request, env: Env): Promise<string | undefined> {
@@ -100,4 +155,24 @@ function base64UrlDecode(value: string): ArrayBuffer {
   const binary = atob(padded);
   const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+}
+
+function normalizeAdminEmail(value: string) {
+  const email = value.trim().toLowerCase();
+  if (!email) throw Object.assign(new Error("Admin email is required"), { status: 400 });
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw Object.assign(new Error("Admin email must be a valid email address"), { status: 400 });
+  }
+  return email;
+}
+
+function normalizeAdminRole(value: unknown): AdminRole {
+  if (value === "admin" || value === "mentor") return value;
+  throw Object.assign(new Error("Admin role must be mentor or admin"), { status: 400 });
+}
+
+function normalizeAdminActive(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (typeof value === "boolean") return value;
+  throw Object.assign(new Error("Admin active must be a boolean"), { status: 400 });
 }

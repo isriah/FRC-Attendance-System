@@ -1,5 +1,5 @@
 import { requireIsoTimestamp, requireNonEmptyString, type KioskHealthReport, type KioskSyncRequest } from "@frc-attendance/shared";
-import { requireAdmin, requireKiosk, sha256Hex } from "./auth";
+import { listAdminUsers, requireAdmin, requireKiosk, sha256Hex, upsertAdminUser } from "./auth";
 import { addManualEvent, syncKioskEvents } from "./attendanceStore";
 import type { Env } from "./env";
 import { buildLegacySheetExport } from "./export";
@@ -65,6 +65,20 @@ export default {
         await requireAdmin(request, env);
         const rows = await env.DB.prepare("SELECT student_id, first_name, last_name, email, active, roster_synced_at FROM students ORDER BY last_name, first_name").all();
         return json({ students: rows.results });
+      }
+
+      if (route === "GET /admin/admin-users") {
+        await requireAdmin(request, env);
+        return json({ adminUsers: await listAdminUsers(env) });
+      }
+
+      const adminUser = url.pathname.match(/^\/admin\/admin-users\/([^/]+)$/);
+      if (request.method === "PUT" && adminUser) {
+        await requireAdmin(request, env);
+        const email = adminUser[1];
+        if (!email) throw Object.assign(new Error("Admin email is required"), { status: 400 });
+        const body = await readJson<{ role?: unknown; active?: unknown }>(request);
+        return json(await upsertAdminUser(env, decodeURIComponent(email), body));
       }
 
       const adminStudentEmail = url.pathname.match(/^\/admin\/students\/([^/]+)\/email$/);

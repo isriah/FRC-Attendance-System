@@ -582,6 +582,27 @@ textarea {
   width: min(260px, 100%);
 }
 
+.admin-user-form {
+  display: grid;
+  grid-template-columns: minmax(min(280px, 100%), 1fr) minmax(140px, auto) auto auto;
+  gap: 12px;
+  align-items: end;
+  margin-top: 14px;
+}
+
+.admin-active-toggle {
+  min-height: 42px;
+  margin-bottom: 0;
+}
+
+.compact-check {
+  margin-bottom: 0;
+}
+
+.admin-user-table {
+  min-width: 760px;
+}
+
 .report-context {
   color: var(--muted-color);
   font-size: 14px;
@@ -833,6 +854,7 @@ pre {
 
   .meeting-form,
   .recurrence-options,
+  .admin-user-form,
   .grid,
   .meeting-detail-grid {
     grid-template-columns: 1fr;
