@@ -5,7 +5,7 @@
 Current production API:
 
 - Worker URL: `https://frc-attendance-api.frc-attendance.workers.dev`
-- Latest deployed Worker version: `c83e53b6-eca7-4b9d-a904-3b746db7a311`
+- Latest deployed Worker version: `080db658-3ca5-4e8c-93c0-69414104ad64`
 - D1 database: `frc-attendance`
 - D1 database ID: `c02c0ca8-033b-435f-ae21-2d8f3b203b22`
 - Applied remote migrations: `0001_initial.sql` through `0004_scheduled_meetings.sql`
@@ -16,7 +16,7 @@ Current production dashboard:
 
 - Cloudflare Pages project: `frc-attendance-dashboard`
 - Pages URL: `https://frc-attendance-dashboard.pages.dev`
-- Latest verified deployment: `https://f54beeb0.frc-attendance-dashboard.pages.dev`
+- Latest verified deployment: `https://d3e231ec.frc-attendance-dashboard.pages.dev`
 - API base URL baked into the uploaded Vite build: `https://frc-attendance-api.frc-attendance.workers.dev`
 - Google OAuth client ID baked into the uploaded Vite build: `180849199739-v04bktp7rfmimgjpvohmq7pinrrpr337.apps.googleusercontent.com`
 
@@ -110,7 +110,7 @@ npm --workspace @frc-attendance/api run dev
 
 `apps/dashboard` is deployed to Cloudflare Pages project `frc-attendance-dashboard`.
 
-Current feature-completion priority: review and deploy the mentor-ready scheduled-meeting reporting slice. Source now includes scheduled meeting summaries, zero-scan required meeting accounting, per-meeting absence drilldowns, roster-wide attendance summaries, date range filters, mentor-facing export ranges, and matching local bench API routes. The branch still needs review/merge/deploy before these reporting updates are live in production.
+Current feature-completion priority: validate the deployed mentor-ready reporting workflows with real roster data, then polish report/export formatting or Google Sheets integration from mentor feedback. Production now includes scheduled meeting summaries, zero-scan required meeting accounting, per-meeting absence drilldowns, roster-wide attendance summaries, date range filters, mentor-facing export ranges, and matching local bench API routes.
 
 For direct uploads, build with production Vite variables before deploying:
 
@@ -160,6 +160,8 @@ Deployment `https://77d95a08.frc-attendance-dashboard.pages.dev` keeps meetings 
 Deployment `https://d3404d23.frc-attendance-dashboard.pages.dev` combines single and repeating meeting creation into one Meetings form. The recurrence controls stay hidden until `Repeats` is checked. Production Worker/dashboard smoke passed on 2026-08-05 with Pi skipped.
 
 Deployment `https://f54beeb0.frc-attendance-dashboard.pages.dev` fixes the Meetings page responsive layout so the page no longer creates document-level horizontal overflow at split-screen widths. Production Worker/dashboard smoke passed on 2026-08-05 with Pi skipped.
+
+Deployment `https://d3e231ec.frc-attendance-dashboard.pages.dev` adds mentor-ready scheduled meeting reports: meeting summaries, absence drilldowns, roster-wide attendance summaries, date range filtering, and mentor-facing export ranges. Worker version `080db658-3ca5-4e8c-93c0-69414104ad64` exposes the matching report endpoints. Production Worker/dashboard smoke passed on 2026-08-05 with Pi skipped.
 
 The dashboard login UI follows the same boundary: when `VITE_GOOGLE_CLIENT_ID` is configured, it shows Google sign-in and a production notice that email-only local login is disabled. The email-only form is rendered only for local development builds with no Google client ID.
 
