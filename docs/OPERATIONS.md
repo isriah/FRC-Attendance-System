@@ -16,7 +16,7 @@ Current production dashboard:
 
 - Cloudflare Pages project: `frc-attendance-dashboard`
 - Pages URL: `https://frc-attendance-dashboard.pages.dev`
-- Latest verified deployment: `https://6e372c01.frc-attendance-dashboard.pages.dev`
+- Latest verified deployment: `https://226ac57b.frc-attendance-dashboard.pages.dev`
 - API base URL baked into the uploaded Vite build: `https://frc-attendance-api.frc-attendance.workers.dev`
 - Google OAuth client ID baked into the uploaded Vite build: `180849199739-v04bktp7rfmimgjpvohmq7pinrrpr337.apps.googleusercontent.com`
 
@@ -166,6 +166,8 @@ Deployment `https://d3e231ec.frc-attendance-dashboard.pages.dev` adds mentor-rea
 Deployment `https://e0927eea.frc-attendance-dashboard.pages.dev` adds a month calendar to the Meetings page, shows report-backed present/absent counts in the scheduled meetings list, and lets mentors select a meeting to review present members, absent members, and attendance stats. Production Worker/dashboard smoke passed on 2026-08-05 with Pi skipped.
 
 Deployment `https://6e372c01.frc-attendance-dashboard.pages.dev` formats selected meeting check-in/check-out values as local times in the Meetings detail panel. Production Worker/dashboard smoke passed on 2026-08-05 with Pi skipped.
+
+Deployment `https://226ac57b.frc-attendance-dashboard.pages.dev` makes Calendar the default Meetings view, moves the full scheduled-meetings table to an All Meetings tab, moves add/edit controls to an Add Meeting/Edit Meeting tab, and keeps selected meeting details with edit/delete controls in the calendar view. Production Worker/dashboard smoke passed on 2026-08-05 with Pi skipped.
 
 The dashboard login UI follows the same boundary: when `VITE_GOOGLE_CLIENT_ID` is configured, it shows Google sign-in and a production notice that email-only local login is disabled. The email-only form is rendered only for local development builds with no Google client ID.
 
