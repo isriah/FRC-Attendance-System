@@ -5,7 +5,7 @@
 Current production API:
 
 - Worker URL: `https://frc-attendance-api.frc-attendance.workers.dev`
-- Latest deployed Worker version: `feac70c2-3656-453d-af06-2a434818a827`
+- Latest deployed Worker version: `51c04831-30ac-4101-a693-c67bacbf693b`
 - D1 database: `frc-attendance`
 - D1 database ID: `c02c0ca8-033b-435f-ae21-2d8f3b203b22`
 - Applied remote migrations: `0001_initial.sql` through `0005_student_email.sql`
@@ -16,7 +16,7 @@ Current production dashboard:
 
 - Cloudflare Pages project: `frc-attendance-dashboard`
 - Pages URL: `https://frc-attendance-dashboard.pages.dev`
-- Latest verified deployment: `https://1e14595e.frc-attendance-dashboard.pages.dev`
+- Latest verified deployment: `https://7ac9ef54.frc-attendance-dashboard.pages.dev`
 - API base URL baked into the uploaded Vite build: `https://frc-attendance-api.frc-attendance.workers.dev`
 - Google OAuth client ID baked into the uploaded Vite build: `180849199739-v04bktp7rfmimgjpvohmq7pinrrpr337.apps.googleusercontent.com`
 
@@ -172,6 +172,8 @@ Deployment `https://226ac57b.frc-attendance-dashboard.pages.dev` makes Calendar 
 Deployment `https://ee7ef476.frc-attendance-dashboard.pages.dev` makes absent members explicit in selected meeting details, with required-meeting absence counts, loading and empty states, and optional-meeting present-only guidance. Production Worker/dashboard smoke passed on 2026-08-06 with Pi skipped.
 
 Deployment `https://1e14595e.frc-attendance-dashboard.pages.dev` adds database-backed dashboard admin management, optional roster member emails, dashboard Themed/Light/Dark modes, improved vertical spacing, and compact human-readable meeting detail tables. Worker version `feac70c2-3656-453d-af06-2a434818a827` applied remote D1 migration `0005_student_email.sql` and authorizes active `admin_users` emails alongside bootstrap env allowlist/domain access. Production Worker/dashboard smoke passed on 2026-08-06 with Pi skipped.
+
+Deployment `https://7ac9ef54.frc-attendance-dashboard.pages.dev` renames product-facing roster people from students to members across dashboard labels, API response contracts, kiosk sync payloads, reports, exports, scripts, and docs. Worker version `51c04831-30ac-4101-a693-c67bacbf693b` adds `/admin/members` while retaining `/admin/students`, `studentId`, `--student-id`, and physical `students.student_id` storage compatibility names. No new D1 migration was required. Production Worker/dashboard smoke passed on 2026-08-10 with Pi skipped.
 
 The dashboard login UI follows the same boundary: when `VITE_GOOGLE_CLIENT_ID` is configured, it shows Google sign-in and a production notice that email-only local login is disabled. The email-only form is rendered only for local development builds with no Google client ID.
 
