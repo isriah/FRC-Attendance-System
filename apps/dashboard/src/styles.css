@@ -347,7 +347,39 @@ textarea {
 }
 
 .meeting-table {
-  min-width: 860px;
+  min-width: 760px;
+}
+
+.meeting-table th:first-child,
+.meeting-table td:first-child {
+  width: 40px;
+  text-align: center;
+}
+
+.bulk-actions,
+.bulk-edit-form {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.bulk-actions {
+  margin-bottom: 12px;
+}
+
+.bulk-edit-form {
+  padding: 12px;
+  margin-bottom: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--primary-bg);
+}
+
+.bulk-edit-form input,
+.bulk-edit-form select {
+  max-width: 100%;
 }
 
 .meeting-tabs {

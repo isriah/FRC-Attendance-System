@@ -196,6 +196,12 @@ const server = createServer(async (request, response) => {
       return;
     }
 
+    if (request.method === "POST" && request.url === "/admin/meetings/bulk-delete") {
+      const body = await readBody<BulkScheduledMeetingDeleteInput>(request);
+      sendJson(response, 200, bulkDeleteScheduledMeetings(body));
+      return;
+    }
+
     const adminMeeting = request.url?.match(/^\/admin\/meetings\/([^/]+)$/);
     if (adminMeeting && request.method === "PUT") {
       const body = await readBody<ScheduledMeetingInput>(request);
@@ -566,6 +572,19 @@ function deleteScheduledMeeting(meetingId: string) {
   db.prepare("DELETE FROM scheduled_meetings WHERE id = ?").run(meetingId);
 }
 
+function bulkDeleteScheduledMeetings(input: BulkScheduledMeetingDeleteInput) {
+  const meetingIds = requireMeetingIds(input.meetingIds);
+  const deleteMeeting = db.prepare("DELETE FROM scheduled_meetings WHERE id = ?");
+  const deleteMany = db.transaction((ids: string[]) => {
+    let deleted = 0;
+    for (const meetingId of ids) {
+      deleted += deleteMeeting.run(meetingId).changes;
+    }
+    return deleted;
+  });
+  return { deleted: deleteMany(meetingIds) };
+}
+
 function normalizeMeetingInput(input: ScheduledMeetingInput): Omit<ScheduledMeeting, "id" | "createdAt" | "updatedAt"> {
   const meetingDate = requireIsoDate(input.meetingDate, "meetingDate");
   const title = requireNonEmptyString(input.title, "title");
@@ -601,6 +620,13 @@ function optionalTrimmedString(value: unknown): string | undefined {
   if (typeof value !== "string") throw httpError(400, "notes must be a string");
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function requireMeetingIds(value: unknown): string[] {
+  if (!Array.isArray(value)) throw httpError(400, "meetingIds must be an array");
+  const meetingIds = value.map((meetingId) => requireNonEmptyString(meetingId, "meetingId"));
+  if (meetingIds.length === 0) throw httpError(400, "Select at least one scheduled meeting");
+  return [...new Set(meetingIds)];
 }
 
 function getScheduledMeetingRow(meetingId: string): ScheduledMeetingRow | undefined {
@@ -1524,6 +1550,10 @@ interface ScheduledMeetingInput {
   startsAt?: unknown;
   endsAt?: unknown;
   notes?: unknown;
+}
+
+interface BulkScheduledMeetingDeleteInput {
+  meetingIds?: unknown;
 }
 
 interface DbScanEvent {

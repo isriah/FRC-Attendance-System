@@ -87,6 +87,18 @@ interface MeetingFormState {
   weekdays: number[];
 }
 
+interface BulkMeetingEditState {
+  titleEnabled: boolean;
+  title: string;
+  requiredEnabled: boolean;
+  required: boolean;
+  timesEnabled: boolean;
+  startTime: string;
+  endTime: string;
+  notesEnabled: boolean;
+  notes: string;
+}
+
 const defaultMeetingTitle = "Regular Meeting";
 const defaultMeetingStartTime = "15:00";
 const defaultMeetingEndTime = "17:30";
@@ -710,8 +722,13 @@ function Meetings({ session }: { session: DashboardSession }) {
   const [message, setMessage] = useState<{ kind: "success" | "error"; text: string }>();
   const [saving, setSaving] = useState(false);
   const [selectedMeetingDate, setSelectedMeetingDate] = useState("");
+  const [selectedMeetingIds, setSelectedMeetingIds] = useState<string[]>([]);
+  const [bulkEditState, setBulkEditState] = useState<BulkMeetingEditState>(emptyBulkMeetingEdit());
+  const [bulkEditing, setBulkEditing] = useState(false);
   const [calendarMonth, setCalendarMonth] = useState("");
   const meetings = data?.meetings ?? [];
+  const selectedMeetings = meetings.filter((meeting) => selectedMeetingIds.includes(meeting.id));
+  const allMeetingsSelected = meetings.length > 0 && selectedMeetingIds.length === meetings.length;
   const meetingSummaryRows = meetingSummary?.meetings ?? [];
   const meetingSummaryByDate = new Map(meetingSummaryRows.map((meeting) => [meeting.meetingDate, meeting]));
   const selectedMeeting = meetings.find((meeting) => meeting.meetingDate === selectedMeetingDate);
@@ -740,6 +757,10 @@ function Meetings({ session }: { session: DashboardSession }) {
     if (!calendarMonth && defaultMeeting) setCalendarMonth(defaultMeeting.meetingDate.slice(0, 7));
     if ((!selectedMeetingDate || !selectedMeetingExists) && defaultMeeting) setSelectedMeetingDate(defaultMeeting.meetingDate);
   }, [calendarMonth, meetings, selectedMeetingDate]);
+
+  useEffect(() => {
+    setSelectedMeetingIds((ids) => ids.filter((id) => meetings.some((meeting) => meeting.id === id)));
+  }, [meetings]);
 
   async function submitMeeting(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -830,6 +851,84 @@ function Meetings({ session }: { session: DashboardSession }) {
     } finally {
       setSaving(false);
     }
+  }
+
+  async function bulkDeleteMeetings() {
+    if (selectedMeetings.length === 0) return;
+    if (!window.confirm(`Delete ${selectedMeetings.length} selected meetings? Attendance sessions already recorded for those dates will stay in the system.`)) return;
+    setSaving(true);
+    setMessage(undefined);
+    try {
+      const result = await apiPost<{ deleted: number }>("/admin/meetings/bulk-delete", { meetingIds: selectedMeetingIds }, session);
+      setMessage({ kind: "success", text: `Deleted ${pluralize(result.deleted, "meeting")}.` });
+      if (selectedMeetings.some((meeting) => meeting.meetingDate === selectedMeetingDate)) setSelectedMeetingDate("");
+      if (editingMeeting && selectedMeetingIds.includes(editingMeeting.id)) {
+        setEditingMeeting(undefined);
+        setFormState(emptyMeetingForm());
+      }
+      setSelectedMeetingIds([]);
+      reload();
+      reloadMeetingSummary();
+    } catch (err) {
+      setMessage({ kind: "error", text: friendlyDashboardError(err) });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function bulkEditMeetings(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (selectedMeetings.length === 0) return;
+    if (!bulkEditState.titleEnabled && !bulkEditState.requiredEnabled && !bulkEditState.timesEnabled && !bulkEditState.notesEnabled) {
+      setMessage({ kind: "error", text: "Choose at least one field to update." });
+      return;
+    }
+    if (bulkEditState.titleEnabled && !bulkEditState.title.trim()) {
+      setMessage({ kind: "error", text: "Bulk title cannot be blank." });
+      return;
+    }
+    if (bulkEditState.timesEnabled && bulkEditState.startTime && bulkEditState.endTime && bulkEditState.endTime <= bulkEditState.startTime) {
+      setMessage({ kind: "error", text: "Meeting end time must be after the start time." });
+      return;
+    }
+    setSaving(true);
+    setMessage(undefined);
+    try {
+      const updatedDates: string[] = [];
+      for (const meeting of selectedMeetings) {
+        const nextTitle = bulkEditState.titleEnabled ? bulkEditState.title : meeting.title;
+        const nextRequired = bulkEditState.requiredEnabled ? bulkEditState.required : meeting.required;
+        const nextStartTime = bulkEditState.timesEnabled ? bulkEditState.startTime : localTimeInputValue(meeting.startsAt);
+        const nextEndTime = bulkEditState.timesEnabled ? bulkEditState.endTime : localTimeInputValue(meeting.endsAt);
+        const nextNotes = bulkEditState.notesEnabled ? bulkEditState.notes : meeting.notes ?? "";
+        await apiPut<ScheduledMeeting>(`/admin/meetings/${encodeURIComponent(meeting.id)}`, {
+          meetingDate: meeting.meetingDate,
+          title: nextTitle.trim(),
+          required: nextRequired,
+          startsAt: nextStartTime ? localDateAndTimeToIso(meeting.meetingDate, nextStartTime) : undefined,
+          endsAt: nextEndTime ? localDateAndTimeToIso(meeting.meetingDate, nextEndTime) : undefined,
+          notes: nextNotes.trim() || undefined
+        }, session);
+        updatedDates.push(meeting.meetingDate);
+      }
+      setMessage({ kind: "success", text: `Updated ${pluralize(updatedDates.length, "meeting")}.` });
+      setBulkEditing(false);
+      setBulkEditState(emptyBulkMeetingEdit());
+      reload();
+      reloadMeetingSummary();
+    } catch (err) {
+      setMessage({ kind: "error", text: friendlyDashboardError(err) });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function toggleMeetingSelection(meetingId: string, selected: boolean) {
+    setSelectedMeetingIds((ids) => selected ? [...new Set([...ids, meetingId])] : ids.filter((id) => id !== meetingId));
+  }
+
+  function toggleAllMeetingSelection(selected: boolean) {
+    setSelectedMeetingIds(selected ? meetings.map((meeting) => meeting.id) : []);
   }
 
   function startEditing(meeting: ScheduledMeeting) {
@@ -971,51 +1070,109 @@ function Meetings({ session }: { session: DashboardSession }) {
 
         {meetingViewTab === "all" ? (
           meetings.length > 0 ? (
-            <div className="meeting-table-wrap">
-            <table className="meeting-table">
-              <thead>
-                <tr>
-                  {["date", "title", "attendance", "present", "absent", "time", "notes", "actions"].map((column) => <th key={column}>{column}</th>)}
-                </tr>
-              </thead>
-              <tbody>
-                {meetings.map((meeting) => {
-                  const summary = meetingSummaryByDate.get(meeting.meetingDate);
-                  return (
-                  <tr
-                    key={meeting.id}
-                    className={selectedMeetingDate === meeting.meetingDate ? "selected-row" : undefined}
-                    tabIndex={0}
-                    onClick={() => setSelectedMeetingDate(meeting.meetingDate)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" || event.key === " ") setSelectedMeetingDate(meeting.meetingDate);
-                    }}
-                  >
-                    <td><button className="link-button" type="button" onClick={() => setSelectedMeetingDate(meeting.meetingDate)}>{meeting.meetingDate}</button></td>
-                    <td>{meeting.title}</td>
-                    <td><MeetingRequirementBadge required={meeting.required} /></td>
-                    <td>{summary ? summary.presentCount : "..."}</td>
-                    <td>{meeting.required ? summary?.absentCount ?? "..." : "N/A"}</td>
-                    <td>{meetingTimeRange(meeting)}</td>
-                    <td>{meeting.notes ?? ""}</td>
-                    <td>
-                      <div className="kiosk-actions">
-                        <button type="button" onClick={(event) => {
-                          event.stopPropagation();
-                          startEditing(meeting);
-                        }} disabled={saving}>Edit</button>
-                        <button type="button" onClick={(event) => {
-                          event.stopPropagation();
-                          deleteMeeting(meeting);
-                        }} disabled={saving}>Delete</button>
-                      </div>
-                    </td>
-                  </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+            <>
+              <div className="bulk-actions">
+                <span>{pluralize(selectedMeetingIds.length, "meeting")} selected</span>
+                <button type="button" disabled={saving || selectedMeetingIds.length === 0} onClick={() => setBulkEditing((value) => !value)}>
+                  {bulkEditing ? "Hide bulk edit" : "Bulk edit"}
+                </button>
+                <button type="button" disabled={saving || selectedMeetingIds.length === 0} onClick={bulkDeleteMeetings}>Bulk delete</button>
+                <button type="button" disabled={saving || selectedMeetingIds.length === 0} onClick={() => setSelectedMeetingIds([])}>Clear selection</button>
+              </div>
+              {bulkEditing ? (
+                <form className="bulk-edit-form" onSubmit={bulkEditMeetings}>
+                  <label className="inline-check">
+                    <input type="checkbox" checked={bulkEditState.titleEnabled} onChange={(event) => setBulkEditState({ ...bulkEditState, titleEnabled: event.target.checked })} />
+                    Title
+                  </label>
+                  <input value={bulkEditState.title} onChange={(event) => setBulkEditState({ ...bulkEditState, title: event.target.value })} disabled={!bulkEditState.titleEnabled} placeholder={defaultMeetingTitle} />
+                  <label className="inline-check">
+                    <input type="checkbox" checked={bulkEditState.requiredEnabled} onChange={(event) => setBulkEditState({ ...bulkEditState, requiredEnabled: event.target.checked })} />
+                    Required
+                  </label>
+                  <select value={bulkEditState.required ? "required" : "optional"} onChange={(event) => setBulkEditState({ ...bulkEditState, required: event.target.value === "required" })} disabled={!bulkEditState.requiredEnabled}>
+                    <option value="required">Required attendance</option>
+                    <option value="optional">Optional attendance</option>
+                  </select>
+                  <label className="inline-check">
+                    <input type="checkbox" checked={bulkEditState.timesEnabled} onChange={(event) => setBulkEditState({ ...bulkEditState, timesEnabled: event.target.checked })} />
+                    Times
+                  </label>
+                  <input value={bulkEditState.startTime} onChange={(event) => setBulkEditState({ ...bulkEditState, startTime: event.target.value })} disabled={!bulkEditState.timesEnabled} type="time" aria-label="Bulk start time" />
+                  <input value={bulkEditState.endTime} onChange={(event) => setBulkEditState({ ...bulkEditState, endTime: event.target.value })} disabled={!bulkEditState.timesEnabled} type="time" aria-label="Bulk end time" />
+                  <label className="inline-check">
+                    <input type="checkbox" checked={bulkEditState.notesEnabled} onChange={(event) => setBulkEditState({ ...bulkEditState, notesEnabled: event.target.checked })} />
+                    Notes
+                  </label>
+                  <input value={bulkEditState.notes} onChange={(event) => setBulkEditState({ ...bulkEditState, notes: event.target.value })} disabled={!bulkEditState.notesEnabled} placeholder="Optional context" />
+                  <button disabled={saving || selectedMeetingIds.length === 0}>{saving ? "Saving..." : `Apply to ${selectedMeetingIds.length}`}</button>
+                </form>
+              ) : null}
+              <div className="meeting-table-wrap">
+                <table className="meeting-table">
+                  <thead>
+                    <tr>
+                      <th>
+                        <input
+                          type="checkbox"
+                          aria-label="Select all meetings"
+                          checked={allMeetingsSelected}
+                          onChange={(event) => toggleAllMeetingSelection(event.target.checked)}
+                        />
+                      </th>
+                      {["date", "title", "attendance", "present", "absent", "time", "notes", "actions"].map((column) => <th key={column}>{column}</th>)}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {meetings.map((meeting) => {
+                      const summary = meetingSummaryByDate.get(meeting.meetingDate);
+                      const selectedForBulk = selectedMeetingIds.includes(meeting.id);
+                      return (
+                      <tr
+                        key={meeting.id}
+                        className={selectedMeetingDate === meeting.meetingDate ? "selected-row" : undefined}
+                        tabIndex={0}
+                        onClick={() => setSelectedMeetingDate(meeting.meetingDate)}
+                        onKeyDown={(event) => {
+                          if (event.target instanceof HTMLElement && event.target.closest("button,input,select,textarea")) return;
+                          if (event.key === "Enter" || event.key === " ") setSelectedMeetingDate(meeting.meetingDate);
+                        }}
+                      >
+                        <td>
+                          <input
+                            type="checkbox"
+                            aria-label={`Select ${meeting.title} on ${meeting.meetingDate}`}
+                            checked={selectedForBulk}
+                            onClick={(event) => event.stopPropagation()}
+                            onChange={(event) => toggleMeetingSelection(meeting.id, event.target.checked)}
+                          />
+                        </td>
+                        <td><button className="link-button" type="button" onClick={() => setSelectedMeetingDate(meeting.meetingDate)}>{meeting.meetingDate}</button></td>
+                        <td>{meeting.title}</td>
+                        <td><MeetingRequirementBadge required={meeting.required} /></td>
+                        <td>{summary ? summary.presentCount : "..."}</td>
+                        <td>{meeting.required ? summary?.absentCount ?? "..." : "N/A"}</td>
+                        <td>{meetingTimeRange(meeting)}</td>
+                        <td>{meeting.notes ?? ""}</td>
+                        <td>
+                          <div className="kiosk-actions">
+                            <button type="button" onClick={(event) => {
+                              event.stopPropagation();
+                              startEditing(meeting);
+                            }} disabled={saving}>Edit</button>
+                            <button type="button" onClick={(event) => {
+                              event.stopPropagation();
+                              deleteMeeting(meeting);
+                            }} disabled={saving}>Delete</button>
+                          </div>
+                        </td>
+                      </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
           ) : <p className="empty-state">No scheduled meetings yet.</p>
         ) : null}
 
@@ -1660,6 +1817,20 @@ function emptyMeetingForm(): MeetingFormState {
     startDate: today,
     endDate: today,
     weekdays: [weekdayForIsoDate(today)]
+  };
+}
+
+function emptyBulkMeetingEdit(): BulkMeetingEditState {
+  return {
+    titleEnabled: false,
+    title: defaultMeetingTitle,
+    requiredEnabled: false,
+    required: true,
+    timesEnabled: false,
+    startTime: defaultMeetingStartTime,
+    endTime: defaultMeetingEndTime,
+    notesEnabled: false,
+    notes: ""
   };
 }
 

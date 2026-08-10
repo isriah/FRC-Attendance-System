@@ -86,7 +86,47 @@ describe("scheduled meeting admin API", () => {
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ error: "endsAt must be on meetingDate" });
   });
+
+  it("bulk deletes selected scheduled meetings without touching unselected meetings", async () => {
+    const env = createTestEnv();
+
+    const first = await createMeeting(env, "2026-01-02", "Practice 1");
+    const second = await createMeeting(env, "2026-01-03", "Practice 2");
+    await createMeeting(env, "2026-01-04", "Practice 3");
+
+    const deleted = await request(env, "POST", "/admin/meetings/bulk-delete", {
+      meetingIds: [first.id, second.id, first.id]
+    });
+
+    expect(deleted.status).toBe(200);
+    expect(await deleted.json()).toEqual({ deleted: 2 });
+
+    const afterDelete = await request(env, "GET", "/admin/meetings");
+    expect(await afterDelete.json()).toMatchObject({
+      meetings: [{
+        meetingDate: "2026-01-04",
+        title: "Practice 3"
+      }]
+    });
+  });
+
+  it("rejects empty bulk delete selections", async () => {
+    const env = createTestEnv();
+
+    const response = await request(env, "POST", "/admin/meetings/bulk-delete", {
+      meetingIds: []
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "Select at least one scheduled meeting" });
+  });
 });
+
+async function createMeeting(env: Env, meetingDate: string, title: string) {
+  const response = await request(env, "POST", "/admin/meetings", { meetingDate, title });
+  expect(response.status).toBe(201);
+  return response.json() as Promise<{ id: string; meetingDate: string; title: string }>;
+}
 
 function createTestEnv(): Env {
   const sqlite = new Database(":memory:");

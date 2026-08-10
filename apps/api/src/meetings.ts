@@ -10,6 +10,10 @@ export interface ScheduledMeetingInput {
   notes?: unknown;
 }
 
+export interface BulkScheduledMeetingDeleteInput {
+  meetingIds?: unknown;
+}
+
 export async function listScheduledMeetings(env: Env): Promise<ScheduledMeeting[]> {
   const rows = await env.DB.prepare(`
     SELECT id, meeting_date, title, required, starts_at, ends_at, notes, created_at, updated_at
@@ -92,6 +96,16 @@ export async function deleteScheduledMeeting(env: Env, meetingId: string): Promi
   await env.DB.prepare("DELETE FROM scheduled_meetings WHERE id = ?").bind(meetingId).run();
 }
 
+export async function bulkDeleteScheduledMeetings(env: Env, input: BulkScheduledMeetingDeleteInput): Promise<{ deleted: number }> {
+  const meetingIds = requireMeetingIds(input.meetingIds);
+  let deleted = 0;
+  for (const meetingId of meetingIds) {
+    const result = await env.DB.prepare("DELETE FROM scheduled_meetings WHERE id = ?").bind(meetingId).run() as { changes?: number; meta?: { changes?: number } };
+    deleted += result.meta?.changes ?? result.changes ?? 0;
+  }
+  return { deleted };
+}
+
 function normalizeMeetingInput(input: ScheduledMeetingInput, timeZone: string): Omit<ScheduledMeeting, "id" | "createdAt" | "updatedAt"> {
   const meetingDate = requireIsoDate(input.meetingDate, "meetingDate");
   const title = requireNonEmptyString(input.title, "title");
@@ -138,6 +152,17 @@ function optionalTrimmedString(value: unknown): string | undefined {
   if (typeof value !== "string") throw Object.assign(new Error("notes must be a string"), { status: 400 });
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function requireMeetingIds(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    throw Object.assign(new Error("meetingIds must be an array"), { status: 400 });
+  }
+  const meetingIds = value.map((meetingId) => requireNonEmptyString(meetingId, "meetingId"));
+  if (meetingIds.length === 0) {
+    throw Object.assign(new Error("Select at least one scheduled meeting"), { status: 400 });
+  }
+  return [...new Set(meetingIds)];
 }
 
 async function getScheduledMeetingRow(env: Env, meetingId: string) {

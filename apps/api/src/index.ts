@@ -5,7 +5,7 @@ import type { Env } from "./env";
 import { buildLegacySheetExport } from "./export";
 import { errorResponse, json, noContent, optionsResponse, readJson } from "./http";
 import { claimPendingKioskCommands, completeKioskCommand, createKioskCommand, listRecentKioskCommands, requireKioskCommandAction } from "./kioskCommands";
-import { createScheduledMeeting, deleteScheduledMeeting, listScheduledMeetings, updateScheduledMeeting, type ScheduledMeetingInput } from "./meetings";
+import { bulkDeleteScheduledMeetings, createScheduledMeeting, deleteScheduledMeeting, listScheduledMeetings, updateScheduledMeeting, type BulkScheduledMeetingDeleteInput, type ScheduledMeetingInput } from "./meetings";
 import { buildAttendanceSessionReport, buildMeetingAbsenceReport, buildMeetingSummaryReport, buildMemberAttendanceReport, buildPresenceReport, buildRosterAttendanceSummary, reportDateRangeFromSearchParams } from "./reports";
 import { listActiveRoster, syncRoster, updateStudentEmail, type RosterMemberInput } from "./roster";
 
@@ -125,6 +125,12 @@ export default {
         await requireAdmin(request, env);
         const body = await readJson<ScheduledMeetingInput>(request);
         return json(await createScheduledMeeting(env, body), { status: 201 });
+      }
+
+      if (route === "POST /admin/meetings/bulk-delete") {
+        await requireAdmin(request, env);
+        const body = await readJson<BulkScheduledMeetingDeleteInput>(request);
+        return json(await bulkDeleteScheduledMeetings(env, body));
       }
 
       const adminMeeting = url.pathname.match(/^\/admin\/meetings\/([^/]+)$/);
