@@ -254,6 +254,14 @@ textarea {
   font-family: inherit;
 }
 
+.meeting-time-fields {
+  display: grid;
+  grid-column: span 2;
+  grid-template-columns: repeat(2, minmax(120px, 1fr));
+  gap: 12px;
+  min-width: 0;
+}
+
 .required-toggle {
   margin-bottom: 0;
   align-self: end;
@@ -917,6 +925,11 @@ pre {
   .admin-user-form,
   .grid,
   .meeting-detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .meeting-time-fields {
+    grid-column: 1 / -1;
     grid-template-columns: 1fr;
   }
 

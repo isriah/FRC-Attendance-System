@@ -967,14 +967,16 @@ function Meetings({ session }: { session: DashboardSession }) {
         <input type="checkbox" checked={formState.required} onChange={(event) => setFormState({ ...formState, required: event.target.checked })} />
         Required attendance
       </label>
-      <label className="field-label">
-        <span>Start time</span>
-        <input value={formState.startTime} onChange={(event) => setFormState({ ...formState, startTime: event.target.value })} type="time" required />
-      </label>
-      <label className="field-label">
-        <span>End time</span>
-        <input value={formState.endTime} onChange={(event) => setFormState({ ...formState, endTime: event.target.value })} type="time" required />
-      </label>
+      <div className="meeting-time-fields">
+        <label className="field-label">
+          <span>Start time</span>
+          <input value={formState.startTime} onChange={(event) => setFormState({ ...formState, startTime: event.target.value })} type="time" required />
+        </label>
+        <label className="field-label">
+          <span>End time</span>
+          <input value={formState.endTime} onChange={(event) => setFormState({ ...formState, endTime: event.target.value })} type="time" required />
+        </label>
+      </div>
       {editingMeeting ? (
         <label className="field-label notes-field">
           <span>Notes</span>
@@ -1035,7 +1037,7 @@ function Meetings({ session }: { session: DashboardSession }) {
         <div className="meeting-tabs" role="tablist" aria-label="Meeting views">
           <button type="button" role="tab" aria-selected={meetingViewTab === "calendar"} className={meetingViewTab === "calendar" ? "active" : ""} onClick={() => setMeetingViewTab("calendar")}>Calendar</button>
           <button type="button" role="tab" aria-selected={meetingViewTab === "all"} className={meetingViewTab === "all" ? "active" : ""} onClick={() => setMeetingViewTab("all")}>All Meetings</button>
-          <button type="button" role="tab" aria-selected={meetingViewTab === "form"} className={meetingViewTab === "form" ? "active" : ""} onClick={startCreating}>{editingMeeting ? "Edit Meeting" : "Add Meeting"}</button>
+          <button type="button" role="tab" aria-selected={meetingViewTab === "form"} aria-disabled={meetingViewTab === "form"} className={meetingViewTab === "form" ? "active" : ""} onClick={meetingViewTab === "form" ? undefined : startCreating}>{editingMeeting ? "Edit Meeting" : "Add Meeting"}</button>
         </div>
         {message ? <p className={`notice ${message.kind}`}>{message.text}</p> : null}
         {error ? <p className="error">{error}</p> : null}
