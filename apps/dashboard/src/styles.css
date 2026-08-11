@@ -370,6 +370,7 @@ textarea {
 }
 
 .bulk-edit-form {
+  align-items: stretch;
   padding: 12px;
   margin-bottom: 12px;
   border: 1px solid var(--border-color);
@@ -377,8 +378,35 @@ textarea {
   background: var(--primary-bg);
 }
 
+.bulk-edit-row {
+  display: grid;
+  grid-template-columns: 112px minmax(160px, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-width: min(100%, 320px);
+}
+
+.bulk-edit-toggle {
+  min-height: 38px;
+  margin-bottom: 0;
+  padding: 0 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--surface-bg);
+  color: var(--text-color);
+  font-weight: 600;
+}
+
+.bulk-edit-time-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(92px, 1fr));
+  gap: 8px;
+  min-width: 0;
+}
+
 .bulk-edit-form input,
-.bulk-edit-form select {
+.bulk-edit-form select,
+.bulk-edit-time-fields {
   max-width: 100%;
 }
 
@@ -889,6 +917,10 @@ pre {
   .admin-user-form,
   .grid,
   .meeting-detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .bulk-edit-row {
     grid-template-columns: 1fr;
   }
 

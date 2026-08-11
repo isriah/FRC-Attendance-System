@@ -1081,30 +1081,40 @@ function Meetings({ session }: { session: DashboardSession }) {
               </div>
               {bulkEditing ? (
                 <form className="bulk-edit-form" onSubmit={bulkEditMeetings}>
-                  <label className="inline-check">
-                    <input type="checkbox" checked={bulkEditState.titleEnabled} onChange={(event) => setBulkEditState({ ...bulkEditState, titleEnabled: event.target.checked })} />
-                    Title
-                  </label>
-                  <input value={bulkEditState.title} onChange={(event) => setBulkEditState({ ...bulkEditState, title: event.target.value })} disabled={!bulkEditState.titleEnabled} placeholder={defaultMeetingTitle} />
-                  <label className="inline-check">
-                    <input type="checkbox" checked={bulkEditState.requiredEnabled} onChange={(event) => setBulkEditState({ ...bulkEditState, requiredEnabled: event.target.checked })} />
-                    Required
-                  </label>
-                  <select value={bulkEditState.required ? "required" : "optional"} onChange={(event) => setBulkEditState({ ...bulkEditState, required: event.target.value === "required" })} disabled={!bulkEditState.requiredEnabled}>
-                    <option value="required">Required attendance</option>
-                    <option value="optional">Optional attendance</option>
-                  </select>
-                  <label className="inline-check">
-                    <input type="checkbox" checked={bulkEditState.timesEnabled} onChange={(event) => setBulkEditState({ ...bulkEditState, timesEnabled: event.target.checked })} />
-                    Times
-                  </label>
-                  <input value={bulkEditState.startTime} onChange={(event) => setBulkEditState({ ...bulkEditState, startTime: event.target.value })} disabled={!bulkEditState.timesEnabled} type="time" aria-label="Bulk start time" />
-                  <input value={bulkEditState.endTime} onChange={(event) => setBulkEditState({ ...bulkEditState, endTime: event.target.value })} disabled={!bulkEditState.timesEnabled} type="time" aria-label="Bulk end time" />
-                  <label className="inline-check">
-                    <input type="checkbox" checked={bulkEditState.notesEnabled} onChange={(event) => setBulkEditState({ ...bulkEditState, notesEnabled: event.target.checked })} />
-                    Notes
-                  </label>
-                  <input value={bulkEditState.notes} onChange={(event) => setBulkEditState({ ...bulkEditState, notes: event.target.value })} disabled={!bulkEditState.notesEnabled} placeholder="Optional context" />
+                  <div className="bulk-edit-row">
+                    <label className="inline-check bulk-edit-toggle">
+                      <input type="checkbox" checked={bulkEditState.titleEnabled} onChange={(event) => setBulkEditState({ ...bulkEditState, titleEnabled: event.target.checked })} />
+                      Title
+                    </label>
+                    <input value={bulkEditState.title} onChange={(event) => setBulkEditState({ ...bulkEditState, title: event.target.value })} disabled={!bulkEditState.titleEnabled} placeholder={defaultMeetingTitle} />
+                  </div>
+                  <div className="bulk-edit-row">
+                    <label className="inline-check bulk-edit-toggle">
+                      <input type="checkbox" checked={bulkEditState.requiredEnabled} onChange={(event) => setBulkEditState({ ...bulkEditState, requiredEnabled: event.target.checked })} />
+                      Required
+                    </label>
+                    <select value={bulkEditState.required ? "required" : "optional"} onChange={(event) => setBulkEditState({ ...bulkEditState, required: event.target.value === "required" })} disabled={!bulkEditState.requiredEnabled}>
+                      <option value="required">Required attendance</option>
+                      <option value="optional">Optional attendance</option>
+                    </select>
+                  </div>
+                  <div className="bulk-edit-row">
+                    <label className="inline-check bulk-edit-toggle">
+                      <input type="checkbox" checked={bulkEditState.timesEnabled} onChange={(event) => setBulkEditState({ ...bulkEditState, timesEnabled: event.target.checked })} />
+                      Times
+                    </label>
+                    <div className="bulk-edit-time-fields">
+                      <input value={bulkEditState.startTime} onChange={(event) => setBulkEditState({ ...bulkEditState, startTime: event.target.value })} disabled={!bulkEditState.timesEnabled} type="time" aria-label="Bulk start time" />
+                      <input value={bulkEditState.endTime} onChange={(event) => setBulkEditState({ ...bulkEditState, endTime: event.target.value })} disabled={!bulkEditState.timesEnabled} type="time" aria-label="Bulk end time" />
+                    </div>
+                  </div>
+                  <div className="bulk-edit-row">
+                    <label className="inline-check bulk-edit-toggle">
+                      <input type="checkbox" checked={bulkEditState.notesEnabled} onChange={(event) => setBulkEditState({ ...bulkEditState, notesEnabled: event.target.checked })} />
+                      Notes
+                    </label>
+                    <input value={bulkEditState.notes} onChange={(event) => setBulkEditState({ ...bulkEditState, notes: event.target.value })} disabled={!bulkEditState.notesEnabled} placeholder="Optional context" />
+                  </div>
                   <button disabled={saving || selectedMeetingIds.length === 0}>{saving ? "Saving..." : `Apply to ${selectedMeetingIds.length}`}</button>
                 </form>
               ) : null}
