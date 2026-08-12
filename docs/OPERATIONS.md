@@ -5,7 +5,7 @@
 Current production API:
 
 - Worker URL: `https://frc-attendance-api.frc-attendance.workers.dev`
-- Latest deployed Worker version: `312ce5fb-729e-4124-9b33-411a56e0e9af`
+- Latest deployed Worker version: `0262c023-b7c5-4dfc-8791-d4f3e67f9807`
 - D1 database: `frc-attendance`
 - D1 database ID: `c02c0ca8-033b-435f-ae21-2d8f3b203b22`
 - Applied remote migrations: `0001_initial.sql` through `0005_student_email.sql`
@@ -16,7 +16,7 @@ Current production dashboard:
 
 - Cloudflare Pages project: `frc-attendance-dashboard`
 - Pages URL: `https://frc-attendance-dashboard.pages.dev`
-- Latest verified deployment: `https://3cd95a98.frc-attendance-dashboard.pages.dev`
+- Latest verified deployment: `https://7c2b740e.frc-attendance-dashboard.pages.dev`
 - API base URL baked into the uploaded Vite build: `https://frc-attendance-api.frc-attendance.workers.dev`
 - Google OAuth client ID baked into the uploaded Vite build: `180849199739-v04bktp7rfmimgjpvohmq7pinrrpr337.apps.googleusercontent.com`
 
@@ -185,6 +185,8 @@ Worker version `312ce5fb-729e-4124-9b33-411a56e0e9af` adds clearer member-facing
 
 Deployment `https://3cd95a98.frc-attendance-dashboard.pages.dev` adds roster-page attendance percentages per active member, using the existing roster attendance summary report so required scheduled meetings drive the percentage and optional meetings do not count against members. Production Worker/dashboard smoke and Pi-local roster pull smoke passed on 2026-08-12. Bench Pi update on 2026-08-12 pulled main through commit `ae727a92e4e8a143adff6b3e9ee10e608f48b1d1` and restarted `frc-dashboard-ui` and `frc-bench-api`; the Pi-local dashboard served at `http://192.168.0.154:5174` and included the roster attendance UI.
 
+Deployment `https://7c2b740e.frc-attendance-dashboard.pages.dev` adds member lifecycle management on the Roster page: Active Members, Deactivated Members, and Roster Import tabs; deactivate/reactivate actions that preserve history; and hard delete with typed `DELETE <Member ID>` confirmation for removing member-owned roster, attendance, event, and fingerprint mapping records while preserving dashboard admin users. Worker version `0262c023-b7c5-4dfc-8791-d4f3e67f9807` exposes the matching authenticated member lifecycle endpoints. No new D1 migration was required. Production Worker/dashboard smoke and Pi-local roster pull smoke passed on 2026-08-12. Bench Pi update on 2026-08-12 pulled main through commit `c6d409ec7bbd6b6e698d6f7919803a66c8f80c58` and restarted `frc-dashboard-ui` and `frc-bench-api`.
+
 The dashboard login UI follows the same boundary: when `VITE_GOOGLE_CLIENT_ID` is configured, it shows Google sign-in and a production notice that email-only local login is disabled. The email-only form is rendered only for local development builds with no Google client ID.
 
 For local development only, if no Google client ID is configured, the dashboard can send an `x-admin-email` header and the API will still enforce the configured allowlist.
@@ -324,7 +326,7 @@ The member Google Sheet remains authoritative for active members and stable Memb
 
 The API and dashboard expose member-facing roster/report fields as `memberId`. Existing D1 and kiosk SQLite tables/columns named `students` and `student_id` remain compatibility storage names and should not be migrated casually.
 
-Removed roster entries are deactivated in D1 rather than deleted.
+Removed roster entries are deactivated in D1 rather than deleted. The Roster page's hard-delete action is a separate explicit administration action with typed confirmation, intended only for records that should be permanently removed along with associated member-owned attendance/event/fingerprint mapping data.
 
 The production Worker also exposes active roster rows to authenticated kiosks at `GET /kiosk/roster`. This uses the kiosk bearer token, so the Pi can refresh its local bench SQLite roster without mentor D1 edits or copying data out of Cloudflare manually.
 

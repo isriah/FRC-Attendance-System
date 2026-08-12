@@ -36,6 +36,7 @@ At session start, agents should:
   - `docs/PI-SETUP.md` for Raspberry Pi services, display/browser autostart, UART, fingerprint hardware, or service restarts.
 - Prefer inspecting files, commit history, and deployed/local state directly over carrying forward a long chat transcript.
 - Keep each session focused on one discrete unit of work. If the next task is unrelated, start a fresh session with the short kickoff above.
+- When a director session is coordinating delegated child sessions, it should automatically review, merge, verify, push, deploy, update the Pi, smoke-test, document, and archive completed child work unless a real blocker appears: failed verification, destructive production data mutation, secrets/config uncertainty, or an unresolved product decision.
 - Do not paste full docs, AGENTS content, command logs, or broad project history into chat unless specifically needed. Put durable handoff notes in a small repo file instead.
 
 If richer continuity is needed, create or update a short handoff file such as `docs/CODEX-HANDOFF.md` with only:
@@ -80,6 +81,7 @@ npm --workspace <package> run <script>
 - API admin auth is configured for Google OAuth client `180849199739-v04bktp7rfmimgjpvohmq7pinrrpr337.apps.googleusercontent.com` with `isriahk@gmail.com` allowlisted.
 - Roster CSV sync currently expects `memberId,firstName,lastName`.
 - Roster `memberId` is stored internally as `students.student_id`.
+- Dashboard roster management defaults to active members, with separate tabs for deactivated member management and roster import. Deactivate/reactivate preserves attendance history; hard delete requires typed confirmation and removes associated member-owned attendance/event/fingerprint mapping rows without removing dashboard admin users.
 - Fingerprint enrollment is available from the dashboard roster tab.
 - Fingerprint templates remain local on the sensor. The kiosk SQLite DB stores slot-to-member mappings.
 - Kiosk scan acknowledgements cover known accepted scans, duplicates, unknown fingerprints, rejected/inactive members, and optional attendance summaries.
