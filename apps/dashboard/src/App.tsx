@@ -1234,7 +1234,7 @@ function Meetings({ session }: { session: DashboardSession }) {
   const { data, error, reload } = useApi<{ meetings: ScheduledMeeting[] }>("/admin/meetings", session);
   const [showUnscheduledAttendance, setShowUnscheduledAttendance] = useState(false);
   const meetingReportQuery = showUnscheduledAttendance ? "?includeUnscheduled=1" : "";
-  const { data: meetingSummary, error: meetingSummaryError, reload: reloadMeetingSummary } = useApi<{ meetings: MeetingSummaryReportRow[] }>(`/admin/reports/meetings${meetingReportQuery}`, session);
+  const { data: meetingSummary, error: meetingSummaryError, loading: meetingSummaryLoading, reload: reloadMeetingSummary } = useApi<{ meetings: MeetingSummaryReportRow[] }>(`/admin/reports/meetings${meetingReportQuery}`, session);
   const [meetingViewTab, setMeetingViewTab] = useState<MeetingViewTab>("calendar");
   const [editingMeeting, setEditingMeeting] = useState<ScheduledMeeting>();
   const [formState, setFormState] = useState<MeetingFormState>(emptyMeetingForm());
@@ -1655,6 +1655,8 @@ function Meetings({ session }: { session: DashboardSession }) {
                 meetings={meetings}
                 unscheduledSummaries={showUnscheduledAttendance ? unscheduledSummaries : []}
                 summariesByDate={meetingSummaryByDate}
+                summariesLoading={meetingSummaryLoading}
+                summariesUnavailable={Boolean(meetingSummaryError && !meetingSummary)}
                 selectedMeetingDate={selectedMeetingDate}
                 onMonthChange={setCalendarMonth}
                 onSelectMeeting={setSelectedMeetingDate}
@@ -1843,6 +1845,8 @@ function MeetingCalendar({
   meetings,
   unscheduledSummaries,
   summariesByDate,
+  summariesLoading,
+  summariesUnavailable,
   selectedMeetingDate,
   onMonthChange,
   onSelectMeeting
@@ -1851,6 +1855,8 @@ function MeetingCalendar({
   meetings: ScheduledMeeting[];
   unscheduledSummaries: MeetingSummaryReportRow[];
   summariesByDate: Map<string, MeetingSummaryReportRow>;
+  summariesLoading: boolean;
+  summariesUnavailable: boolean;
   selectedMeetingDate: string;
   onMonthChange: (month: string) => void;
   onSelectMeeting: (meetingDate: string) => void;
@@ -1888,7 +1894,7 @@ function MeetingCalendar({
                       onClick={() => onSelectMeeting(meeting.meetingDate)}
                     >
                       <span>{meeting.title}</span>
-                      <small>{summary ? `${summary.presentCount} present` : "loading"}</small>
+                      <small>{calendarMeetingSummaryLabel(meeting, summary, { loading: summariesLoading, unavailable: summariesUnavailable })}</small>
                     </button>
                   );
                 })}
@@ -2610,28 +2616,63 @@ function DataTable({ rows, columns, density = "regular" }: { rows: Array<Record<
 function useApi<T>(path: string, session: DashboardSession) {
   const [data, setData] = useState<T | undefined>();
   const [error, setError] = useState<string | undefined>();
+  const [loading, setLoading] = useState(true);
   const [nonce, setNonce] = useState(0);
   useEffect(() => {
+    let active = true;
     setError(undefined);
-    apiGet<T>(path, session).then(setData, (err) => setError(err instanceof Error ? err.message : String(err)));
+    setLoading(true);
+    apiGet<T>(path, session).then(
+      (result) => {
+        if (!active) return;
+        setData(result);
+      },
+      (err) => {
+        if (!active) return;
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    ).finally(() => {
+      if (active) setLoading(false);
+    });
+    return () => {
+      active = false;
+    };
   }, [path, session, nonce]);
-  return { data, error, reload: () => setNonce((value) => value + 1) };
+  return { data, error, loading, reload: () => setNonce((value) => value + 1) };
 }
 
 function useOptionalApi<T>(path: string | undefined, session: DashboardSession) {
   const [data, setData] = useState<T | undefined>();
   const [error, setError] = useState<string | undefined>();
+  const [loading, setLoading] = useState(false);
   const [nonce, setNonce] = useState(0);
   useEffect(() => {
     if (!path) {
       setData(undefined);
       setError(undefined);
+      setLoading(false);
       return;
     }
+    let active = true;
     setError(undefined);
-    apiGet<T>(path, session).then(setData, (err) => setError(err instanceof Error ? err.message : String(err)));
+    setLoading(true);
+    apiGet<T>(path, session).then(
+      (result) => {
+        if (!active) return;
+        setData(result);
+      },
+      (err) => {
+        if (!active) return;
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    ).finally(() => {
+      if (active) setLoading(false);
+    });
+    return () => {
+      active = false;
+    };
   }, [path, session, nonce]);
-  return { data, error, reload: () => setNonce((value) => value + 1) };
+  return { data, error, loading, reload: () => setNonce((value) => value + 1) };
 }
 
 function parseRosterCsv(text: string) {
@@ -2895,6 +2936,26 @@ function meetingTimeRange(meeting: Pick<ScheduledMeeting, "startsAt" | "endsAt">
   if (meeting.startsAt && meeting.endsAt) return `${formatTime(meeting.startsAt)} - ${formatTime(meeting.endsAt)}`;
   if (meeting.startsAt) return `Starts ${formatTime(meeting.startsAt)}`;
   return `Ends ${formatTime(meeting.endsAt)}`;
+}
+
+function calendarMeetingSummaryLabel(
+  meeting: ScheduledMeeting,
+  summary: MeetingSummaryReportRow | undefined,
+  reportState: { loading: boolean; unavailable: boolean }
+) {
+  if (summary) {
+    if (summary.required) return `${summary.presentCount} present, ${summary.absentCount} absent`;
+    return `${summary.presentCount} present`;
+  }
+  if (reportState.loading) return "Loading...";
+  if (reportState.unavailable) return "Report unavailable";
+  if (!isScheduledMeetingComplete(meeting)) return "Upcoming";
+  return meeting.required ? "No attendance yet" : "0 present";
+}
+
+function isScheduledMeetingComplete(meeting: Pick<ScheduledMeeting, "meetingDate" | "endsAt">) {
+  if (meeting.endsAt) return new Date(meeting.endsAt).getTime() <= Date.now();
+  return meeting.meetingDate <= localDateInputValue();
 }
 
 function notificationSummary(result: MeetingAbsenceNotificationResult) {
