@@ -115,6 +115,7 @@ npm --workspace <package> run <script>
 - Polish fingerprint administration by showing current slot mappings, auto-suggesting the next available slot, supporting delete/remap, and confirming before overwriting occupied slots.
 - Improve kiosk messaging with richer API-provided member messages, configurable attendance summary display, and clearer offline acknowledgements.
 - Backburnered: prepare for multi-kiosk operation with real kiosk token provisioning, per-kiosk status/sync health, enrollment visibility, and delayed sync tests.
+- Backburnered: email notifications for upcoming meetings, meeting changes, absence notices, or attendance digests. Member emails are currently roster metadata only and do not trigger notifications.
 - Focused report builder, scan acknowledgement/action derivation, and offline queue restart/reconnect tests are in place. Delayed multi-kiosk sync ordering is backburnered with multi-kiosk work.
 
 ## Verification Expectations
