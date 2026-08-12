@@ -864,6 +864,12 @@ pre {
   padding: 7px 9px;
 }
 
+.mapping-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .enrollment-list {
   display: grid;
   gap: 10px;

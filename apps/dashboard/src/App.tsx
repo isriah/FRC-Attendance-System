@@ -397,6 +397,17 @@ function Roster({ session }: { session: DashboardSession }) {
     }
   }
 
+  function startRemapEnrollment(enrollment: FingerprintEnrollment) {
+    setEnrollMemberId(enrollment.memberId);
+    setEnrollSlot(String(enrollment.slot));
+    setEnrollFingerLabel(enrollment.fingerLabel ?? "");
+    setConfirmOverwrite(false);
+    setEnrollMessage({
+      kind: "info",
+      text: `Slot ${enrollment.slot} is loaded for remapping. Check the replace confirmation before saving changes.`
+    });
+  }
+
   return (
     <>
       <section>
@@ -489,7 +500,7 @@ function Roster({ session }: { session: DashboardSession }) {
         {enrollMessage ? <p className={`notice ${enrollMessage.kind}`}>{enrollMessage.text}</p> : null}
         {enrollmentError ? <p className="error">{enrollmentError}</p> : null}
         {fingerprintEnrollmentAvailable ? (
-          <FingerprintEnrollmentTable enrollments={enrollments} onDelete={deleteEnrollment} deleting={enrolling} />
+          <FingerprintEnrollmentTable enrollments={enrollments} onDelete={deleteEnrollment} onRemap={startRemapEnrollment} busy={enrolling} />
         ) : null}
       </section>
       <Table title="Roster" error={error} rows={data?.members ?? []} columns={["memberId", "firstName", "lastName", "email", "active"]} />
@@ -676,7 +687,17 @@ function AdminUsers({ session }: { session: DashboardSession }) {
   );
 }
 
-function FingerprintEnrollmentTable({ enrollments, onDelete, deleting }: { enrollments: FingerprintEnrollment[]; onDelete: (slot: number) => void; deleting: boolean }) {
+function FingerprintEnrollmentTable({
+  enrollments,
+  onDelete,
+  onRemap,
+  busy
+}: {
+  enrollments: FingerprintEnrollment[];
+  onDelete: (slot: number) => void;
+  onRemap: (enrollment: FingerprintEnrollment) => void;
+  busy: boolean;
+}) {
   if (enrollments.length === 0) {
     return (
       <div className="enrollment-list">
@@ -691,7 +712,7 @@ function FingerprintEnrollmentTable({ enrollments, onDelete, deleting }: { enrol
       <table className="compact-table">
         <thead>
           <tr>
-            {["slot", "member", "finger", "enrolled", "actions"].map((column) => <th key={column}>{column}</th>)}
+            {["Slot", "Member", "Finger", "Updated", "Actions"].map((column) => <th key={column}>{column}</th>)}
           </tr>
         </thead>
         <tbody>
@@ -704,7 +725,12 @@ function FingerprintEnrollmentTable({ enrollments, onDelete, deleting }: { enrol
               </td>
               <td>{enrollment.fingerLabel ?? ""}</td>
               <td>{formatDateTime(enrollment.enrolledAt)}</td>
-              <td><button type="button" disabled={deleting} onClick={() => onDelete(enrollment.slot)}>Remove mapping</button></td>
+              <td>
+                <div className="mapping-actions">
+                  <button type="button" disabled={busy} onClick={() => onRemap(enrollment)}>Remap</button>
+                  <button type="button" disabled={busy} onClick={() => onDelete(enrollment.slot)}>Remove mapping</button>
+                </div>
+              </td>
             </tr>
           ))}
         </tbody>
