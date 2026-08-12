@@ -5,7 +5,7 @@
 Current production API:
 
 - Worker URL: `https://frc-attendance-api.frc-attendance.workers.dev`
-- Latest deployed Worker version: `d276724a-511c-43cc-a5c9-443164ec62f5`
+- Latest deployed Worker version: `10baf524-a915-4b12-afce-4bfa3c2d4367`
 - D1 database: `frc-attendance`
 - D1 database ID: `c02c0ca8-033b-435f-ae21-2d8f3b203b22`
 - Applied remote migrations: `0001_initial.sql` through `0005_student_email.sql`
@@ -16,7 +16,7 @@ Current production dashboard:
 
 - Cloudflare Pages project: `frc-attendance-dashboard`
 - Pages URL: `https://frc-attendance-dashboard.pages.dev`
-- Latest verified deployment: `https://c0720753.frc-attendance-dashboard.pages.dev`
+- Latest verified deployment: `https://0c2ffd86.frc-attendance-dashboard.pages.dev`
 - API base URL baked into the uploaded Vite build: `https://frc-attendance-api.frc-attendance.workers.dev`
 - Google OAuth client ID baked into the uploaded Vite build: `180849199739-v04bktp7rfmimgjpvohmq7pinrrpr337.apps.googleusercontent.com`
 
@@ -190,6 +190,8 @@ Deployment `https://7c2b740e.frc-attendance-dashboard.pages.dev` adds member lif
 Deployment `https://c0720753.frc-attendance-dashboard.pages.dev` polishes roster administration: removes the member lifecycle notice from the Roster page, keeps default roster rows compact, moves email editing and attendance drilldown into per-member details, removes the default Required Meetings counter, and moves fingerprint enrollment into active member details with a fixed ten-finger label selector. No Worker change or D1 migration was required. Production Worker/dashboard smoke and Pi-local roster pull smoke passed on 2026-08-12. Bench Pi update on 2026-08-12 pulled main through commit `cafa3dffae3eb933402766e15e4214ab3970ed08` and restarted `frc-dashboard-ui` and `frc-bench-api`.
 
 Worker version `d276724a-511c-43cc-a5c9-443164ec62f5` excludes future and in-progress scheduled meetings from attendance/report counts by default, including roster attendance percentages, per-member missed meeting details, meeting summaries, and attendance session report rows. Timed scheduled meetings count after their `ends_at`; date-only meetings use the existing local report date rule. Meeting administration/calendar views still show and manage future meetings. No D1 migration was required. Production Worker/dashboard smoke and Pi-local roster pull smoke passed on 2026-08-12. Bench Pi update on 2026-08-12 pulled main through commit `3be6b15a709e75c8959b166a2af7d16255439036` and restarted `frc-bench-api` and `frc-dashboard-ui`.
+
+Deployment `https://0c2ffd86.frc-attendance-dashboard.pages.dev` and Worker version `10baf524-a915-4b12-afce-4bfa3c2d4367` add unscheduled attendance management. Reports hide attendance-only dates by default and expose `includeUnscheduled=1`; dashboard Meetings and Reports views provide a Show unscheduled attendance toggle, Convert action to create a scheduled meeting for an attendance-only date, and destructive Clear action guarded by typed `CLEAR YYYY-MM-DD` confirmation. Clear removes API-owned scan/manual source events for that local date, rebuilds derived sessions, and preserves scheduled meetings, roster, admins, kiosks, and fingerprint mappings. No D1 migration was required. Production Worker/dashboard smoke and Pi-local roster pull smoke passed on 2026-08-12. Bench Pi update on 2026-08-12 pulled main through commit `ea991045183b7790cc18b2f46484e9e6316b5fbd` and restarted `frc-bench-api` and `frc-dashboard-ui`.
 
 The dashboard login UI follows the same boundary: when `VITE_GOOGLE_CLIENT_ID` is configured, it shows Google sign-in and a production notice that email-only local login is disabled. The email-only form is rendered only for local development builds with no Google client ID.
 
