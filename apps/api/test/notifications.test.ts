@@ -212,6 +212,164 @@ describe("meeting absence notifications", () => {
   });
 });
 
+describe("member attendance report notifications", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("previews a member attendance report without writing audit rows", async () => {
+    const env = createTestEnv();
+    insertStudent(env, "100001", "Report", "Member", "report@example.org");
+    insertMeeting(env, "2026-01-02", 1, "Required Build");
+    insertMeeting(env, "2026-01-09", 1, "Required Shop");
+    insertMeeting(env, "2026-01-10", 0, "Optional Demo");
+    insertSession(env, "100001", "2026-01-02");
+    insertSession(env, "100001", "2026-01-10");
+
+    const response = await request(env, "/admin/notifications/member-attendance-report", {
+      memberId: "100001",
+      preview: true
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      memberId: "100001",
+      firstName: "Report",
+      lastName: "Member",
+      email: "report@example.org",
+      notificationKind: "member_attendance_report",
+      providerConfigured: false,
+      mode: "preview",
+      sentCount: 0,
+      recipient: {
+        memberId: "100001",
+        email: "report@example.org",
+        status: "would_send"
+      },
+      report: {
+        attendanceRate: 0.5,
+        totalMeetings: 2,
+        presentMeetings: 1,
+        missedMeetings: 1,
+        missedMeetingsList: [{ meetingDate: "2026-01-09", title: "Required Shop" }],
+        optionalMeetings: [{ meetingDate: "2026-01-10", title: "Optional Demo", attended: true }]
+      }
+    });
+    expect(countRows(env, "notification_deliveries")).toBe(0);
+  });
+
+  it("returns clear missing-email feedback for member reports", async () => {
+    const env = createTestEnv({
+      RESEND_API_KEY: "re_test-key",
+      EMAIL_FROM_ADDRESS: "attendance@example.org"
+    });
+    insertStudent(env, "100001", "Missing", "Email", null);
+    insertMeeting(env, "2026-01-02", 1, "Required Build");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await request(env, "/admin/notifications/member-attendance-report", {
+      memberId: "100001"
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      providerConfigured: true,
+      mode: "send",
+      recipient: null,
+      sentCount: 0,
+      missingEmail: [{
+        memberId: "100001",
+        firstName: "Missing",
+        lastName: "Email",
+        status: "missing_email"
+      }]
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(countRows(env, "notification_deliveries")).toBe(0);
+  });
+
+  it("sends member attendance reports through Resend and skips same-day duplicates", async () => {
+    const env = createTestEnv({
+      RESEND_API_KEY: "re_test-key",
+      EMAIL_FROM_ADDRESS: "attendance@example.org",
+      EMAIL_FROM_NAME: "Team Attendance"
+    });
+    insertStudent(env, "100001", "Needs", "Report", "needs@example.org");
+    insertMeeting(env, "2026-01-02", 1, "Required Build");
+    insertMeeting(env, "2026-01-09", 1, "Required Shop");
+    insertMeeting(env, "2026-01-10", 0, "Optional Demo");
+    insertMeeting(env, "2099-01-02", 1, "Future Build", "2099-01-02T20:00:00.000Z", "2099-01-02T22:00:00.000Z");
+    insertSession(env, "100001", "2026-01-02");
+    insertSession(env, "100001", "2026-01-10");
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ id: "provider-report-1" }), { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await request(env, "/admin/notifications/member-attendance-report", {
+      memberId: "100001"
+    });
+
+    expect(response.status).toBe(200);
+    const body = await response.json() as { reportDate: string };
+    expect(body).toMatchObject({
+      providerConfigured: true,
+      mode: "send",
+      sentCount: 1,
+      skippedDuplicateCount: 0,
+      recipient: {
+        memberId: "100001",
+        email: "needs@example.org",
+        status: "sent"
+      },
+      report: {
+        attendanceRate: 0.5,
+        totalMeetings: 2,
+        presentMeetings: 1,
+        missedMeetings: 1,
+        missedMeetingsList: [{ meetingDate: "2026-01-09", title: "Required Shop" }],
+        optionalMeetings: [{ meetingDate: "2026-01-10", title: "Optional Demo", attended: true }]
+      }
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith("https://api.resend.com/emails", expect.objectContaining({
+      method: "POST",
+      headers: expect.objectContaining({
+        authorization: "Bearer re_test-key",
+        "content-type": "application/json",
+        "Idempotency-Key": `member_attendance_report:${body.reportDate}:100001:needs@example.org`
+      })
+    }));
+    const resendBody = fetchJsonBody(fetchMock);
+    expect(resendBody).toMatchObject({
+      from: "Team Attendance <attendance@example.org>",
+      to: ["needs@example.org"],
+      subject: "Attendance report for Needs Report"
+    });
+    expect(resendBody.text).toContain("Required attendance: 50%");
+    expect(resendBody.text).toContain("Required Shop");
+    expect(resendBody.text).toContain("Optional Demo (attended)");
+    expect(resendBody.text).not.toContain("Future Build");
+
+    const duplicateResponse = await request(env, "/admin/notifications/member-attendance-report", {
+      memberId: "100001"
+    });
+
+    expect(duplicateResponse.status).toBe(200);
+    expect(await duplicateResponse.json()).toMatchObject({
+      sentCount: 0,
+      skippedDuplicateCount: 1,
+      recipient: {
+        memberId: "100001",
+        email: "needs@example.org",
+        status: "skipped_duplicate"
+      }
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(sentDeliveryEmails(env)).toEqual(["needs@example.org"]);
+    expect(providerMessageIds(env)).toEqual(["provider-report-1"]);
+  });
+});
+
 function createTestEnv(overrides: Partial<Env> = {}): Env {
   const sqlite = new Database(":memory:");
   sqlite.exec(`
@@ -334,7 +492,7 @@ function insertSession(env: Env, memberId: string, meetingDate: string) {
   ).run();
 }
 
-function insertDelivery(env: Env, memberId: string, email: string, status: "sent" | "error") {
+function insertDelivery(env: Env, memberId: string, email: string, status: "sent" | "error", notificationKind = "meeting_absence", meetingDate = "2026-01-02") {
   return env.DB.prepare(`
     INSERT INTO notification_deliveries (
       id,
@@ -349,8 +507,8 @@ function insertDelivery(env: Env, memberId: string, email: string, status: "sent
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(
     `delivery-${memberId}`,
-    "meeting_absence",
-    "2026-01-02",
+    notificationKind,
+    meetingDate,
     memberId,
     email,
     status,

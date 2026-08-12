@@ -6,7 +6,7 @@ import { buildLegacySheetExport } from "./export";
 import { errorResponse, json, noContent, optionsResponse, readJson } from "./http";
 import { claimPendingKioskCommands, completeKioskCommand, createKioskCommand, listRecentKioskCommands, requireKioskCommandAction } from "./kioskCommands";
 import { bulkDeleteScheduledMeetings, convertUnscheduledAttendanceToMeeting, createScheduledMeeting, deleteScheduledMeeting, listScheduledMeetings, updateScheduledMeeting, type BulkScheduledMeetingDeleteInput, type ScheduledMeetingInput } from "./meetings";
-import { sendMeetingAbsenceNotifications, type MeetingAbsenceNotificationInput } from "./notifications";
+import { sendMeetingAbsenceNotifications, sendMemberAttendanceReportNotification, type MeetingAbsenceNotificationInput, type MemberAttendanceReportNotificationInput } from "./notifications";
 import { buildAttendanceSessionReport, buildMeetingAbsenceReport, buildMeetingSummaryReport, buildMemberAttendanceReport, buildPresenceReport, buildRosterAttendanceSummary, reportDateRangeFromSearchParams } from "./reports";
 import { deactivateMember, hardDeleteMember, listActiveRoster, listRosterMembers, reactivateMember, syncRoster, updateStudentEmail, type RosterMemberInput } from "./roster";
 
@@ -219,6 +219,12 @@ export default {
         await requireAdmin(request, env);
         const body = await readJson<MeetingAbsenceNotificationInput>(request);
         return json(await sendMeetingAbsenceNotifications(env, body));
+      }
+
+      if (route === "POST /admin/notifications/member-attendance-report") {
+        await requireAdmin(request, env);
+        const body = await readJson<MemberAttendanceReportNotificationInput>(request);
+        return json(await sendMemberAttendanceReportNotification(env, body));
       }
 
       if (route === "GET /admin/events") {

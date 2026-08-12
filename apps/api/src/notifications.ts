@@ -1,11 +1,18 @@
 import { meetingDateForTimestamp, requireIsoDate } from "@frc-attendance/shared";
 import type { Env } from "./env";
-import { buildMeetingAbsenceReport } from "./reports";
+import { buildMeetingAbsenceReport, buildMeetingSummaryReport, buildMemberAttendanceReport } from "./reports";
 
 const meetingAbsenceKind = "meeting_absence";
+const memberAttendanceReportKind = "member_attendance_report";
 
 export interface MeetingAbsenceNotificationInput {
   meetingDate?: unknown;
+  preview?: unknown;
+  resend?: unknown;
+}
+
+export interface MemberAttendanceReportNotificationInput {
+  memberId?: unknown;
   preview?: unknown;
   resend?: unknown;
 }
@@ -21,6 +28,31 @@ export interface MeetingAbsenceNotificationResult {
   errorCount: number;
   recipients: NotificationRecipient[];
   missingEmail: MissingEmailRecipient[];
+  warnings: string[];
+}
+
+export interface MemberAttendanceReportNotificationResult {
+  memberId: string;
+  firstName: string;
+  lastName: string;
+  email: string | null;
+  reportDate: string;
+  notificationKind: typeof memberAttendanceReportKind;
+  providerConfigured: boolean;
+  mode: "preview" | "send";
+  sentCount: number;
+  skippedDuplicateCount: number;
+  errorCount: number;
+  recipient: NotificationRecipient | null;
+  missingEmail: MissingEmailRecipient[];
+  report: {
+    attendanceRate: number | null;
+    totalMeetings: number;
+    presentMeetings: number;
+    missedMeetings: number;
+    missedMeetingsList: Array<{ meetingDate: string; title: string | null }>;
+    optionalMeetings: Array<{ meetingDate: string; title: string | null; attended: boolean }>;
+  };
   warnings: string[];
 }
 
@@ -66,7 +98,7 @@ export async function sendMeetingAbsenceNotifications(
   const absences = await hydrateAbsenceEmails(env, absenceReport.rows);
   const provider = emailProvider(env);
   const mode = preview || !provider.configured ? "preview" : "send";
-  const sentKeys = resend ? new Set<string>() : await sentNotificationKeys(env, meetingDate);
+  const sentKeys = resend ? new Set<string>() : await sentNotificationKeys(env, meetingAbsenceKind, meetingDate);
   const recipients: NotificationRecipient[] = [];
   const missingEmail: MissingEmailRecipient[] = [];
   const warnings: string[] = [];
@@ -99,6 +131,7 @@ export async function sendMeetingAbsenceNotifications(
       try {
         const delivery = await provider.send(buildAbsenceEmail(meeting, { ...row, email }));
         await recordNotificationDelivery(env, {
+          notificationKind: meetingAbsenceKind,
           meetingDate,
           memberId: row.memberId,
           email,
@@ -110,6 +143,7 @@ export async function sendMeetingAbsenceNotifications(
         recipient.status = "error";
         recipient.error = message;
         await recordNotificationDelivery(env, {
+          notificationKind: meetingAbsenceKind,
           meetingDate,
           memberId: row.memberId,
           email,
@@ -133,6 +167,121 @@ export async function sendMeetingAbsenceNotifications(
     errorCount: recipients.filter((recipient) => recipient.status === "error").length,
     recipients,
     missingEmail,
+    warnings
+  };
+}
+
+export async function sendMemberAttendanceReportNotification(
+  env: Env,
+  input: MemberAttendanceReportNotificationInput,
+  now = new Date()
+): Promise<MemberAttendanceReportNotificationResult> {
+  const memberId = requireNonEmptyString(input.memberId, "memberId");
+  const preview = input.preview === undefined ? false : requireBoolean(input.preview, "preview");
+  const resend = input.resend === undefined ? false : requireBoolean(input.resend, "resend");
+  const [member, report, meetingSummary] = await Promise.all([
+    getMemberEmail(env, memberId),
+    buildMemberAttendanceReport(env, memberId, {}, now),
+    buildMeetingSummaryReport(env, {}, 500, now)
+  ]);
+  const reportDate = meetingDateForTimestamp(now.toISOString(), env.TIME_ZONE);
+  const provider = emailProvider(env);
+  const mode = preview || !provider.configured ? "preview" : "send";
+  const warnings: string[] = [];
+  const missingEmail: MissingEmailRecipient[] = [];
+  let recipient: NotificationRecipient | null = null;
+
+  if (!provider.configured) warnings.push("Email provider is not configured; showing preview only.");
+  if (resend) warnings.push("Resend enabled; previously sent attendance reports for this member are included.");
+
+  const meetingsByDate = new Map(meetingSummary.map((meeting) => [meeting.meetingDate, meeting]));
+  const missedMeetingsList = report.absentDates.map((date) => ({
+    meetingDate: date,
+    title: meetingsByDate.get(date)?.title ?? null
+  }));
+  const optionalSessionDates = await memberOptionalSessionDates(env, memberId);
+  const optionalMeetings = meetingSummary
+    .filter((meeting) => !meeting.required)
+    .map((meeting) => ({
+      meetingDate: meeting.meetingDate,
+      title: meeting.title,
+      attended: optionalSessionDates.has(meeting.meetingDate)
+    }));
+  const email = normalizeOptionalEmail(member.email);
+
+  if (!email) {
+    missingEmail.push({
+      memberId: report.memberId,
+      firstName: report.firstName,
+      lastName: report.lastName,
+      status: "missing_email"
+    });
+  } else {
+    const sentKeys = resend ? new Set<string>() : await sentNotificationKeys(env, memberAttendanceReportKind, reportDate);
+    const duplicate = sentKeys.has(notificationKey(report.memberId, email));
+    recipient = {
+      memberId: report.memberId,
+      firstName: report.firstName,
+      lastName: report.lastName,
+      email,
+      status: duplicate ? "skipped_duplicate" : mode === "preview" ? "would_send" : "sent"
+    };
+
+    if (mode === "send" && !duplicate) {
+      try {
+        const delivery = await provider.send(buildMemberAttendanceEmail({
+          ...report,
+          email,
+          reportDate,
+          missedMeetingsList,
+          optionalMeetings
+        }));
+        await recordNotificationDelivery(env, {
+          notificationKind: memberAttendanceReportKind,
+          meetingDate: reportDate,
+          memberId: report.memberId,
+          email,
+          status: "sent",
+          providerMessageId: delivery.providerMessageId
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        recipient.status = "error";
+        recipient.error = message;
+        await recordNotificationDelivery(env, {
+          notificationKind: memberAttendanceReportKind,
+          meetingDate: reportDate,
+          memberId: report.memberId,
+          email,
+          status: "error",
+          errorMessage: message
+        });
+      }
+    }
+  }
+
+  return {
+    memberId: report.memberId,
+    firstName: report.firstName,
+    lastName: report.lastName,
+    email,
+    reportDate,
+    notificationKind: memberAttendanceReportKind,
+    providerConfigured: provider.configured,
+    mode,
+    sentCount: recipient?.status === "sent" ? 1 : 0,
+    skippedDuplicateCount: recipient?.status === "skipped_duplicate" ? 1 : 0,
+    errorCount: recipient?.status === "error" ? 1 : 0,
+    recipient,
+    missingEmail,
+    report: {
+      attendanceRate: report.attendanceRate,
+      totalMeetings: report.totalMeetings,
+      presentMeetings: report.presentMeetings,
+      missedMeetings: report.missedMeetings,
+      missedMeetingsList,
+      optionalMeetings
+    },
     warnings
   };
 }
@@ -284,16 +433,97 @@ function buildAbsenceEmail(meeting: { meeting_date: string; title: string | null
   };
 }
 
-async function sentNotificationKeys(env: Env, meetingDate: string): Promise<Set<string>> {
+function buildMemberAttendanceEmail(member: {
+  memberId: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  reportDate: string;
+  attendanceRate: number | null;
+  totalMeetings: number;
+  presentMeetings: number;
+  missedMeetings: number;
+  missedMeetingsList: Array<{ meetingDate: string; title: string | null }>;
+  optionalMeetings: Array<{ meetingDate: string; title: string | null; attended: boolean }>;
+}) {
+  const attendance = formatPercent(member.attendanceRate);
+  const subject = `Attendance report for ${member.firstName} ${member.lastName}`;
+  const missedText = member.missedMeetingsList.length > 0
+    ? member.missedMeetingsList.map((meeting) => `- ${meeting.meetingDate}: ${meeting.title ?? "Required meeting"}`).join("\n")
+    : "None";
+  const optionalText = member.optionalMeetings.length > 0
+    ? member.optionalMeetings.map((meeting) => `- ${meeting.meetingDate}: ${meeting.title ?? "Optional meeting"} (${meeting.attended ? "attended" : "not required"})`).join("\n")
+    : "None available";
+  const missedHtml = member.missedMeetingsList.length > 0
+    ? `<ul>${member.missedMeetingsList.map((meeting) => `<li>${meeting.meetingDate}: ${escapeHtml(meeting.title ?? "Required meeting")}</li>`).join("")}</ul>`
+    : "<p>None</p>";
+  const optionalHtml = member.optionalMeetings.length > 0
+    ? `<ul>${member.optionalMeetings.map((meeting) => `<li>${meeting.meetingDate}: ${escapeHtml(meeting.title ?? "Optional meeting")} (${meeting.attended ? "attended" : "not required"})</li>`).join("")}</ul>`
+    : "<p>None available</p>";
+  const text = [
+    `Hi ${member.firstName},`,
+    "",
+    `Here is your current FRC attendance report as of ${member.reportDate}.`,
+    "",
+    `Member: ${member.firstName} ${member.lastName} (${member.memberId})`,
+    `Required attendance: ${attendance}`,
+    `Completed required meetings: ${member.totalMeetings}`,
+    `Attended: ${member.presentMeetings}`,
+    `Missed: ${member.missedMeetings}`,
+    "",
+    "Missed required meetings:",
+    missedText,
+    "",
+    "Optional/not-required meetings:",
+    optionalText,
+    "",
+    "Future and in-progress meetings are not included in required attendance counts.",
+    "If this looks wrong, please contact a mentor so they can correct the attendance record.",
+    "",
+    "FRC Attendance"
+  ].join("\n");
+  const html = [
+    `<p>Hi ${escapeHtml(member.firstName)},</p>`,
+    `<p>Here is your current FRC attendance report as of ${member.reportDate}.</p>`,
+    "<dl>",
+    `<dt>Member</dt><dd>${escapeHtml(member.firstName)} ${escapeHtml(member.lastName)} (${escapeHtml(member.memberId)})</dd>`,
+    `<dt>Required attendance</dt><dd>${attendance}</dd>`,
+    `<dt>Completed required meetings</dt><dd>${member.totalMeetings}</dd>`,
+    `<dt>Attended</dt><dd>${member.presentMeetings}</dd>`,
+    `<dt>Missed</dt><dd>${member.missedMeetings}</dd>`,
+    "</dl>",
+    "<h2>Missed required meetings</h2>",
+    missedHtml,
+    "<h2>Optional/not-required meetings</h2>",
+    optionalHtml,
+    "<p>Future and in-progress meetings are not included in required attendance counts.</p>",
+    "<p>If this looks wrong, please contact a mentor so they can correct the attendance record.</p>",
+    "<p>FRC Attendance</p>"
+  ].join("");
+  return {
+    to: member.email,
+    subject,
+    text,
+    html,
+    metadata: {
+      notificationKind: memberAttendanceReportKind,
+      meetingDate: member.reportDate,
+      memberId: member.memberId
+    }
+  };
+}
+
+async function sentNotificationKeys(env: Env, notificationKind: string, meetingDate: string): Promise<Set<string>> {
   const rows = await env.DB.prepare(`
     SELECT student_id, recipient_email
     FROM notification_deliveries
     WHERE notification_kind = ? AND meeting_date = ? AND status = 'sent'
-  `).bind(meetingAbsenceKind, meetingDate).all<{ student_id: string; recipient_email: string }>();
+  `).bind(notificationKind, meetingDate).all<{ student_id: string; recipient_email: string }>();
   return new Set(rows.results.map((row) => notificationKey(row.student_id, row.recipient_email)));
 }
 
 async function recordNotificationDelivery(env: Env, delivery: {
+  notificationKind: string;
   meetingDate: string;
   memberId: string;
   email: string;
@@ -319,7 +549,7 @@ async function recordNotificationDelivery(env: Env, delivery: {
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(
     crypto.randomUUID(),
-    meetingAbsenceKind,
+    delivery.notificationKind,
     delivery.meetingDate,
     delivery.memberId,
     delivery.email,
@@ -331,6 +561,26 @@ async function recordNotificationDelivery(env: Env, delivery: {
     now,
     now
   ).run();
+}
+
+async function getMemberEmail(env: Env, memberId: string) {
+  const member = await env.DB.prepare(`
+    SELECT student_id, email
+    FROM students
+    WHERE student_id = ?
+  `).bind(memberId).first<{ student_id: string; email: string | null }>();
+  if (!member) throw Object.assign(new Error("Member not found"), { status: 404 });
+  return member;
+}
+
+async function memberOptionalSessionDates(env: Env, memberId: string) {
+  const rows = await env.DB.prepare(`
+    SELECT DISTINCT attendance_sessions.meeting_date
+    FROM attendance_sessions
+    INNER JOIN scheduled_meetings ON scheduled_meetings.meeting_date = attendance_sessions.meeting_date
+    WHERE attendance_sessions.student_id = ? AND scheduled_meetings.required = 0
+  `).bind(memberId).all<{ meeting_date: string }>();
+  return new Set(rows.results.map((row) => row.meeting_date));
 }
 
 function providerMessageIdFromResponse(text: string): string | undefined {
@@ -356,6 +606,17 @@ function normalizeOptionalEmail(value?: string | null) {
 function requireBoolean(value: unknown, fieldName: string): boolean {
   if (typeof value !== "boolean") throw Object.assign(new Error(`${fieldName} must be a boolean`), { status: 400 });
   return value;
+}
+
+function requireNonEmptyString(value: unknown, fieldName: string): string {
+  if (typeof value !== "string" || !value.trim()) {
+    throw Object.assign(new Error(`${fieldName} is required`), { status: 400 });
+  }
+  return value.trim();
+}
+
+function formatPercent(value: number | null) {
+  return value === null ? "N/A" : `${Math.round(value * 100)}%`;
 }
 
 function isMeetingComplete(meeting: { meeting_date: string; ends_at: string | null }, env: Env, now: Date): boolean {
