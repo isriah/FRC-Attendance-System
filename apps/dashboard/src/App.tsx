@@ -277,6 +277,7 @@ function Overview({ session }: { session: DashboardSession }) {
 
 function Roster({ session }: { session: DashboardSession }) {
   const { data, error, reload } = useApi<{ members: MemberRow[] }>("/admin/members", session);
+  const { data: rosterSummary, error: rosterSummaryError, reload: reloadRosterSummary } = useApi<{ members: RosterAttendanceSummaryRow[] }>("/admin/reports/roster-attendance", session);
   const { data: enrollmentData, error: enrollmentError, reload: reloadEnrollments } = useOptionalApi<{ enrollments: FingerprintEnrollment[] }>(
     fingerprintEnrollmentAvailable ? "/admin/fingerprint/enrollments" : undefined,
     session
@@ -294,6 +295,15 @@ function Roster({ session }: { session: DashboardSession }) {
   const [enrollMessage, setEnrollMessage] = useState<{ kind: "info" | "success" | "error"; text: string }>();
   const [enrolling, setEnrolling] = useState(false);
   const activeMembers = data?.members.filter((member) => member.active) ?? [];
+  const attendanceByMemberId = new Map((rosterSummary?.members ?? []).map((member) => [member.memberId, member]));
+  const rosterRows = (data?.members ?? []).map((member) => {
+    const attendance = attendanceByMemberId.get(member.memberId);
+    return {
+      ...member,
+      attendance: member.active ? formatPercent(attendance?.attendanceRate ?? null) : "",
+      requiredMeetings: member.active ? attendance?.requiredMeetings ?? 0 : ""
+    };
+  });
   const enrollments = enrollmentData?.enrollments ?? [];
   const nextOpenSlot = nextAvailableFingerprintSlot(enrollments);
   const selectedSlot = Number(enrollSlot);
@@ -418,6 +428,7 @@ function Roster({ session }: { session: DashboardSession }) {
           await apiPost("/admin/roster/sync", { members }, session);
           setImportMessage(`Synced ${members.length} members`);
           reload();
+          reloadRosterSummary();
         }}>
           <textarea value={importText} onChange={(event) => setImportText(event.target.value)} rows={8} />
           <div className="toolbar compact">
@@ -429,6 +440,7 @@ function Roster({ session }: { session: DashboardSession }) {
                   const result = await apiPost<{ synced: number; rosterSyncedAt?: string | null }>("/admin/roster/pull-production", {}, session);
                   setImportMessage(`Pulled ${result.synced} production members${result.rosterSyncedAt ? ` synced ${formatDateTime(result.rosterSyncedAt)}` : ""}`);
                   reload();
+                  reloadRosterSummary();
                 } catch (error) {
                   setImportMessage(friendlyDashboardError(error));
                 } finally {
@@ -503,7 +515,13 @@ function Roster({ session }: { session: DashboardSession }) {
           <FingerprintEnrollmentTable enrollments={enrollments} onDelete={deleteEnrollment} onRemap={startRemapEnrollment} busy={enrolling} />
         ) : null}
       </section>
-      <Table title="Roster" error={error} rows={data?.members ?? []} columns={["memberId", "firstName", "lastName", "email", "active"]} />
+      <Table
+        title="Roster"
+        error={error ?? rosterSummaryError}
+        rows={rosterRows}
+        columns={["memberId", "firstName", "lastName", "email", "active", "attendance", "requiredMeetings"]}
+        note="Attendance is based on required scheduled meetings; optional meetings are not counted against members."
+      />
     </>
   );
 }
@@ -1745,10 +1763,11 @@ function Metric({ label, value }: { label: string; value: string | number }) {
   return <article className="metric"><span>{label}</span><strong>{value}</strong></article>;
 }
 
-function Table({ title, rows, columns, error }: { title: string; rows: Array<Record<string, unknown>>; columns: string[]; error?: string }) {
+function Table({ title, rows, columns, error, note }: { title: string; rows: Array<Record<string, unknown>>; columns: string[]; error?: string; note?: string }) {
   return (
     <section>
       <h2>{title}</h2>
+      {note ? <p className="report-context">{note}</p> : null}
       {error ? <p className="error">{error}</p> : null}
       <DataTable rows={rows} columns={columns} />
     </section>

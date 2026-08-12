@@ -378,6 +378,31 @@ describe("report builders", () => {
     expect(report.rows).toEqual([]);
   });
 
+  it("excludes optional scheduled meetings from roster attendance percentages", async () => {
+    const env = createTestEnv();
+    insertStudent(env, "100001", "Bench", "Member");
+    insertMeeting(env, "2026-01-03", 1, "Required Build");
+    insertMeeting(env, "2026-01-04", 0, "Optional Demo");
+    insertSession(env, "100001", "2026-01-04", "2026-01-04T20:00:00.000Z", "2026-01-04T22:00:00.000Z", "closed");
+
+    const rosterSummary = await buildRosterAttendanceSummary(env);
+
+    expect(rosterSummary).toEqual([
+      {
+        memberId: "100001",
+        firstName: "Bench",
+        lastName: "Member",
+        requiredMeetings: 1,
+        presentMeetings: 0,
+        missedMeetings: 1,
+        attendanceRate: 0,
+        lastSeenAt: "2026-01-04T20:00:00.000Z",
+        openSessionDates: [],
+        openSessionWarning: false
+      }
+    ]);
+  });
+
   it("filters member attendance and roster summary by report date range", async () => {
     const env = createTestEnv();
     insertStudent(env, "100001", "Bench", "Student");
