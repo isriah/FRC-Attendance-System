@@ -179,6 +179,8 @@ Deployment `https://50ac4035.frc-attendance-dashboard.pages.dev` adds bulk meeti
 
 Deployment `https://9ce3910c.frc-attendance-dashboard.pages.dev` polishes Meetings UI layout: the All Meetings bulk-edit checkbox rows align with their corresponding fields, the active Add/Edit Meeting tab stays visible but no longer resets the form when clicked again, and meeting start/end time fields share a row when responsive space allows. No Worker change or D1 migration was required. Production Worker/dashboard smoke passed on 2026-08-11 with Pi skipped.
 
+Bench Pi update on 2026-08-11 pulled main through commit `319f96f398c1bd8535e8036ce9205b7b76ab2992` and restarted `frc-dashboard-ui`, `frc-bench-api`, and `frc-kiosk-service`. The Pi-local dashboard serves at `http://192.168.0.154:5174` from the workstation and `http://localhost:5174` on the Pi; direct `http://AttKiosk:5174` returned 403 from Vite host checking. The served dashboard source includes the fingerprint mapping `Remap` action, bench API health returned ok, and `frc-kiosk-service` reported `Fingerprint reader online`.
+
 The dashboard login UI follows the same boundary: when `VITE_GOOGLE_CLIENT_ID` is configured, it shows Google sign-in and a production notice that email-only local login is disabled. The email-only form is rendered only for local development builds with no Google client ID.
 
 For local development only, if no Google client ID is configured, the dashboard can send an `x-admin-email` header and the API will still enforce the configured allowlist.
