@@ -68,6 +68,20 @@ export async function listActiveRoster(env: Env) {
   };
 }
 
+export async function listRosterMembers(env: Env, active?: boolean) {
+  const where = active === undefined ? "" : "WHERE active = ?";
+  const statement = env.DB.prepare(`
+    SELECT student_id, first_name, last_name, email, active, roster_synced_at
+    FROM students
+    ${where}
+    ORDER BY last_name, first_name
+  `);
+  const rows = active === undefined
+    ? await statement.all<StudentRow>()
+    : await statement.bind(active ? 1 : 0).all<StudentRow>();
+  return rows.results.map(rowToMember);
+}
+
 export async function updateStudentEmail(env: Env, memberId: string, email: string | null) {
   const normalizedMemberId = requireRosterString(memberId, "memberId");
   const normalizedEmail = normalizeOptionalRosterEmail(email ?? undefined);
@@ -78,6 +92,33 @@ export async function updateStudentEmail(env: Env, memberId: string, email: stri
   const changes = (result as D1Result & { changes?: number }).meta?.changes ?? (result as D1Result & { changes?: number }).changes;
   if (changes === 0) throw Object.assign(new Error("Member not found"), { status: 404 });
   return { memberId: normalizedMemberId, email: normalizedEmail ?? null };
+}
+
+export async function deactivateMember(env: Env, memberId: string) {
+  return setMemberActive(env, memberId, false);
+}
+
+export async function reactivateMember(env: Env, memberId: string) {
+  return setMemberActive(env, memberId, true);
+}
+
+export async function hardDeleteMember(env: Env, memberId: string) {
+  const normalizedMemberId = requireRosterString(memberId, "memberId");
+  const member = await requireExistingMember(env, normalizedMemberId);
+  const statements = [
+    env.DB.prepare("DELETE FROM fingerprint_enrollments WHERE student_id = ?").bind(normalizedMemberId),
+    env.DB.prepare("DELETE FROM manual_events WHERE student_id = ?").bind(normalizedMemberId),
+    env.DB.prepare("DELETE FROM attendance_sessions WHERE student_id = ?").bind(normalizedMemberId),
+    env.DB.prepare("DELETE FROM scan_events WHERE student_id = ?").bind(normalizedMemberId),
+    env.DB.prepare("DELETE FROM students WHERE student_id = ?").bind(normalizedMemberId)
+  ];
+  await env.DB.batch(statements);
+  return {
+    memberId: normalizedMemberId,
+    firstName: member.first_name,
+    lastName: member.last_name,
+    hardDeleted: true
+  };
 }
 
 export function normalizeRosterMembers(members: RosterMemberInput[] | undefined): NormalizedRosterMemberInput[] {
@@ -97,6 +138,35 @@ export function normalizeRosterMembers(members: RosterMemberInput[] | undefined)
     if (email) seenEmails.add(email);
     return email ? { memberId, firstName, lastName, email } : { memberId, firstName, lastName };
   });
+}
+
+async function setMemberActive(env: Env, memberId: string, active: boolean) {
+  const normalizedMemberId = requireRosterString(memberId, "memberId");
+  await requireExistingMember(env, normalizedMemberId);
+  await env.DB.prepare(
+    "UPDATE students SET active = ? WHERE student_id = ?"
+  ).bind(active ? 1 : 0, normalizedMemberId).run();
+  const member = await requireExistingMember(env, normalizedMemberId);
+  return rowToMember(member);
+}
+
+async function requireExistingMember(env: Env, memberId: string) {
+  const member = await env.DB.prepare(
+    "SELECT student_id, first_name, last_name, email, active, roster_synced_at FROM students WHERE student_id = ?"
+  ).bind(memberId).first<StudentRow>();
+  if (!member) throw Object.assign(new Error("Member not found"), { status: 404 });
+  return member;
+}
+
+function rowToMember(row: StudentRow) {
+  return {
+    memberId: row.student_id,
+    firstName: row.first_name,
+    lastName: row.last_name,
+    email: row.email ?? null,
+    active: Boolean(row.active),
+    rosterSyncedAt: row.roster_synced_at ?? null
+  };
 }
 
 async function hashRosterRow(member: NormalizedRosterMemberInput): Promise<string> {
@@ -125,4 +195,13 @@ async function requireUniqueStudentEmail(env: Env, email: string, memberId: stri
     "SELECT student_id FROM students WHERE email = ? AND student_id <> ?"
   ).bind(email, memberId).first<{ student_id: string }>();
   if (existing) throw Object.assign(new Error(`Email is already assigned to member ${existing.student_id}`), { status: 409 });
+}
+
+interface StudentRow {
+  student_id: string;
+  first_name: string;
+  last_name: string;
+  email?: string | null;
+  active: number;
+  roster_synced_at?: string | null;
 }

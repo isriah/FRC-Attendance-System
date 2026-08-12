@@ -219,10 +219,14 @@ const server = createServer(async (request, response) => {
       return;
     }
 
-    if (request.method === "GET" && (request.url === "/admin/members" || request.url === "/admin/students")) {
-      const students = db.prepare("SELECT student_id, first_name, last_name, email, active FROM students ORDER BY last_name, first_name").all();
+    if (request.method === "GET" && (request.url?.startsWith("/admin/members") || request.url?.startsWith("/admin/students"))) {
+      const url = new URL(request.url, `http://${request.headers.host ?? "localhost"}`);
+      const active = url.searchParams.get("active");
+      const activeWhere = active === null ? "" : "WHERE active = ?";
+      const statement = db.prepare(`SELECT student_id, first_name, last_name, email, active FROM students ${activeWhere} ORDER BY last_name, first_name`);
+      const students = active === null ? statement.all() : statement.all(active === "true" || active === "1" ? 1 : 0);
       const members = students.map(rowToMember);
-      sendJson(response, 200, request.url === "/admin/members" ? { members } : { students, members });
+      sendJson(response, 200, url.pathname === "/admin/members" ? { members } : { students, members });
       return;
     }
 
@@ -232,6 +236,30 @@ const server = createServer(async (request, response) => {
       if (!memberId) throw httpError(400, "Member id is required");
       const body = await readBody<{ email?: string | null }>(request);
       sendJson(response, 200, updateStudentEmail(decodeURIComponent(memberId), body.email ?? null));
+      return;
+    }
+
+    const adminMemberDeactivate = request.url?.match(/^\/admin\/(?:members|students)\/([^/]+)\/deactivate$/);
+    if (adminMemberDeactivate && request.method === "POST") {
+      const memberId = adminMemberDeactivate[1];
+      if (!memberId) throw httpError(400, "Member id is required");
+      sendJson(response, 200, setMemberActive(decodeURIComponent(memberId), false));
+      return;
+    }
+
+    const adminMemberReactivate = request.url?.match(/^\/admin\/(?:members|students)\/([^/]+)\/reactivate$/);
+    if (adminMemberReactivate && request.method === "POST") {
+      const memberId = adminMemberReactivate[1];
+      if (!memberId) throw httpError(400, "Member id is required");
+      sendJson(response, 200, setMemberActive(decodeURIComponent(memberId), true));
+      return;
+    }
+
+    const adminMember = request.url?.match(/^\/admin\/(?:members|students)\/([^/]+)$/);
+    if (adminMember && request.method === "DELETE") {
+      const memberId = adminMember[1];
+      if (!memberId) throw httpError(400, "Member id is required");
+      sendJson(response, 200, hardDeleteMember(decodeURIComponent(memberId)));
       return;
     }
 
@@ -466,6 +494,43 @@ function updateStudentEmail(memberId: string, email: string | null) {
   const result = db.prepare("UPDATE students SET email = ? WHERE student_id = ?").run(normalizedEmail ?? null, normalizedMemberId);
   if (result.changes === 0) throw httpError(404, "Member not found");
   return { memberId: normalizedMemberId, email: normalizedEmail ?? null };
+}
+
+function setMemberActive(memberId: string, active: boolean) {
+  const normalizedMemberId = requireNonEmptyString(memberId, "memberId");
+  requireExistingMember(normalizedMemberId);
+  db.prepare("UPDATE students SET active = ? WHERE student_id = ?").run(active ? 1 : 0, normalizedMemberId);
+  return rowToMember(requireExistingMember(normalizedMemberId));
+}
+
+function hardDeleteMember(memberId: string) {
+  const normalizedMemberId = requireNonEmptyString(memberId, "memberId");
+  const member = requireExistingMember(normalizedMemberId);
+  const transaction = db.transaction(() => {
+    db.prepare("DELETE FROM scan_events WHERE student_id = ?").run(normalizedMemberId);
+    db.prepare("DELETE FROM students WHERE student_id = ?").run(normalizedMemberId);
+  });
+  transaction();
+  const deletedMappings = deleteLocalEnrollmentMappingsForMember(normalizedMemberId);
+  return {
+    memberId: normalizedMemberId,
+    firstName: member.first_name,
+    lastName: member.last_name,
+    hardDeleted: true,
+    deletedFingerprintMappings: deletedMappings
+  };
+}
+
+function requireExistingMember(memberId: string) {
+  const member = db.prepare("SELECT student_id, first_name, last_name, email, active FROM students WHERE student_id = ?").get(memberId) as {
+    student_id: string;
+    first_name: string;
+    last_name: string;
+    email?: string | null;
+    active: number;
+  } | undefined;
+  if (!member) throw httpError(404, "Member not found");
+  return member;
 }
 
 function seedSampleMeetings() {
@@ -806,6 +871,17 @@ function deleteFingerprintEnrollment(slotInput: number) {
     const result = localDb.prepare("UPDATE local_enrollments SET deleted_at = ? WHERE template_slot = ? AND deleted_at IS NULL").run(deletedAt, slot);
     if (result.changes === 0) throw httpError(404, "Fingerprint enrollment not found");
     return { slot, deletedAt, message: `Fingerprint slot ${slot} mapping removed. The sensor template was not deleted.` };
+  } finally {
+    localDb.close();
+  }
+}
+
+function deleteLocalEnrollmentMappingsForMember(memberId: string) {
+  const localDb = openLocalEnrollmentDb();
+  try {
+    const deletedAt = new Date().toISOString();
+    const result = localDb.prepare("UPDATE local_enrollments SET deleted_at = ? WHERE student_id = ? AND deleted_at IS NULL").run(deletedAt, memberId);
+    return result.changes;
   } finally {
     localDb.close();
   }

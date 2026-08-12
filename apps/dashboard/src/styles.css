@@ -87,6 +87,17 @@ button:hover {
   color: var(--surface-bg);
 }
 
+.danger-button {
+  border-color: var(--danger-color);
+  color: var(--danger-color);
+}
+
+.danger-button:hover {
+  background: var(--danger-color);
+  border-color: var(--danger-color);
+  color: var(--surface-bg);
+}
+
 .dashboard {
   display: grid;
   grid-template-columns: 240px minmax(0, 1fr);
@@ -642,12 +653,18 @@ textarea {
   padding: 8px;
 }
 
-.roster-email-table {
+.roster-email-table,
+.roster-member-table {
   min-width: 760px;
 }
 
-.roster-email-table input {
+.roster-email-table input,
+.roster-member-table input {
   width: min(260px, 100%);
+}
+
+.roster-member-table .mapping-actions {
+  min-width: 260px;
 }
 
 .admin-user-form {

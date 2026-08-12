@@ -4,6 +4,7 @@ import { apiBaseUrl, apiDelete, apiGet, apiPost, apiPut, type DashboardSession }
 import "./styles.css";
 
 type Tab = "overview" | "roster" | "admins" | "meetings" | "kiosks" | "events" | "reports" | "export";
+type RosterViewTab = "active" | "deactivated" | "import";
 type MeetingViewTab = "calendar" | "all" | "form";
 type ThemeMode = "themed" | "light" | "dark";
 type KioskCommandAction = "restart_display" | "restart_services" | "reboot_system";
@@ -282,11 +283,12 @@ function Roster({ session }: { session: DashboardSession }) {
     fingerprintEnrollmentAvailable ? "/admin/fingerprint/enrollments" : undefined,
     session
   );
+  const [rosterViewTab, setRosterViewTab] = useState<RosterViewTab>("active");
   const [importText, setImportText] = useState("memberId,firstName,lastName,email\n100001,Bench,Member,bench@example.org");
   const [importMessage, setImportMessage] = useState<string>();
   const [emailDrafts, setEmailDrafts] = useState<Record<string, string>>({});
-  const [emailMessage, setEmailMessage] = useState<{ kind: "success" | "error"; text: string }>();
-  const [savingEmailFor, setSavingEmailFor] = useState<string>();
+  const [memberMessage, setMemberMessage] = useState<{ kind: "success" | "error"; text: string }>();
+  const [busyMemberId, setBusyMemberId] = useState<string>();
   const [pullingRoster, setPullingRoster] = useState(false);
   const [enrollMemberId, setEnrollMemberId] = useState("");
   const [enrollSlot, setEnrollSlot] = useState("");
@@ -295,13 +297,14 @@ function Roster({ session }: { session: DashboardSession }) {
   const [enrollMessage, setEnrollMessage] = useState<{ kind: "info" | "success" | "error"; text: string }>();
   const [enrolling, setEnrolling] = useState(false);
   const activeMembers = data?.members.filter((member) => member.active) ?? [];
+  const deactivatedMembers = data?.members.filter((member) => !member.active) ?? [];
   const attendanceByMemberId = new Map((rosterSummary?.members ?? []).map((member) => [member.memberId, member]));
-  const rosterRows = (data?.members ?? []).map((member) => {
+  const activeRosterRows = activeMembers.map((member) => {
     const attendance = attendanceByMemberId.get(member.memberId);
     return {
       ...member,
-      attendance: member.active ? formatPercent(attendance?.attendanceRate ?? null) : "",
-      requiredMeetings: member.active ? attendance?.requiredMeetings ?? 0 : ""
+      attendance: formatPercent(attendance?.attendanceRate ?? null),
+      requiredMeetings: attendance?.requiredMeetings ?? 0
     };
   });
   const enrollments = enrollmentData?.enrollments ?? [];
@@ -333,16 +336,62 @@ function Roster({ session }: { session: DashboardSession }) {
 
   async function saveMemberEmail(member: MemberRow) {
     const email = emailDrafts[member.memberId]?.trim() ?? "";
-    setSavingEmailFor(member.memberId);
-    setEmailMessage(undefined);
+    setBusyMemberId(member.memberId);
+    setMemberMessage(undefined);
     try {
       await apiPut(`/admin/members/${encodeURIComponent(member.memberId)}/email`, { email: email || null }, session);
-      setEmailMessage({ kind: "success", text: `Saved email for ${member.firstName} ${member.lastName}.` });
+      setMemberMessage({ kind: "success", text: `Saved email for ${member.firstName} ${member.lastName}.` });
       reload();
     } catch (error) {
-      setEmailMessage({ kind: "error", text: friendlyDashboardError(error) });
+      setMemberMessage({ kind: "error", text: friendlyDashboardError(error) });
     } finally {
-      setSavingEmailFor(undefined);
+      setBusyMemberId(undefined);
+    }
+  }
+
+  async function setMemberActive(member: MemberRow, active: boolean) {
+    const verb = active ? "reactivate" : "deactivate";
+    if (!active && !window.confirm(`Deactivate ${member.firstName} ${member.lastName}? Attendance history will be preserved and the member can be reactivated later.`)) return;
+    setBusyMemberId(member.memberId);
+    setMemberMessage(undefined);
+    try {
+      await apiPost(`/admin/members/${encodeURIComponent(member.memberId)}/${verb}`, {}, session);
+      setMemberMessage({
+        kind: "success",
+        text: active
+          ? `Reactivated ${member.firstName} ${member.lastName}.`
+          : `Deactivated ${member.firstName} ${member.lastName}. Attendance history was preserved.`
+      });
+      reload();
+      reloadRosterSummary();
+    } catch (error) {
+      setMemberMessage({ kind: "error", text: friendlyDashboardError(error) });
+    } finally {
+      setBusyMemberId(undefined);
+    }
+  }
+
+  async function hardDeleteMember(member: MemberRow) {
+    const phrase = `DELETE ${member.memberId}`;
+    const entered = window.prompt(
+      `Hard delete ${member.firstName} ${member.lastName} (${member.memberId})?\n\nThis permanently removes the roster row and associated attendance, event, report-linked, and local fingerprint mapping records where this API owns them. Dashboard admin users are not removed.\n\nType ${phrase} to continue.`
+    );
+    if (entered !== phrase) {
+      setMemberMessage({ kind: "error", text: `Hard delete cancelled. Type ${phrase} exactly to delete this member.` });
+      return;
+    }
+    setBusyMemberId(member.memberId);
+    setMemberMessage(undefined);
+    try {
+      await apiDelete(`/admin/members/${encodeURIComponent(member.memberId)}`, session);
+      setMemberMessage({ kind: "success", text: `Hard deleted ${member.firstName} ${member.lastName} and associated member data.` });
+      reload();
+      reloadRosterSummary();
+      reloadEnrollments();
+    } catch (error) {
+      setMemberMessage({ kind: "error", text: friendlyDashboardError(error) });
+    } finally {
+      setBusyMemberId(undefined);
     }
   }
 
@@ -421,52 +470,91 @@ function Roster({ session }: { session: DashboardSession }) {
   return (
     <>
       <section>
-        <h2>Roster Import</h2>
-        <form className="stack" onSubmit={async (event) => {
-          event.preventDefault();
-          const members = parseRosterCsv(importText);
-          await apiPost("/admin/roster/sync", { members }, session);
-          setImportMessage(`Synced ${members.length} members`);
-          reload();
-          reloadRosterSummary();
-        }}>
-          <textarea value={importText} onChange={(event) => setImportText(event.target.value)} rows={8} />
-          <div className="toolbar compact">
-            <button>Sync roster</button>
-            {productionRosterPullAvailable ? (
-              <button type="button" disabled={pullingRoster} onClick={async () => {
-                setPullingRoster(true);
-                try {
-                  const result = await apiPost<{ synced: number; rosterSyncedAt?: string | null }>("/admin/roster/pull-production", {}, session);
-                  setImportMessage(`Pulled ${result.synced} production members${result.rosterSyncedAt ? ` synced ${formatDateTime(result.rosterSyncedAt)}` : ""}`);
-                  reload();
-                  reloadRosterSummary();
-                } catch (error) {
-                  setImportMessage(friendlyDashboardError(error));
-                } finally {
-                  setPullingRoster(false);
-                }
-              }}>
-                {pullingRoster ? "Pulling..." : "Pull production roster"}
-              </button>
-            ) : null}
-            {importMessage ? <span>{importMessage}</span> : null}
-          </div>
-        </form>
-      </section>
-      <section>
-        <h2>Member Emails</h2>
+        <div className="section-heading">
+          <h2>Roster</h2>
+          <span className="muted">{activeMembers.length} active, {deactivatedMembers.length} deactivated</span>
+        </div>
+        <div className="meeting-tabs">
+          {([
+            ["active", "Active Members"],
+            ["deactivated", "Deactivated Members"],
+            ["import", "Roster Import"]
+          ] as Array<[RosterViewTab, string]>).map(([value, label]) => (
+            <button key={value} type="button" className={rosterViewTab === value ? "active" : ""} onClick={() => setRosterViewTab(value)}>
+              {label}
+            </button>
+          ))}
+        </div>
         <p className="notice info">
-          Member emails are stored on roster records for association. Dashboard login access is managed on the Admins tab.
+          Deactivate members to preserve attendance history. Hard delete permanently removes associated member data and requires typed confirmation.
         </p>
-        {emailMessage ? <p className={`notice ${emailMessage.kind}`}>{emailMessage.text}</p> : null}
-        <RosterEmailTable
-          members={data?.members ?? []}
-          drafts={emailDrafts}
-          savingFor={savingEmailFor}
-          onDraftChange={(memberId, email) => setEmailDrafts((drafts) => ({ ...drafts, [memberId]: email }))}
-          onSave={saveMemberEmail}
-        />
+        {memberMessage ? <p className={`notice ${memberMessage.kind}`}>{memberMessage.text}</p> : null}
+        {error ?? rosterSummaryError ? <p className="error">{error ?? rosterSummaryError}</p> : null}
+        {rosterViewTab === "active" ? (
+          <MemberManagementTable
+            members={activeRosterRows}
+            drafts={emailDrafts}
+            busyMemberId={busyMemberId}
+            onDraftChange={(memberId, email) => setEmailDrafts((drafts) => ({ ...drafts, [memberId]: email }))}
+            onSaveEmail={saveMemberEmail}
+            onDeactivate={(member) => setMemberActive(member, false)}
+            onReactivate={(member) => setMemberActive(member, true)}
+            onHardDelete={hardDeleteMember}
+            emptyMessage="No active members yet."
+            showAttendance
+          />
+        ) : null}
+        {rosterViewTab === "deactivated" ? (
+          <MemberManagementTable
+            members={deactivatedMembers}
+            drafts={emailDrafts}
+            busyMemberId={busyMemberId}
+            onDraftChange={(memberId, email) => setEmailDrafts((drafts) => ({ ...drafts, [memberId]: email }))}
+            onSaveEmail={saveMemberEmail}
+            onDeactivate={(member) => setMemberActive(member, false)}
+            onReactivate={(member) => setMemberActive(member, true)}
+            onHardDelete={hardDeleteMember}
+            emptyMessage="No deactivated members."
+          />
+        ) : null}
+        {rosterViewTab === "import" ? (
+          <form className="stack" onSubmit={async (event) => {
+            event.preventDefault();
+            try {
+              const members = parseRosterCsv(importText);
+              await apiPost("/admin/roster/sync", { members }, session);
+              setImportMessage(`Synced ${members.length} members. Missing members were deactivated, not deleted.`);
+              reload();
+              reloadRosterSummary();
+            } catch (error) {
+              setImportMessage(friendlyDashboardError(error));
+            }
+          }}>
+            <textarea value={importText} onChange={(event) => setImportText(event.target.value)} rows={8} />
+            <p className="notice info">Roster import updates active members and deactivates missing members. It never hard deletes data.</p>
+            <div className="toolbar compact">
+              <button>Sync roster</button>
+              {productionRosterPullAvailable ? (
+                <button type="button" disabled={pullingRoster} onClick={async () => {
+                  setPullingRoster(true);
+                  try {
+                    const result = await apiPost<{ synced: number; rosterSyncedAt?: string | null }>("/admin/roster/pull-production", {}, session);
+                    setImportMessage(`Pulled ${result.synced} production members${result.rosterSyncedAt ? ` synced ${formatDateTime(result.rosterSyncedAt)}` : ""}. Missing local members were deactivated, not deleted.`);
+                    reload();
+                    reloadRosterSummary();
+                  } catch (error) {
+                    setImportMessage(friendlyDashboardError(error));
+                  } finally {
+                    setPullingRoster(false);
+                  }
+                }}>
+                  {pullingRoster ? "Pulling..." : "Pull production roster"}
+                </button>
+              ) : null}
+              {importMessage ? <span>{importMessage}</span> : null}
+            </div>
+          </form>
+        ) : null}
       </section>
       <section>
         <h2>Fingerprint Enrollment</h2>
@@ -515,41 +603,45 @@ function Roster({ session }: { session: DashboardSession }) {
           <FingerprintEnrollmentTable enrollments={enrollments} onDelete={deleteEnrollment} onRemap={startRemapEnrollment} busy={enrolling} />
         ) : null}
       </section>
-      <Table
-        title="Roster"
-        error={error ?? rosterSummaryError}
-        rows={rosterRows}
-        columns={["memberId", "firstName", "lastName", "email", "active", "attendance", "requiredMeetings"]}
-        note="Attendance is based on required scheduled meetings; optional meetings are not counted against members."
-      />
     </>
   );
 }
 
-function RosterEmailTable({
+function MemberManagementTable({
   members,
   drafts,
-  savingFor,
+  busyMemberId,
   onDraftChange,
-  onSave
+  onSaveEmail,
+  onDeactivate,
+  onReactivate,
+  onHardDelete,
+  emptyMessage,
+  showAttendance = false
 }: {
-  members: MemberRow[];
+  members: Array<MemberRow & { attendance?: string; requiredMeetings?: number | string }>;
   drafts: Record<string, string>;
-  savingFor?: string;
+  busyMemberId?: string;
   onDraftChange: (memberId: string, email: string) => void;
-  onSave: (member: MemberRow) => void;
+  onSaveEmail: (member: MemberRow) => void;
+  onDeactivate: (member: MemberRow) => void;
+  onReactivate: (member: MemberRow) => void;
+  onHardDelete: (member: MemberRow) => void;
+  emptyMessage: string;
+  showAttendance?: boolean;
 }) {
-  if (members.length === 0) return <p className="empty-state">No roster members yet.</p>;
+  if (members.length === 0) return <p className="empty-state">{emptyMessage}</p>;
   return (
     <div className="data-table-wrap">
-      <table className="data-table roster-email-table">
+      <table className="data-table roster-member-table">
         <thead>
           <tr>
             <th>Member ID</th>
             <th>First Name</th>
             <th>Last Name</th>
             <th>Email</th>
-            <th>Active</th>
+            {showAttendance ? <th>Attendance</th> : null}
+            {showAttendance ? <th>Required Meetings</th> : null}
             <th>Actions</th>
           </tr>
         </thead>
@@ -567,11 +659,20 @@ function RosterEmailTable({
                   placeholder="name@example.org"
                 />
               </td>
-              <td>{member.active ? "Yes" : "No"}</td>
+              {showAttendance ? <td>{member.attendance ?? ""}</td> : null}
+              {showAttendance ? <td>{member.requiredMeetings ?? ""}</td> : null}
               <td>
-                <button type="button" disabled={savingFor === member.memberId} onClick={() => onSave(member)}>
-                  {savingFor === member.memberId ? "Saving..." : "Save"}
-                </button>
+                <div className="mapping-actions">
+                  <button type="button" disabled={busyMemberId === member.memberId} onClick={() => onSaveEmail(member)}>
+                    {busyMemberId === member.memberId ? "Saving..." : "Save email"}
+                  </button>
+                  {member.active ? (
+                    <button type="button" disabled={busyMemberId === member.memberId} onClick={() => onDeactivate(member)}>Deactivate</button>
+                  ) : (
+                    <button type="button" disabled={busyMemberId === member.memberId} onClick={() => onReactivate(member)}>Reactivate</button>
+                  )}
+                  <button type="button" className="danger-button" disabled={busyMemberId === member.memberId} onClick={() => onHardDelete(member)}>Hard delete</button>
+                </div>
               </td>
             </tr>
           ))}

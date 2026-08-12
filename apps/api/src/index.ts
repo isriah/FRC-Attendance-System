@@ -7,7 +7,7 @@ import { errorResponse, json, noContent, optionsResponse, readJson } from "./htt
 import { claimPendingKioskCommands, completeKioskCommand, createKioskCommand, listRecentKioskCommands, requireKioskCommandAction } from "./kioskCommands";
 import { bulkDeleteScheduledMeetings, createScheduledMeeting, deleteScheduledMeeting, listScheduledMeetings, updateScheduledMeeting, type BulkScheduledMeetingDeleteInput, type ScheduledMeetingInput } from "./meetings";
 import { buildAttendanceSessionReport, buildMeetingAbsenceReport, buildMeetingSummaryReport, buildMemberAttendanceReport, buildPresenceReport, buildRosterAttendanceSummary, reportDateRangeFromSearchParams } from "./reports";
-import { listActiveRoster, syncRoster, updateStudentEmail, type RosterMemberInput } from "./roster";
+import { deactivateMember, hardDeleteMember, listActiveRoster, listRosterMembers, reactivateMember, syncRoster, updateStudentEmail, type RosterMemberInput } from "./roster";
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -63,9 +63,10 @@ export default {
 
       if (route === "GET /admin/members" || route === "GET /admin/students") {
         await requireAdmin(request, env);
-        const rows = await env.DB.prepare("SELECT student_id, first_name, last_name, email, active, roster_synced_at FROM students ORDER BY last_name, first_name").all();
-        const members = rows.results.map(rowToMember);
-        return json(route === "GET /admin/members" ? { members } : { students: rows.results, members });
+        const active = url.searchParams.get("active");
+        const activeFilter = active === null ? undefined : active === "true" || active === "1";
+        const members = await listRosterMembers(env, activeFilter);
+        return json(route === "GET /admin/members" ? { members } : { students: members.map(memberToLegacyStudent), members });
       }
 
       if (route === "GET /admin/admin-users") {
@@ -89,6 +90,30 @@ export default {
         if (!memberId) throw Object.assign(new Error("Member id is required"), { status: 400 });
         const body = await readJson<{ email?: string | null }>(request);
         return json(await updateStudentEmail(env, decodeURIComponent(memberId), body.email ?? null));
+      }
+
+      const adminMemberDeactivate = url.pathname.match(/^\/admin\/(?:members|students)\/([^/]+)\/deactivate$/);
+      if (request.method === "POST" && adminMemberDeactivate) {
+        await requireAdmin(request, env);
+        const memberId = adminMemberDeactivate[1];
+        if (!memberId) throw Object.assign(new Error("Member id is required"), { status: 400 });
+        return json(await deactivateMember(env, decodeURIComponent(memberId)));
+      }
+
+      const adminMemberReactivate = url.pathname.match(/^\/admin\/(?:members|students)\/([^/]+)\/reactivate$/);
+      if (request.method === "POST" && adminMemberReactivate) {
+        await requireAdmin(request, env);
+        const memberId = adminMemberReactivate[1];
+        if (!memberId) throw Object.assign(new Error("Member id is required"), { status: 400 });
+        return json(await reactivateMember(env, decodeURIComponent(memberId)));
+      }
+
+      const adminMember = url.pathname.match(/^\/admin\/(?:members|students)\/([^/]+)$/);
+      if (request.method === "DELETE" && adminMember) {
+        await requireAdmin(request, env);
+        const memberId = adminMember[1];
+        if (!memberId) throw Object.assign(new Error("Member id is required"), { status: 400 });
+        return json(await hardDeleteMember(env, decodeURIComponent(memberId)));
       }
 
       if (route === "POST /admin/kiosks") {
@@ -253,17 +278,6 @@ async function updateKioskHealth(env: Env, report: KioskHealthReport) {
   ).run();
 }
 
-function rowToMember(row: Record<string, unknown>) {
-  return {
-    memberId: String(row.student_id),
-    firstName: String(row.first_name),
-    lastName: String(row.last_name),
-    email: row.email ?? null,
-    active: Boolean(row.active),
-    rosterSyncedAt: row.roster_synced_at ?? null
-  };
-}
-
 function rowToScanEventResponse(row: Record<string, unknown>) {
   return {
     id: row.id,
@@ -275,5 +289,23 @@ function rowToScanEventResponse(row: Record<string, unknown>) {
     source: row.source,
     status: row.status,
     rejectionReason: row.rejection_reason
+  };
+}
+
+function memberToLegacyStudent(member: {
+  memberId: string;
+  firstName: string;
+  lastName: string;
+  email?: string | null;
+  active: boolean;
+  rosterSyncedAt?: string | null;
+}) {
+  return {
+    student_id: member.memberId,
+    first_name: member.firstName,
+    last_name: member.lastName,
+    email: member.email ?? null,
+    active: member.active,
+    roster_synced_at: member.rosterSyncedAt ?? null
   };
 }
