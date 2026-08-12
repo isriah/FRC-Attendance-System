@@ -57,10 +57,10 @@ This repeatable check verifies the production Worker `/health` response, verifie
    - `GOOGLE_ALLOWED_EMAILS`: comma-separated bootstrap mentor emails.
    - `GOOGLE_ALLOWED_DOMAIN`: optional bootstrap Google Workspace domain.
    - `DUPLICATE_WINDOW_SECONDS`: default `90`.
-   - `EMAIL_PROVIDER_URL`: optional HTTP email provider endpoint for missed-meeting notifications.
-   - `EMAIL_PROVIDER_API_KEY`: optional bearer token for the configured email provider; store as a secret when used.
-   - `EMAIL_FROM_ADDRESS`: required with `EMAIL_PROVIDER_URL` to enable actual sends.
+   - `RESEND_API_KEY`: Resend API key for missed-meeting notifications; store as a Worker secret when used.
+   - `EMAIL_FROM_ADDRESS`: verified Resend sender address; required with `RESEND_API_KEY` to enable actual sends.
    - `EMAIL_FROM_NAME`: optional display name, defaults to `FRC Attendance`.
+   - `EMAIL_PROVIDER_URL` and `EMAIL_PROVIDER_API_KEY`: optional legacy generic HTTP provider settings retained for local experiments; prefer Resend for production.
 
 6. Deploy the Worker:
 
@@ -197,7 +197,7 @@ Worker version `d276724a-511c-43cc-a5c9-443164ec62f5` excludes future and in-pro
 
 Deployment `https://0c2ffd86.frc-attendance-dashboard.pages.dev` and Worker version `10baf524-a915-4b12-afce-4bfa3c2d4367` add unscheduled attendance management. Reports hide attendance-only dates by default and expose `includeUnscheduled=1`; dashboard Meetings and Reports views provide a Show unscheduled attendance toggle, Convert action to create a scheduled meeting for an attendance-only date, and destructive Clear action guarded by typed `CLEAR YYYY-MM-DD` confirmation. Clear removes API-owned scan/manual source events for that local date, rebuilds derived sessions, and preserves scheduled meetings, roster, admins, kiosks, and fingerprint mappings. No D1 migration was required. Production Worker/dashboard smoke and Pi-local roster pull smoke passed on 2026-08-12. Bench Pi update on 2026-08-12 pulled main through commit `ea991045183b7790cc18b2f46484e9e6316b5fbd` and restarted `frc-bench-api` and `frc-dashboard-ui`.
 
-Deployment `https://4810fab3.frc-attendance-dashboard.pages.dev` and Worker version `cb053a95-5869-4e62-b0e5-042382958721` add missed-meeting absence email previews/sends for completed required scheduled meetings, roster search by member ID/name, and web-dashboard hiding of unavailable fingerprint detail controls. Remote D1 migration `0006_notification_deliveries.sql` was applied. Email sending remains preview-only until `EMAIL_PROVIDER_URL` and `EMAIL_FROM_ADDRESS` are configured. Production Worker/dashboard smoke and Pi-local roster pull smoke passed on 2026-08-12. Bench Pi update on 2026-08-12 pulled main through commit `d30e35e65bab1d7a7c23abf1b4fe4be13c57ef06` and restarted `frc-dashboard-ui` and `frc-bench-api`.
+Deployment `https://4810fab3.frc-attendance-dashboard.pages.dev` and Worker version `cb053a95-5869-4e62-b0e5-042382958721` add missed-meeting absence email previews/sends for completed required scheduled meetings, roster search by member ID/name, and web-dashboard hiding of unavailable fingerprint detail controls. Remote D1 migration `0006_notification_deliveries.sql` was applied. Email sending remains preview-only until `RESEND_API_KEY` and `EMAIL_FROM_ADDRESS` are configured. Production Worker/dashboard smoke and Pi-local roster pull smoke passed on 2026-08-12. Bench Pi update on 2026-08-12 pulled main through commit `d30e35e65bab1d7a7c23abf1b4fe4be13c57ef06` and restarted `frc-dashboard-ui` and `frc-bench-api`.
 
 The dashboard login UI follows the same boundary: when `VITE_GOOGLE_CLIENT_ID` is configured, it shows Google sign-in and a production notice that email-only local login is disabled. The email-only form is rendered only for local development builds with no Google client ID.
 
@@ -219,7 +219,31 @@ Dashboard roster records can store an optional member email for user association
 
 The Worker exposes authenticated admin `POST /admin/notifications/meeting-absence` for completed required scheduled meetings. The request body accepts `meetingDate`, optional `preview`, and optional `resend`; the dashboard uses preview first, then confirms before sending when a provider is configured.
 
-Sending is disabled unless both `EMAIL_PROVIDER_URL` and `EMAIL_FROM_ADDRESS` are configured. In disabled mode, the endpoint returns who would receive email, who is missing a member email, and a warning without writing delivery audit rows. When enabled, the Worker posts a generic JSON payload to `EMAIL_PROVIDER_URL` with an optional `Authorization: Bearer <EMAIL_PROVIDER_API_KEY>` header. The provider-specific shape is intentionally isolated in `apps/api/src/notifications.ts` so another HTTP provider can be added later without changing absence selection.
+Production email sending uses Resend. Sending is disabled unless both `RESEND_API_KEY` and `EMAIL_FROM_ADDRESS` are configured. In disabled mode, the endpoint returns who would receive email, who is missing a member email, and a warning without writing delivery audit rows. When enabled, the Worker posts to `https://api.resend.com/emails` with `Authorization: Bearer <RESEND_API_KEY>`, a Resend idempotency key, and a JSON body containing `from`, `to`, `subject`, `html`, and `text`. The provider-specific shape is isolated in `apps/api/src/notifications.ts`; legacy `EMAIL_PROVIDER_URL` and `EMAIL_PROVIDER_API_KEY` generic HTTP settings are still accepted for non-production experiments.
+
+Resend setup:
+
+1. Verify a sender domain in Resend and create an API key. For free/no-branding delivery, use an address on the verified team domain rather than a shared or test sender.
+2. Configure the Worker secret and sender variables without committing secrets:
+
+   ```powershell
+   npx.cmd wrangler secret put RESEND_API_KEY --config apps/api/wrangler.toml
+   npx.cmd wrangler secret put EMAIL_FROM_ADDRESS --config apps/api/wrangler.toml
+   npx.cmd wrangler secret put EMAIL_FROM_NAME --config apps/api/wrangler.toml
+   ```
+
+   Suggested values:
+
+   - `EMAIL_FROM_ADDRESS`: `attendance@<verified-domain>`
+   - `EMAIL_FROM_NAME`: `FRC Attendance`
+
+3. Deploy the Worker after secrets are set:
+
+   ```powershell
+   npm.cmd --workspace @frc-attendance/api run deploy
+   ```
+
+4. Use the dashboard missed-meeting preview first, then send one completed required meeting as a smoke test. Confirm Resend shows accepted deliveries and `notification_deliveries.provider_message_id` is populated.
 
 Migration `0006_notification_deliveries.sql` creates `notification_deliveries` for audit and duplicate prevention. It tracks notification kind, meeting date, member ID, recipient email, status, provider message ID, error message, and sent/error timestamps. Successful prior deliveries are skipped by default; `resend: true` includes them again.
 

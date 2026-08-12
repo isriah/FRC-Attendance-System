@@ -64,7 +64,7 @@ export async function sendMeetingAbsenceNotifications(
   const meeting = await getRequiredCompletedMeeting(env, meetingDate, now);
   const absenceReport = await buildMeetingAbsenceReport(env, meetingDate, now);
   const absences = await hydrateAbsenceEmails(env, absenceReport.rows);
-  const provider = httpEmailProvider(env);
+  const provider = emailProvider(env);
   const mode = preview || !provider.configured ? "preview" : "send";
   const sentKeys = resend ? new Set<string>() : await sentNotificationKeys(env, meetingDate);
   const recipients: NotificationRecipient[] = [];
@@ -171,18 +171,49 @@ async function hydrateAbsenceEmails(env: Env, rows: Array<{ memberId: string; fi
   }));
 }
 
-function httpEmailProvider(env: Env): EmailProvider {
-  const url = env.EMAIL_PROVIDER_URL?.trim();
+function emailProvider(env: Env): EmailProvider {
   const fromAddress = normalizeOptionalEmail(env.EMAIL_FROM_ADDRESS);
-  if (!url || !fromAddress) {
-    return {
-      configured: false,
-      async send() {
-        throw new Error("Email provider is not configured");
-      }
-    };
-  }
+  const resendApiKey = env.RESEND_API_KEY?.trim();
+  if (resendApiKey && fromAddress) return resendEmailProvider(env, resendApiKey, fromAddress);
 
+  const url = env.EMAIL_PROVIDER_URL?.trim();
+  if (url && fromAddress) return genericHttpEmailProvider(env, url, fromAddress);
+
+  return {
+    configured: false,
+    async send() {
+      throw new Error("Email provider is not configured");
+    }
+  };
+}
+
+function resendEmailProvider(env: Env, apiKey: string, fromAddress: string): EmailProvider {
+  return {
+    configured: true,
+    async send(message) {
+      const response = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${apiKey}`,
+          "content-type": "application/json",
+          "Idempotency-Key": idempotencyKey(message)
+        },
+        body: JSON.stringify({
+          from: formatFromAddress(fromAddress, env.EMAIL_FROM_NAME),
+          to: [message.to],
+          subject: message.subject,
+          html: message.html,
+          text: message.text
+        })
+      });
+      const text = await response.text();
+      if (!response.ok) throw new Error(text || `Resend returned ${response.status}`);
+      return { providerMessageId: providerMessageIdFromResponse(text) };
+    }
+  };
+}
+
+function genericHttpEmailProvider(env: Env, url: string, fromAddress: string): EmailProvider {
   return {
     configured: true,
     async send(message) {
@@ -211,7 +242,19 @@ function httpEmailProvider(env: Env): EmailProvider {
   };
 }
 
-function buildAbsenceEmail(meeting: { meeting_date: string; title: string | null }, member: { firstName: string; email: string }) {
+function formatFromAddress(fromAddress: string, fromName?: string) {
+  const name = fromName?.trim() || "FRC Attendance";
+  return `${name} <${fromAddress}>`;
+}
+
+function idempotencyKey(message: EmailMessage) {
+  const kind = message.metadata.notificationKind ?? "notification";
+  const meetingDate = message.metadata.meetingDate ?? "unknown-date";
+  const memberId = message.metadata.memberId ?? "unknown-member";
+  return `${kind}:${meetingDate}:${memberId}:${message.to.trim().toLowerCase()}`;
+}
+
+function buildAbsenceEmail(meeting: { meeting_date: string; title: string | null }, member: { memberId: string; firstName: string; email: string }) {
   const meetingLabel = meeting.title ?? `meeting on ${meeting.meeting_date}`;
   const subject = `Missed meeting: ${meetingLabel}`;
   const text = [
@@ -235,7 +278,8 @@ function buildAbsenceEmail(meeting: { meeting_date: string; title: string | null
     html,
     metadata: {
       notificationKind: meetingAbsenceKind,
-      meetingDate: meeting.meeting_date
+      meetingDate: meeting.meeting_date,
+      memberId: member.memberId
     }
   };
 }
