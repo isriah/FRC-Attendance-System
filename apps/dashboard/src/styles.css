@@ -437,6 +437,37 @@ textarea {
   min-width: 0;
 }
 
+.roster-controls {
+  align-items: flex-start;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  justify-content: space-between;
+  margin-bottom: 16px;
+  min-width: 0;
+}
+
+.roster-controls .meeting-tabs {
+  margin-bottom: 0;
+}
+
+.roster-search {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  min-width: min(100%, 260px);
+}
+
+.roster-search span {
+  color: var(--muted-color);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.roster-search input {
+  width: 100%;
+}
+
 .meeting-calendar {
   display: grid;
   gap: 12px;
