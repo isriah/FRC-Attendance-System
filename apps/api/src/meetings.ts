@@ -60,6 +60,20 @@ export async function createScheduledMeeting(env: Env, input: ScheduledMeetingIn
   return meeting;
 }
 
+export async function convertUnscheduledAttendanceToMeeting(env: Env, input: ScheduledMeetingInput): Promise<ScheduledMeeting> {
+  const meetingDate = requireIsoDate(input.meetingDate, "meetingDate");
+  const existing = await env.DB.prepare("SELECT id FROM scheduled_meetings WHERE meeting_date = ?").bind(meetingDate).first<{ id: string }>();
+  if (existing) throw Object.assign(new Error(`Scheduled meeting already exists for ${meetingDate}`), { status: 409 });
+
+  const attendance = await env.DB.prepare("SELECT COUNT(*) AS count FROM attendance_sessions WHERE meeting_date = ?").bind(meetingDate).first<{ count: number }>();
+  if (Number(attendance?.count ?? 0) === 0) {
+    throw Object.assign(new Error(`No unscheduled attendance exists for ${meetingDate}`), { status: 404 });
+  }
+
+  return createScheduledMeeting(env, input);
+}
+
+
 export async function updateScheduledMeeting(env: Env, meetingId: string, input: ScheduledMeetingInput): Promise<ScheduledMeeting> {
   const existing = await getScheduledMeetingRow(env, meetingId);
   if (!existing) throw Object.assign(new Error("Scheduled meeting not found"), { status: 404 });

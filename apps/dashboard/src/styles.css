@@ -544,6 +544,19 @@ textarea {
   color: var(--surface-bg);
 }
 
+.calendar-event.attendance-only {
+  background: var(--accent-bg);
+  border-color: var(--accent-soft);
+  color: var(--accent-dark);
+}
+
+.calendar-event.attendance-only:hover,
+.calendar-event.attendance-only.selected {
+  background: var(--accent-color);
+  border-color: var(--accent-color);
+  color: var(--surface-bg);
+}
+
 .calendar-event span,
 .calendar-event small {
   overflow: hidden;

@@ -202,6 +202,12 @@ const server = createServer(async (request, response) => {
       return;
     }
 
+    if (request.method === "POST" && request.url === "/admin/meetings/convert-unscheduled") {
+      const body = await readBody<ScheduledMeetingInput>(request);
+      sendJson(response, 201, convertUnscheduledAttendanceToMeeting(body));
+      return;
+    }
+
     const adminMeeting = request.url?.match(/^\/admin\/meetings\/([^/]+)$/);
     if (adminMeeting && request.method === "PUT") {
       const body = await readBody<ScheduledMeetingInput>(request);
@@ -305,6 +311,12 @@ const server = createServer(async (request, response) => {
         rosterSyncedAt: roster.rosterSyncedAt,
         pulledAt: new Date().toISOString()
       });
+      return;
+    }
+
+    if (request.method === "POST" && request.url === "/admin/attendance/clear-date") {
+      const body = await readBody<{ meetingDate?: unknown; confirmation?: unknown }>(request);
+      sendJson(response, 200, clearBenchAttendanceForDate(body));
       return;
     }
 
@@ -601,6 +613,17 @@ function createScheduledMeeting(input: ScheduledMeetingInput): ScheduledMeeting 
   return meeting;
 }
 
+function convertUnscheduledAttendanceToMeeting(input: ScheduledMeetingInput): ScheduledMeeting {
+  const meetingDate = requireIsoDate(input.meetingDate, "meetingDate");
+  const existing = db.prepare("SELECT id FROM scheduled_meetings WHERE meeting_date = ?").get(meetingDate) as { id: string } | undefined;
+  if (existing) throw httpError(409, `Scheduled meeting already exists for ${meetingDate}`);
+
+  const hasAttendance = deriveBenchSessions().some((session) => session.meetingDate === meetingDate);
+  if (!hasAttendance) throw httpError(404, `No unscheduled attendance exists for ${meetingDate}`);
+
+  return createScheduledMeeting(input);
+}
+
 function updateScheduledMeeting(meetingId: string, input: ScheduledMeetingInput): ScheduledMeeting {
   const existing = getScheduledMeetingRow(meetingId);
   if (!existing) throw httpError(404, "Scheduled meeting not found");
@@ -648,6 +671,31 @@ function bulkDeleteScheduledMeetings(input: BulkScheduledMeetingDeleteInput) {
     return deleted;
   });
   return { deleted: deleteMany(meetingIds) };
+}
+
+function clearBenchAttendanceForDate(input: { meetingDate?: unknown; confirmation?: unknown }) {
+  const meetingDate = requireIsoDate(input.meetingDate, "meetingDate");
+  const expectedConfirmation = `CLEAR ${meetingDate}`;
+  if (input.confirmation !== expectedConfirmation) {
+    throw httpError(400, `Type ${expectedConfirmation} to clear attendance for ${meetingDate}`);
+  }
+
+  const rows = db.prepare("SELECT id, occurred_at FROM scan_events ORDER BY occurred_at ASC").all() as Array<{ id: string; occurred_at: string }>;
+  const scanIds = rows
+    .filter((row) => meetingDateForTimestamp(row.occurred_at) === meetingDate)
+    .map((row) => row.id);
+  const deleteScanEvent = db.prepare("DELETE FROM scan_events WHERE id = ?");
+  const deleteMany = db.transaction((ids: string[]) => {
+    for (const id of ids) deleteScanEvent.run(id);
+  });
+  deleteMany(scanIds);
+
+  return {
+    meetingDate,
+    deletedScanEvents: scanIds.length,
+    deletedManualEvents: 0,
+    confirmation: expectedConfirmation
+  };
 }
 
 function normalizeMeetingInput(input: ScheduledMeetingInput): Omit<ScheduledMeeting, "id" | "createdAt" | "updatedAt"> {
@@ -1192,6 +1240,7 @@ function buildPresenceReport(date = meetingDateForTimestamp(new Date().toISOStri
 interface BenchReportDateRange {
   startDate?: string;
   endDate?: string;
+  includeUnscheduled?: boolean;
 }
 
 function buildMemberAttendanceReport(memberId: string, range: BenchReportDateRange = {}, now = new Date()) {
@@ -1203,10 +1252,14 @@ function buildMemberAttendanceReport(memberId: string, range: BenchReportDateRan
     .filter((meeting) => isDateInRange(meeting.meeting_date, range))
     .filter((meeting) => !isBenchMeetingComplete(meeting, now))
     .map((meeting) => meeting.meeting_date));
+  const scheduledDates = new Set(benchScheduledMeetings()
+    .filter((meeting) => isDateInRange(meeting.meeting_date, range))
+    .map((meeting) => meeting.meeting_date));
   const sessions = deriveBenchSessions().filter((session) => (
     isDateInRange(session.meetingDate, range) &&
     isDateComplete(session.meetingDate, reportDate) &&
-    !incompleteScheduledDates.has(session.meetingDate)
+    !incompleteScheduledDates.has(session.meetingDate) &&
+    (range.includeUnscheduled || scheduledDates.has(session.meetingDate))
   ));
   const allDates = benchReportMeetingDates(range, now);
   const allDateSet = new Set(allDates);
@@ -1247,7 +1300,8 @@ function buildBenchAttendanceSessionReport(range: BenchReportDateRange = {}, lim
   const sessions = deriveBenchSessions().filter((session) => (
     isDateInRange(session.meetingDate, range) &&
     isDateComplete(session.meetingDate, reportDate) &&
-    !incompleteScheduledDates.has(session.meetingDate)
+    !incompleteScheduledDates.has(session.meetingDate) &&
+    (range.includeUnscheduled || meetingsByDate.has(session.meetingDate))
   ));
   const sessionDates = new Set(sessions.map((session) => session.meetingDate));
   const sessionRows = sessions.map((session) => {
@@ -1487,6 +1541,8 @@ function benchReportMeetingDates(range: BenchReportDateRange, now = new Date()):
       .filter((row) => row.required === 1 && isDateInRange(row.meeting_date, range) && isBenchMeetingComplete(row, now));
     return [...new Set(rows.map((row) => row.meeting_date))].sort();
   }
+  if (!range.includeUnscheduled) return [];
+
   const reportDate = benchCurrentReportDate(now);
   return [...new Set(deriveBenchSessions()
     .filter((session) => isDateInRange(session.meetingDate, range) && isDateComplete(session.meetingDate, reportDate))
@@ -1526,12 +1582,17 @@ function benchReportDateRangeFromUrl(url: URL): BenchReportDateRange {
   const startDate = optionalBenchIsoDate(url.searchParams.get("startDate"), "startDate");
   const endDate = optionalBenchIsoDate(url.searchParams.get("endDate"), "endDate");
   if (startDate && endDate && startDate > endDate) throw httpError(400, "startDate must be on or before endDate");
-  return { startDate, endDate };
+  return { startDate, endDate, includeUnscheduled: isTruthyBenchParam(url.searchParams.get("includeUnscheduled")) };
 }
 
 function optionalBenchIsoDate(value: string | null, fieldName: string): string | undefined {
   if (value === null || value === "") return undefined;
   return requireIsoDate(value, fieldName);
+}
+
+function isTruthyBenchParam(value: string | null): boolean {
+  if (value === null || value === "") return false;
+  return ["1", "true", "yes", "on"].includes(value.toLowerCase());
 }
 
 function isDateInRange(meetingDate: string, range: BenchReportDateRange): boolean {

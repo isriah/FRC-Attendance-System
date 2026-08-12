@@ -1,4 +1,4 @@
-import { DEFAULT_DUPLICATE_WINDOW_MS, deriveAttendanceSessions, isDuplicateScan, meetingDateForTimestamp } from "@frc-attendance/shared";
+import { DEFAULT_DUPLICATE_WINDOW_MS, deriveAttendanceSessions, isDuplicateScan, meetingDateForTimestamp, requireIsoDate } from "@frc-attendance/shared";
 import type { KioskScanAcknowledgement, KioskSyncEventInput, KioskSyncResult, ScanEvent, ScanEventStatus } from "@frc-attendance/shared";
 import type { Env } from "./env";
 import { buildMemberAttendanceReport } from "./reports";
@@ -96,6 +96,45 @@ export async function addManualEvent(env: Env, input: { memberId: string; occurr
   return { id, ...input };
 }
 
+export async function clearAttendanceForDate(env: Env, input: { meetingDate?: unknown; confirmation?: unknown }) {
+  const meetingDate = requireIsoDate(input.meetingDate, "meetingDate");
+  const expectedConfirmation = `CLEAR ${meetingDate}`;
+  if (input.confirmation !== expectedConfirmation) {
+    throw Object.assign(new Error(`Type ${expectedConfirmation} to clear attendance for ${meetingDate}`), { status: 400 });
+  }
+
+  const bounds = broadUtcBoundsForLocalDate(meetingDate);
+  const [scanRows, manualRows] = await Promise.all([
+    env.DB.prepare("SELECT id, occurred_at FROM scan_events WHERE occurred_at >= ? AND occurred_at < ?")
+      .bind(bounds.start, bounds.end)
+      .all<{ id: string; occurred_at: string }>(),
+    env.DB.prepare("SELECT id, occurred_at FROM manual_events WHERE occurred_at >= ? AND occurred_at < ?")
+      .bind(bounds.start, bounds.end)
+      .all<{ id: string; occurred_at: string }>()
+  ]);
+
+  const scanIds = scanRows.results
+    .filter((row) => meetingDateForTimestamp(row.occurred_at, env.TIME_ZONE) === meetingDate)
+    .map((row) => row.id);
+  const manualIds = manualRows.results
+    .filter((row) => meetingDateForTimestamp(row.occurred_at, env.TIME_ZONE) === meetingDate)
+    .map((row) => row.id);
+
+  const deleteStatements = [
+    ...scanIds.map((id) => env.DB.prepare("DELETE FROM scan_events WHERE id = ?").bind(id)),
+    ...manualIds.map((id) => env.DB.prepare("DELETE FROM manual_events WHERE id = ?").bind(id))
+  ];
+  if (deleteStatements.length > 0) await env.DB.batch(deleteStatements);
+  await rebuildAttendanceSessions(env);
+
+  return {
+    meetingDate,
+    deletedScanEvents: scanIds.length,
+    deletedManualEvents: manualIds.length,
+    confirmation: expectedConfirmation
+  };
+}
+
 export async function rebuildAttendanceSessions(env: Env): Promise<void> {
   const scans = await env.DB.prepare(
     "SELECT id, student_id, occurred_at, status FROM scan_events WHERE status = 'accepted' ORDER BY occurred_at ASC"
@@ -173,6 +212,14 @@ function rowToScanEvent(row: {
   };
 }
 
+function broadUtcBoundsForLocalDate(meetingDate: string): { start: string; end: string } {
+  const start = new Date(`${meetingDate}T00:00:00.000Z`);
+  start.setUTCDate(start.getUTCDate() - 2);
+  const end = new Date(`${meetingDate}T00:00:00.000Z`);
+  end.setUTCDate(end.getUTCDate() + 3);
+  return { start: start.toISOString(), end: end.toISOString() };
+}
+
 async function buildAcknowledgement(env: Env, acknowledgement: AcknowledgementInput): Promise<KioskScanAcknowledgement> {
   const student = await env.DB.prepare(
     "SELECT first_name, last_name FROM students WHERE student_id = ?"
@@ -244,7 +291,7 @@ async function actionForAcceptedScan(env: Env, kioskId: string, input: Normalize
 
 async function attendanceSummary(env: Env, memberId: string): Promise<{ rate: number | null; summary?: string }> {
   try {
-    const report = await buildMemberAttendanceReport(env, memberId);
+    const report = await buildMemberAttendanceReport(env, memberId, { includeUnscheduled: true });
     if (report.attendanceRate === null) return { rate: null };
     return {
       rate: report.attendanceRate,

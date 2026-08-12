@@ -1,11 +1,11 @@
 import { requireIsoTimestamp, requireNonEmptyString, type KioskHealthReport, type KioskSyncRequest } from "@frc-attendance/shared";
 import { listAdminUsers, requireAdmin, requireKiosk, sha256Hex, upsertAdminUser } from "./auth";
-import { addManualEvent, syncKioskEvents } from "./attendanceStore";
+import { addManualEvent, clearAttendanceForDate, syncKioskEvents } from "./attendanceStore";
 import type { Env } from "./env";
 import { buildLegacySheetExport } from "./export";
 import { errorResponse, json, noContent, optionsResponse, readJson } from "./http";
 import { claimPendingKioskCommands, completeKioskCommand, createKioskCommand, listRecentKioskCommands, requireKioskCommandAction } from "./kioskCommands";
-import { bulkDeleteScheduledMeetings, createScheduledMeeting, deleteScheduledMeeting, listScheduledMeetings, updateScheduledMeeting, type BulkScheduledMeetingDeleteInput, type ScheduledMeetingInput } from "./meetings";
+import { bulkDeleteScheduledMeetings, convertUnscheduledAttendanceToMeeting, createScheduledMeeting, deleteScheduledMeeting, listScheduledMeetings, updateScheduledMeeting, type BulkScheduledMeetingDeleteInput, type ScheduledMeetingInput } from "./meetings";
 import { buildAttendanceSessionReport, buildMeetingAbsenceReport, buildMeetingSummaryReport, buildMemberAttendanceReport, buildPresenceReport, buildRosterAttendanceSummary, reportDateRangeFromSearchParams } from "./reports";
 import { deactivateMember, hardDeleteMember, listActiveRoster, listRosterMembers, reactivateMember, syncRoster, updateStudentEmail, type RosterMemberInput } from "./roster";
 
@@ -158,6 +158,12 @@ export default {
         return json(await bulkDeleteScheduledMeetings(env, body));
       }
 
+      if (route === "POST /admin/meetings/convert-unscheduled") {
+        await requireAdmin(request, env);
+        const body = await readJson<ScheduledMeetingInput>(request);
+        return json(await convertUnscheduledAttendanceToMeeting(env, body), { status: 201 });
+      }
+
       const adminMeeting = url.pathname.match(/^\/admin\/meetings\/([^/]+)$/);
       if (adminMeeting && request.method === "PUT") {
         await requireAdmin(request, env);
@@ -200,6 +206,12 @@ export default {
           reason: requireNonEmptyString(body.reason, "reason"),
           adminEmail: admin.email
         }));
+      }
+
+      if (route === "POST /admin/attendance/clear-date") {
+        await requireAdmin(request, env);
+        const body = await readJson<{ meetingDate?: unknown; confirmation?: unknown }>(request);
+        return json(await clearAttendanceForDate(env, body));
       }
 
       if (route === "GET /admin/events") {

@@ -63,7 +63,7 @@ describe("report builders", () => {
     insertSession(env, "100001", "2026-01-02", "2026-01-02T23:00:00.000Z", null, "open");
     insertSession(env, "100002", "2026-01-09", "2026-01-09T20:00:00.000Z", null, "open");
 
-    const report = await buildMemberAttendanceReport(env, "100001");
+    const report = await buildMemberAttendanceReport(env, "100001", { includeUnscheduled: true });
 
     expect(report).toMatchObject({
       memberId: "100001",
@@ -384,7 +384,31 @@ describe("report builders", () => {
     });
   });
 
-  it("treats unscheduled attendance dates as required only when no scheduled meetings exist", async () => {
+  it("hides unscheduled attendance from meeting reports by default and includes it when requested", async () => {
+    const env = createTestEnv();
+    insertStudent(env, "100001", "Bench", "Student");
+    insertMeeting(env, "2026-01-02", 1, "Required Build");
+    insertSession(env, "100001", "2026-01-02", "2026-01-02T20:00:00.000Z", null, "open");
+    insertSession(env, "100001", "2026-01-09", "2026-01-09T20:00:00.000Z", null, "open");
+
+    const defaultSummary = await buildMeetingSummaryReport(env);
+    const defaultSessions = await buildAttendanceSessionReport(env);
+    const visibleSummary = await buildMeetingSummaryReport(env, { includeUnscheduled: true });
+    const visibleSessions = await buildAttendanceSessionReport(env, { includeUnscheduled: true });
+
+    expect(defaultSummary.map((row) => row.meetingDate)).toEqual(["2026-01-02"]);
+    expect(defaultSessions.map((row) => row.meeting_date)).toEqual(["2026-01-02"]);
+    expect(visibleSummary.map((row) => row.meetingDate)).toEqual(["2026-01-09", "2026-01-02"]);
+    expect(visibleSummary[0]).toMatchObject({
+      meetingDate: "2026-01-09",
+      title: null,
+      scheduled: false,
+      hasAttendance: true
+    });
+    expect(visibleSessions.map((row) => row.meeting_date)).toEqual(["2026-01-09", "2026-01-02"]);
+  });
+
+  it("treats unscheduled attendance dates as required only when explicitly included and no scheduled meetings exist", async () => {
     const env = createTestEnv();
     insertStudent(env, "100001", "Bench", "Student");
     insertStudent(env, "100002", "Drive", "Captain");
@@ -393,8 +417,10 @@ describe("report builders", () => {
     insertSession(env, "999999", "2026-01-02", "2026-01-02T20:10:00.000Z", null, "open");
     insertSession(env, "100002", "2026-01-09", "2026-01-09T20:00:00.000Z", "2026-01-09T22:00:00.000Z", "closed");
 
-    const rows = await buildMeetingSummaryReport(env, { startDate: "2026-01-02", endDate: "2026-01-02" });
+    const defaultRows = await buildMeetingSummaryReport(env, { startDate: "2026-01-02", endDate: "2026-01-02" });
+    const rows = await buildMeetingSummaryReport(env, { startDate: "2026-01-02", endDate: "2026-01-02", includeUnscheduled: true });
 
+    expect(defaultRows).toEqual([]);
     expect(rows).toEqual([
       {
         meetingDate: "2026-01-02",
@@ -411,6 +437,15 @@ describe("report builders", () => {
         openCheckIns: 2
       }
     ]);
+  });
+
+  it("parses the unscheduled report toggle from search params", () => {
+    expect(reportDateRangeFromSearchParams(new URLSearchParams("includeUnscheduled=true"))).toMatchObject({
+      includeUnscheduled: true
+    });
+    expect(reportDateRangeFromSearchParams(new URLSearchParams())).toMatchObject({
+      includeUnscheduled: false
+    });
   });
 
   it("returns absent active roster rows for a required meeting", async () => {
@@ -585,7 +620,8 @@ describe("report builders", () => {
   it("validates report date ranges", () => {
     expect(reportDateRangeFromSearchParams(new URLSearchParams("startDate=2026-01-02&endDate=2026-01-09"))).toEqual({
       startDate: "2026-01-02",
-      endDate: "2026-01-09"
+      endDate: "2026-01-09",
+      includeUnscheduled: false
     });
     expect(() => reportDateRangeFromSearchParams(new URLSearchParams("startDate=2026-01-09&endDate=2026-01-02"))).toThrow("startDate must be on or before endDate");
   });

@@ -1090,7 +1090,9 @@ function FingerprintEnrollmentTable({
 
 function Meetings({ session }: { session: DashboardSession }) {
   const { data, error, reload } = useApi<{ meetings: ScheduledMeeting[] }>("/admin/meetings", session);
-  const { data: meetingSummary, error: meetingSummaryError, reload: reloadMeetingSummary } = useApi<{ meetings: MeetingSummaryReportRow[] }>("/admin/reports/meetings", session);
+  const [showUnscheduledAttendance, setShowUnscheduledAttendance] = useState(false);
+  const meetingReportQuery = showUnscheduledAttendance ? "?includeUnscheduled=1" : "";
+  const { data: meetingSummary, error: meetingSummaryError, reload: reloadMeetingSummary } = useApi<{ meetings: MeetingSummaryReportRow[] }>(`/admin/reports/meetings${meetingReportQuery}`, session);
   const [meetingViewTab, setMeetingViewTab] = useState<MeetingViewTab>("calendar");
   const [editingMeeting, setEditingMeeting] = useState<ScheduledMeeting>();
   const [formState, setFormState] = useState<MeetingFormState>(emptyMeetingForm());
@@ -1106,6 +1108,8 @@ function Meetings({ session }: { session: DashboardSession }) {
   const allMeetingsSelected = meetings.length > 0 && selectedMeetingIds.length === meetings.length;
   const meetingSummaryRows = meetingSummary?.meetings ?? [];
   const meetingSummaryByDate = new Map(meetingSummaryRows.map((meeting) => [meeting.meetingDate, meeting]));
+  const unscheduledSummaries = meetingSummaryRows.filter((meeting) => !meeting.scheduled);
+  const hasVisibleMeetingRows = meetings.length > 0 || (showUnscheduledAttendance && unscheduledSummaries.length > 0);
   const selectedMeeting = meetings.find((meeting) => meeting.meetingDate === selectedMeetingDate);
   const selectedMeetingSummary = selectedMeetingDate ? meetingSummaryByDate.get(selectedMeetingDate) : undefined;
   const { data: selectedPresence, error: selectedPresenceError, reload: reloadSelectedPresence } = useOptionalApi<PresenceReport>(
@@ -1124,14 +1128,17 @@ function Meetings({ session }: { session: DashboardSession }) {
     if (meetings.length === 0) return;
     const today = localDateInputValue();
     const todayMonth = today.slice(0, 7);
-    const selectedMeetingExists = meetings.some((meeting) => meeting.meetingDate === selectedMeetingDate);
+    const selectableDates = new Set([...meetings.map((meeting) => meeting.meetingDate), ...unscheduledSummaries.map((meeting) => meeting.meetingDate)]);
+    const selectedMeetingExists = selectableDates.has(selectedMeetingDate);
     const defaultMeeting =
       meetings.find((meeting) => meeting.meetingDate === today)
+      ?? unscheduledSummaries.find((meeting) => meeting.meetingDate === today)
       ?? meetings.find((meeting) => meeting.meetingDate.startsWith(todayMonth))
+      ?? unscheduledSummaries.find((meeting) => meeting.meetingDate.startsWith(todayMonth))
       ?? meetings[0];
     if (!calendarMonth && defaultMeeting) setCalendarMonth(defaultMeeting.meetingDate.slice(0, 7));
     if ((!selectedMeetingDate || !selectedMeetingExists) && defaultMeeting) setSelectedMeetingDate(defaultMeeting.meetingDate);
-  }, [calendarMonth, meetings, selectedMeetingDate]);
+  }, [calendarMonth, meetings, selectedMeetingDate, unscheduledSummaries]);
 
   useEffect(() => {
     setSelectedMeetingIds((ids) => ids.filter((id) => meetings.some((meeting) => meeting.id === id)));
@@ -1328,6 +1335,42 @@ function Meetings({ session }: { session: DashboardSession }) {
     setMeetingViewTab("form");
   }
 
+  function startConvertingUnscheduled(summary: MeetingSummaryReportRow) {
+    setEditingMeeting(undefined);
+    setFormState({
+      ...emptyMeetingForm(),
+      meetingDate: summary.meetingDate,
+      title: summary.title ?? defaultMeetingTitle,
+      required: true
+    });
+    setSelectedMeetingDate(summary.meetingDate);
+    setCalendarMonth(summary.meetingDate.slice(0, 7));
+    setMessage({ kind: "success", text: `Review details, then save ${summary.meetingDate} as a scheduled meeting.` });
+    setMeetingViewTab("form");
+  }
+
+  async function clearUnscheduledAttendance(summary: MeetingSummaryReportRow) {
+    const confirmation = window.prompt(`This permanently deletes scan and manual attendance data for ${summary.meetingDate}. Scheduled meetings, roster, kiosks, and fingerprint mappings are preserved. Type CLEAR ${summary.meetingDate} to continue.`);
+    if (confirmation === null) return;
+    setSaving(true);
+    setMessage(undefined);
+    try {
+      const result = await apiPost<{ deletedScanEvents: number; deletedManualEvents: number }>("/admin/attendance/clear-date", {
+        meetingDate: summary.meetingDate,
+        confirmation
+      }, session);
+      setMessage({ kind: "success", text: `Cleared ${summary.meetingDate}: deleted ${pluralize(result.deletedScanEvents, "scan event")} and ${pluralize(result.deletedManualEvents, "manual event")}.` });
+      if (selectedMeetingDate === summary.meetingDate) setSelectedMeetingDate("");
+      reloadMeetingSummary();
+      reloadSelectedPresence();
+      reloadSelectedAbsences();
+    } catch (err) {
+      setMessage({ kind: "error", text: friendlyDashboardError(err) });
+    } finally {
+      setSaving(false);
+    }
+  }
+
   const meetingForm = (
     <form className="meeting-form" onSubmit={submitMeeting}>
       <label className="field-label">
@@ -1414,39 +1457,46 @@ function Meetings({ session }: { session: DashboardSession }) {
           <button type="button" role="tab" aria-selected={meetingViewTab === "all"} className={meetingViewTab === "all" ? "active" : ""} onClick={() => setMeetingViewTab("all")}>All Meetings</button>
           <button type="button" role="tab" aria-selected={meetingViewTab === "form"} aria-disabled={meetingViewTab === "form"} className={meetingViewTab === "form" ? "active" : ""} onClick={meetingViewTab === "form" ? undefined : startCreating}>{editingMeeting ? "Edit Meeting" : "Add Meeting"}</button>
         </div>
+        <label className="inline-check notice info">
+          <input type="checkbox" checked={showUnscheduledAttendance} onChange={(event) => setShowUnscheduledAttendance(event.target.checked)} />
+          Show unscheduled attendance
+        </label>
         {message ? <p className={`notice ${message.kind}`}>{message.text}</p> : null}
         {error ? <p className="error">{error}</p> : null}
         {meetingSummaryError ? <p className="error">{meetingSummaryError}</p> : null}
 
         {meetingViewTab === "calendar" ? (
           <>
-            {meetings.length > 0 ? (
+            {hasVisibleMeetingRows ? (
               <MeetingCalendar
-                month={calendarMonth || meetings[0]?.meetingDate.slice(0, 7) || localDateInputValue().slice(0, 7)}
+                month={calendarMonth || meetings[0]?.meetingDate.slice(0, 7) || unscheduledSummaries[0]?.meetingDate.slice(0, 7) || localDateInputValue().slice(0, 7)}
                 meetings={meetings}
+                unscheduledSummaries={showUnscheduledAttendance ? unscheduledSummaries : []}
                 summariesByDate={meetingSummaryByDate}
                 selectedMeetingDate={selectedMeetingDate}
                 onMonthChange={setCalendarMonth}
                 onSelectMeeting={setSelectedMeetingDate}
               />
             ) : <p className="empty-state">No scheduled meetings yet.</p>}
-            <MeetingDetails
-              meeting={selectedMeeting}
-              summary={selectedMeetingSummary}
+              <MeetingDetails
+                meeting={selectedMeeting}
+                summary={selectedMeetingSummary}
               presence={selectedPresence}
               absences={selectedAbsences}
               presentRows={presentRows}
               presenceError={selectedPresenceError}
               absencesError={selectedAbsencesError}
-              saving={saving}
-              onEdit={startEditing}
-              onDelete={deleteMeeting}
-            />
+                saving={saving}
+                onEdit={startEditing}
+                onDelete={deleteMeeting}
+                onConvert={startConvertingUnscheduled}
+                onClear={clearUnscheduledAttendance}
+              />
           </>
         ) : null}
 
         {meetingViewTab === "all" ? (
-          meetings.length > 0 ? (
+          hasVisibleMeetingRows ? (
             <>
               <div className="bulk-actions">
                 <span>{pluralize(selectedMeetingIds.length, "meeting")} selected</span>
@@ -1511,7 +1561,36 @@ function Meetings({ session }: { session: DashboardSession }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {meetings.map((meeting) => {
+                    {[
+                      ...meetings.map((meeting) => ({ kind: "scheduled" as const, meeting })),
+                      ...(showUnscheduledAttendance ? unscheduledSummaries.map((summary) => ({ kind: "unscheduled" as const, summary })) : [])
+                    ].sort((left, right) => {
+                      const leftDate = left.kind === "scheduled" ? left.meeting.meetingDate : left.summary.meetingDate;
+                      const rightDate = right.kind === "scheduled" ? right.meeting.meetingDate : right.summary.meetingDate;
+                      return rightDate.localeCompare(leftDate);
+                    }).map((row) => {
+                      if (row.kind === "unscheduled") {
+                        const summary = row.summary;
+                        return (
+                          <tr key={`unscheduled-${summary.meetingDate}`} className={selectedMeetingDate === summary.meetingDate ? "selected-row" : undefined}>
+                            <td></td>
+                            <td><button className="link-button" type="button" onClick={() => setSelectedMeetingDate(summary.meetingDate)}>{summary.meetingDate}</button></td>
+                            <td>Unscheduled attendance</td>
+                            <td>attendance-only</td>
+                            <td>{summary.presentCount}</td>
+                            <td>N/A</td>
+                            <td></td>
+                            <td></td>
+                            <td>
+                              <div className="kiosk-actions">
+                                <button type="button" disabled={saving} onClick={() => startConvertingUnscheduled(summary)}>Convert</button>
+                                <button type="button" className="danger-button" disabled={saving} onClick={() => clearUnscheduledAttendance(summary)}>Clear</button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      }
+                      const meeting = row.meeting;
                       const summary = meetingSummaryByDate.get(meeting.meetingDate);
                       const selectedForBulk = selectedMeetingIds.includes(meeting.id);
                       return (
@@ -1577,6 +1656,7 @@ function Meetings({ session }: { session: DashboardSession }) {
 function MeetingCalendar({
   month,
   meetings,
+  unscheduledSummaries,
   summariesByDate,
   selectedMeetingDate,
   onMonthChange,
@@ -1584,6 +1664,7 @@ function MeetingCalendar({
 }: {
   month: string;
   meetings: ScheduledMeeting[];
+  unscheduledSummaries: MeetingSummaryReportRow[];
   summariesByDate: Map<string, MeetingSummaryReportRow>;
   selectedMeetingDate: string;
   onMonthChange: (month: string) => void;
@@ -1591,6 +1672,7 @@ function MeetingCalendar({
 }) {
   const days = calendarDaysForMonth(month);
   const meetingsByDate = groupMeetingsByDate(meetings);
+  const unscheduledByDate = new Map(unscheduledSummaries.map((summary) => [summary.meetingDate, summary]));
 
   return (
     <div className="meeting-calendar">
@@ -1606,6 +1688,7 @@ function MeetingCalendar({
         {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((weekday) => <div className="calendar-weekday" key={weekday}>{weekday}</div>)}
         {days.map((day) => {
           const dayMeetings = meetingsByDate.get(day.date) ?? [];
+          const unscheduled = unscheduledByDate.get(day.date);
           return (
             <div className={`calendar-day ${day.inMonth ? "" : "outside-month"} ${day.date === localDateInputValue() ? "today" : ""}`} key={day.date}>
               <span className="calendar-date">{day.dayOfMonth}</span>
@@ -1624,6 +1707,16 @@ function MeetingCalendar({
                     </button>
                   );
                 })}
+                {unscheduled ? (
+                  <button
+                    className={`calendar-event attendance-only ${selectedMeetingDate === unscheduled.meetingDate ? "selected" : ""}`}
+                    type="button"
+                    onClick={() => onSelectMeeting(unscheduled.meetingDate)}
+                  >
+                    <span>Unscheduled attendance</span>
+                    <small>{unscheduled.presentCount} present</small>
+                  </button>
+                ) : null}
               </div>
             </div>
           );
@@ -1643,7 +1736,9 @@ function MeetingDetails({
   absencesError,
   saving,
   onEdit,
-  onDelete
+  onDelete,
+  onConvert,
+  onClear
 }: {
   meeting?: ScheduledMeeting;
   summary?: MeetingSummaryReportRow;
@@ -1655,10 +1750,16 @@ function MeetingDetails({
   saving: boolean;
   onEdit: (meeting: ScheduledMeeting) => void;
   onDelete: (meeting: ScheduledMeeting) => void;
+  onConvert: (summary: MeetingSummaryReportRow) => void;
+  onClear: (summary: MeetingSummaryReportRow) => void;
 }) {
-  if (!meeting) {
+  if (!meeting && !summary) {
     return <p className="empty-state">Select a meeting on the calendar to see attendance details.</p>;
   }
+  const attendanceOnly = !meeting && summary && !summary.scheduled;
+  const detailDate = meeting?.meetingDate ?? summary?.meetingDate ?? "";
+  const detailTitle = meeting?.title ?? summary?.title ?? "Unscheduled attendance";
+  const required = meeting?.required ?? summary?.required ?? false;
   const meetingPresentRows = presentRows.map((row) => ({
     ...row,
     checkInAt: typeof row.checkInAt === "string" ? formatTime(row.checkInAt) : row.checkInAt,
@@ -1670,7 +1771,9 @@ function MeetingDetails({
       ? "No members have checked in for this meeting yet."
       : `${pluralize(meetingPresentRows.length, "member")} checked in for this meeting.`
     : "Loading present members...";
-  const absentStateText = meeting.required
+  const absentStateText = attendanceOnly
+    ? "Convert this attendance-only date into a scheduled meeting to track required or optional attendance."
+    : required
     ? absences
       ? absentRows.length === 0
         ? "No active members are absent for this required meeting."
@@ -1682,17 +1785,29 @@ function MeetingDetails({
     <div className="meeting-details">
       <div className="section-heading">
         <div>
-          <h3>{meeting.title}</h3>
-          <p className="report-context">{meeting.meetingDate}{meetingTimeRange(meeting) ? `, ${meetingTimeRange(meeting)}` : ""}</p>
+          <h3>{detailTitle}</h3>
+          <p className="report-context">{detailDate}{meeting && meetingTimeRange(meeting) ? `, ${meetingTimeRange(meeting)}` : ""}</p>
         </div>
         <div className="meeting-detail-actions">
-          <MeetingRequirementBadge required={meeting.required} />
-          <button type="button" onClick={() => onEdit(meeting)} disabled={saving}>Edit</button>
-          <button type="button" onClick={() => onDelete(meeting)} disabled={saving}>Delete</button>
+          {attendanceOnly && summary ? (
+            <>
+              <span className="status-badge pending">attendance-only</span>
+              <button type="button" onClick={() => onConvert(summary)} disabled={saving}>Convert</button>
+              <button type="button" className="danger-button" onClick={() => onClear(summary)} disabled={saving}>Clear</button>
+            </>
+          ) : meeting ? (
+            <>
+              <MeetingRequirementBadge required={meeting.required} />
+              <button type="button" onClick={() => onEdit(meeting)} disabled={saving}>Edit</button>
+              <button type="button" onClick={() => onDelete(meeting)} disabled={saving}>Delete</button>
+            </>
+          ) : null}
         </div>
       </div>
       <p className="report-context">
-        {meeting.required
+        {attendanceOnly
+          ? "Attendance exists for this date, but no scheduled meeting label has been created yet."
+          : required
           ? "Required meetings count active members who were not present as absent."
           : "Optional meetings show who attended, but do not create missed-meeting counts."}
       </p>
@@ -1700,7 +1815,7 @@ function MeetingDetails({
         <Metric label="Present" value={summary?.presentCount ?? (presence ? presentRows.length : "...")} />
         <Metric label="Signed In" value={presence?.counts.signedIn ?? 0} />
         <Metric label="Open Check-Ins" value={summary?.openCheckIns ?? 0} />
-        <Metric label="Absent" value={meeting.required ? summary?.absentCount ?? absences?.absentCount ?? "..." : "N/A"} />
+        <Metric label="Absent" value={!attendanceOnly && required ? summary?.absentCount ?? absences?.absentCount ?? "..." : "N/A"} />
       </div>
       {presenceError ? <p className="error">{presenceError}</p> : null}
       {absencesError ? <p className="error">{absencesError}</p> : null}
@@ -1715,11 +1830,11 @@ function MeetingDetails({
         </div>
         <div>
           <div className="meeting-detail-subheading">
-            <h3>{meeting.required ? "Absent Members" : "Optional Attendance"}</h3>
-            <span>{meeting.required ? absences?.absentCount ?? "..." : "N/A"}</span>
+            <h3>{!attendanceOnly && required ? "Absent Members" : "Optional Attendance"}</h3>
+            <span>{!attendanceOnly && required ? absences?.absentCount ?? "..." : "N/A"}</span>
           </div>
           <p className="empty-state">{absentStateText}</p>
-          {meeting.required ? (
+          {!attendanceOnly && required ? (
             <DataTable rows={absentRows} columns={["memberId", "firstName", "lastName"]} density="compact" />
           ) : (
             <p className="notice info">Track attendance here as present-only participation; use required meetings for absence accountability.</p>
@@ -1871,7 +1986,10 @@ function Reports({ session }: { session: DashboardSession }) {
   const [presenceDate, setPresenceDate] = useState(localDateInputValue());
   const [selectedMeetingDate, setSelectedMeetingDate] = useState("");
   const [selectedMemberId, setSelectedMemberId] = useState("");
-  const reportQuery = reportRangeQuery(reportStartDate, reportEndDate);
+  const [showUnscheduledAttendance, setShowUnscheduledAttendance] = useState(false);
+  const [attendanceActionMessage, setAttendanceActionMessage] = useState<{ kind: "success" | "error"; text: string }>();
+  const [attendanceActionBusyDate, setAttendanceActionBusyDate] = useState("");
+  const reportQuery = reportRangeQuery(reportStartDate, reportEndDate, showUnscheduledAttendance);
   const { data: meetingSummary, error: meetingSummaryError, reload: reloadMeetingSummary } = useApi<{ meetings: MeetingSummaryReportRow[] }>(`/admin/reports/meetings${reportQuery}`, session);
   const { data: rosterSummary, error: rosterSummaryError, reload: reloadRosterSummary } = useApi<{ members: RosterAttendanceSummaryRow[] }>(`/admin/reports/roster-attendance${reportQuery}`, session);
   const { data: sessionRows, error: sessionError, reload: reloadSessions } = useApi<{ sessions: Array<Record<string, unknown>> }>(`/admin/reports/sessions${reportQuery}`, session);
@@ -1888,6 +2006,59 @@ function Reports({ session }: { session: DashboardSession }) {
     session
   );
   const selectedMeeting = meetingData?.meetings.find((meeting) => meeting.meetingDate === presenceDate);
+
+  async function convertAttendanceDate(meeting: MeetingSummaryReportRow) {
+    const title = window.prompt(`Name the scheduled meeting for ${meeting.meetingDate}.`, defaultMeetingTitle);
+    if (title === null) return;
+    const trimmedTitle = title.trim();
+    if (!trimmedTitle) {
+      setAttendanceActionMessage({ kind: "error", text: "Meeting title cannot be blank." });
+      return;
+    }
+    const required = window.confirm("Should this converted meeting count as required attendance?");
+    setAttendanceActionBusyDate(meeting.meetingDate);
+    setAttendanceActionMessage(undefined);
+    try {
+      await apiPost<ScheduledMeeting>("/admin/meetings/convert-unscheduled", {
+        meetingDate: meeting.meetingDate,
+        title: trimmedTitle,
+        required
+      }, session);
+      setAttendanceActionMessage({ kind: "success", text: `Converted ${meeting.meetingDate} to ${trimmedTitle}.` });
+      reloadMeetingSummary();
+      reloadRosterSummary();
+      reloadSessions();
+      reloadAbsences();
+    } catch (err) {
+      setAttendanceActionMessage({ kind: "error", text: friendlyDashboardError(err) });
+    } finally {
+      setAttendanceActionBusyDate("");
+    }
+  }
+
+  async function clearAttendanceDate(meeting: MeetingSummaryReportRow) {
+    const confirmation = window.prompt(`This permanently deletes scan and manual attendance data for ${meeting.meetingDate}. Scheduled meetings, roster, kiosks, and fingerprint mappings are preserved. Type CLEAR ${meeting.meetingDate} to continue.`);
+    if (confirmation === null) return;
+    setAttendanceActionBusyDate(meeting.meetingDate);
+    setAttendanceActionMessage(undefined);
+    try {
+      const result = await apiPost<{ deletedScanEvents: number; deletedManualEvents: number }>("/admin/attendance/clear-date", {
+        meetingDate: meeting.meetingDate,
+        confirmation
+      }, session);
+      setAttendanceActionMessage({ kind: "success", text: `Cleared ${meeting.meetingDate}: deleted ${pluralize(result.deletedScanEvents, "scan event")} and ${pluralize(result.deletedManualEvents, "manual event")}.` });
+      if (selectedMeetingDate === meeting.meetingDate) setSelectedMeetingDate("");
+      reloadMeetingSummary();
+      reloadRosterSummary();
+      reloadSessions();
+      reloadPresence();
+      reloadAbsences();
+    } catch (err) {
+      setAttendanceActionMessage({ kind: "error", text: friendlyDashboardError(err) });
+    } finally {
+      setAttendanceActionBusyDate("");
+    }
+  }
 
   return (
     <>
@@ -1909,26 +2080,23 @@ function Reports({ session }: { session: DashboardSession }) {
             reloadMember();
             reloadAbsences();
           }}>Refresh Range</button>
+          <label className="inline-check">
+            <input type="checkbox" checked={showUnscheduledAttendance} onChange={(event) => setShowUnscheduledAttendance(event.target.checked)} />
+            Show unscheduled attendance
+          </label>
         </div>
         <p className="report-context">Required meetings count missed active members. Optional meetings show attendance without missed counts. Scheduled rows marked zero scans had no check-ins or manual corrections.</p>
+        {attendanceActionMessage ? <p className={`notice ${attendanceActionMessage.kind}`}>{attendanceActionMessage.text}</p> : null}
         <div className="grid compact-grid">
           <Metric label="Required Meetings" value={meetingRows.filter((meeting) => meeting.required).length} />
           <Metric label="Zero-Scan Required" value={meetingRows.filter((meeting) => meeting.required && meeting.zeroScan).length} />
           <Metric label="Open Check-Ins" value={meetingRows.reduce((sum, meeting) => sum + meeting.openCheckIns, 0)} />
         </div>
-        <DataTable
-          rows={meetingRows.map((meeting) => ({
-            date: meeting.meetingDate,
-            title: meeting.title ?? "Unscheduled attendance",
-            attendance: meeting.required ? "required" : "optional",
-            time: meetingTimeRange({ startsAt: meeting.startsAt, endsAt: meeting.endsAt }),
-            scheduled: meeting.scheduled ? "yes" : "attendance-only",
-            present: meeting.presentCount,
-            absent: meeting.required ? meeting.absentCount : "",
-            openCheckIns: meeting.openCheckIns,
-            note: meeting.zeroScan ? "zero scans" : ""
-          }))}
-          columns={["date", "title", "attendance", "time", "scheduled", "present", "absent", "openCheckIns", "note"]}
+        <MeetingAttendanceTable
+          meetings={meetingRows}
+          busyDate={attendanceActionBusyDate}
+          onConvert={convertAttendanceDate}
+          onClear={clearAttendanceDate}
         />
         {meetingSummaryError ? <p className="error">{meetingSummaryError}</p> : null}
       </section>
@@ -2063,6 +2231,58 @@ function Reports({ session }: { session: DashboardSession }) {
       </form>
       <Table title="Attendance session audit" error={sessionError} rows={sessionRows?.sessions ?? []} columns={["meeting_date", "meeting_title", "required", "has_attendance", "member_id", "check_in_at", "check_out_at", "status"]} />
     </>
+  );
+}
+
+function MeetingAttendanceTable({
+  meetings,
+  busyDate,
+  onConvert,
+  onClear
+}: {
+  meetings: MeetingSummaryReportRow[];
+  busyDate: string;
+  onConvert: (meeting: MeetingSummaryReportRow) => void;
+  onClear: (meeting: MeetingSummaryReportRow) => void;
+}) {
+  if (meetings.length === 0) return <p className="empty-state">No meeting attendance rows match this range.</p>;
+
+  return (
+    <div className="meeting-table-wrap">
+      <table>
+        <thead>
+          <tr>
+            {["date", "title", "attendance", "time", "scheduled", "present", "absent", "openCheckIns", "note", "actions"].map((column) => <th key={column}>{column}</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {meetings.map((meeting) => {
+            const attendanceOnly = !meeting.scheduled;
+            return (
+              <tr key={meeting.meetingDate}>
+                <td>{meeting.meetingDate}</td>
+                <td>{meeting.title ?? "Unscheduled attendance"}</td>
+                <td>{attendanceOnly ? "attendance-only" : meeting.required ? "required" : "optional"}</td>
+                <td>{meetingTimeRange({ startsAt: meeting.startsAt, endsAt: meeting.endsAt })}</td>
+                <td>{meeting.scheduled ? "yes" : "attendance-only"}</td>
+                <td>{meeting.presentCount}</td>
+                <td>{meeting.required && !attendanceOnly ? meeting.absentCount : ""}</td>
+                <td>{meeting.openCheckIns}</td>
+                <td>{meeting.zeroScan ? "zero scans" : ""}</td>
+                <td>
+                  {attendanceOnly ? (
+                    <div className="kiosk-actions">
+                      <button type="button" disabled={busyDate === meeting.meetingDate} onClick={() => onConvert(meeting)}>Convert</button>
+                      <button type="button" className="danger-button" disabled={busyDate === meeting.meetingDate} onClick={() => onClear(meeting)}>Clear</button>
+                    </div>
+                  ) : null}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -2466,10 +2686,11 @@ interface RosterAttendanceSummaryRow {
   openSessionWarning: boolean;
 }
 
-function reportRangeQuery(startDate: string, endDate: string) {
+function reportRangeQuery(startDate: string, endDate: string, includeUnscheduled = false) {
   const params = new URLSearchParams();
   if (startDate) params.set("startDate", startDate);
   if (endDate) params.set("endDate", endDate);
+  if (includeUnscheduled) params.set("includeUnscheduled", "1");
   const query = params.toString();
   return query ? `?${query}` : "";
 }

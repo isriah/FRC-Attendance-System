@@ -4,6 +4,7 @@ import type { Env } from "./env";
 export interface ReportDateRange {
   startDate?: string;
   endDate?: string;
+  includeUnscheduled?: boolean;
 }
 
 export interface PresenceReportRow {
@@ -88,6 +89,7 @@ export function reportDateRangeFromSearchParams(searchParams: URLSearchParams): 
   const range: ReportDateRange = {};
   const startDate = optionalIsoDate(searchParams.get("startDate"), "startDate");
   const endDate = optionalIsoDate(searchParams.get("endDate"), "endDate");
+  range.includeUnscheduled = isTruthyParam(searchParams.get("includeUnscheduled"));
   if (startDate) range.startDate = startDate;
   if (endDate) range.endDate = endDate;
   if (range.startDate && range.endDate && range.startDate > range.endDate) {
@@ -131,8 +133,11 @@ export async function buildAttendanceSessionReport(env: Env, range: ReportDateRa
     .map((meeting) => meeting.meeting_date));
   const completedScheduledMeetings = scheduledMeetings.results.filter((meeting) => !incompleteScheduledDates.has(meeting.meeting_date));
   const reportDate = currentReportDate(env, now);
+  const completedScheduledDates = new Set(completedScheduledMeetings.map((meeting) => meeting.meeting_date));
   const visibleSessions = sessions.results.filter((session) => (
-    isReportDateComplete(session.meeting_date, reportDate) && !incompleteScheduledDates.has(session.meeting_date)
+    isReportDateComplete(session.meeting_date, reportDate) &&
+    !incompleteScheduledDates.has(session.meeting_date) &&
+    (range.includeUnscheduled || completedScheduledDates.has(session.meeting_date))
   ));
   const sessionDates = new Set(visibleSessions.map((session) => session.meeting_date));
   const sessionRows: AttendanceSessionReportRow[] = visibleSessions.map((session) => ({
@@ -204,8 +209,11 @@ export async function buildMeetingSummaryReport(env: Env, range: ReportDateRange
     .filter((meeting) => !isMeetingComplete(meeting, env, now))
     .map((meeting) => meeting.meeting_date));
   const completedScheduledMeetings = scheduledMeetings.results.filter((meeting) => !incompleteScheduledDates.has(meeting.meeting_date));
+  const completedScheduledDates = new Set(completedScheduledMeetings.map((meeting) => meeting.meeting_date));
   const visibleSessions = sessions.results.filter((session) => (
-    isReportDateComplete(session.meeting_date, reportDate) && !incompleteScheduledDates.has(session.meeting_date)
+    isReportDateComplete(session.meeting_date, reportDate) &&
+    !incompleteScheduledDates.has(session.meeting_date) &&
+    (range.includeUnscheduled || completedScheduledDates.has(session.meeting_date))
   ));
   const meetingsByDate = new Map(completedScheduledMeetings.map((meeting) => [meeting.meeting_date, meeting]));
   const sessionsByDate = new Map(visibleSessions.map((session) => [session.meeting_date, session]));
@@ -341,6 +349,7 @@ export async function buildMemberAttendanceReport(env: Env, memberId: string, ra
   if (!student) throw Object.assign(new Error("Member not found"), { status: 404 });
 
   const meetingDates = await requiredMeetingDates(env, range, now);
+  const scheduledDates = await reportScheduledDates(env, range);
   const sessions = await env.DB.prepare(
     `
       SELECT meeting_date, status, check_in_at
@@ -351,13 +360,14 @@ export async function buildMemberAttendanceReport(env: Env, memberId: string, ra
     `
   ).bind(memberId, ...dateRangeParams(range)).all<{ meeting_date: string; status: "open" | "closed"; check_in_at: string }>();
 
+  const visibleSessions = sessions.results.filter((session) => range.includeUnscheduled || scheduledDates.has(session.meeting_date));
   const allDates = [...new Set(meetingDates.map((row) => row.meeting_date))];
   const allDateSet = new Set(allDates);
-  const presentDates = [...new Set(sessions.results.map((session) => session.meeting_date))].filter((date) => allDateSet.has(date));
+  const presentDates = [...new Set(visibleSessions.map((session) => session.meeting_date))].filter((date) => allDateSet.has(date));
   const presentDateSet = new Set(presentDates);
   const absentDates = allDates.filter((date) => !presentDateSet.has(date));
   const attendanceRate = allDates.length === 0 ? null : presentDates.length / allDates.length;
-  const lastSeenAt = sessions.results.reduce<string | undefined>((latest, session) => {
+  const lastSeenAt = visibleSessions.reduce<string | undefined>((latest, session) => {
     if (!latest || session.check_in_at > latest) return session.check_in_at;
     return latest;
   }, undefined);
@@ -375,8 +385,17 @@ export async function buildMemberAttendanceReport(env: Env, memberId: string, ra
     lastSeenAt,
     presentDates,
     absentDates,
-    openSessionDates: sessions.results.filter((session) => session.status === "open" && allDateSet.has(session.meeting_date)).map((session) => session.meeting_date)
+    openSessionDates: visibleSessions.filter((session) => session.status === "open" && allDateSet.has(session.meeting_date)).map((session) => session.meeting_date)
   };
+}
+
+async function reportScheduledDates(env: Env, range: ReportDateRange): Promise<Set<string>> {
+  const rows = await env.DB.prepare(`
+    SELECT meeting_date
+    FROM scheduled_meetings
+    ${whereDateRange("meeting_date", range)}
+  `).bind(...dateRangeParams(range)).all<{ meeting_date: string }>();
+  return new Set(rows.results.map((row) => row.meeting_date));
 }
 
 async function requiredMeetingDates(env: Env, range: ReportDateRange, now: Date) {
@@ -390,6 +409,8 @@ async function requiredMeetingDates(env: Env, range: ReportDateRange, now: Date)
     `).bind(...dateRangeParams(range)).all<{ meeting_date: string; ends_at: string | null }>();
     return scheduledDates.results.filter((meeting) => isMeetingComplete(meeting, env, now));
   }
+
+  if (!range.includeUnscheduled) return [];
 
   const sessionDates = await env.DB.prepare(`
     SELECT DISTINCT meeting_date
@@ -409,6 +430,11 @@ async function hasAnyScheduledMeetings(env: Env): Promise<boolean> {
 function optionalIsoDate(value: string | null, fieldName: string): string | undefined {
   if (value === null || value === "") return undefined;
   return requireIsoDate(value, fieldName);
+}
+
+function isTruthyParam(value: string | null): boolean {
+  if (value === null || value === "") return false;
+  return ["1", "true", "yes", "on"].includes(value.toLowerCase());
 }
 
 function whereDateRange(column: string, range: ReportDateRange, prefix: "WHERE" | "AND" = "WHERE"): string {
