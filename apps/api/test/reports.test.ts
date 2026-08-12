@@ -9,6 +9,7 @@ import {
   buildRosterAttendanceSummary,
   reportDateRangeFromSearchParams
 } from "../src/reports";
+import { buildLegacySheetExport } from "../src/export";
 import type { Env } from "../src/env";
 
 describe("report builders", () => {
@@ -164,6 +165,43 @@ describe("report builders", () => {
     ]);
   });
 
+  it("filters session report rows by date range before adding zero-scan scheduled meetings", async () => {
+    const env = createTestEnv();
+    insertStudent(env, "100001", "Bench", "Student");
+    insertMeeting(env, "2026-01-02", 1, "Before Range");
+    insertMeeting(env, "2026-01-09", 1, "In Range Required");
+    insertMeeting(env, "2026-01-16", 0, "In Range Optional");
+    insertMeeting(env, "2026-01-23", 1, "After Range");
+    insertSession(env, "100001", "2026-01-02", "2026-01-02T20:00:00.000Z", null, "open");
+    insertSession(env, "100001", "2026-01-09", "2026-01-09T20:00:00.000Z", "2026-01-09T22:00:00.000Z", "closed");
+    insertSession(env, "100001", "2026-01-23", "2026-01-23T20:00:00.000Z", null, "open");
+
+    const rows = await buildAttendanceSessionReport(env, { startDate: "2026-01-09", endDate: "2026-01-16" });
+
+    expect(rows).toEqual([
+      {
+        meeting_date: "2026-01-16",
+        meeting_title: "In Range Optional",
+        required: 0,
+        has_attendance: 0,
+        member_id: null,
+        check_in_at: null,
+        check_out_at: null,
+        status: "scheduled"
+      },
+      {
+        meeting_date: "2026-01-09",
+        meeting_title: "In Range Required",
+        required: 1,
+        has_attendance: 1,
+        member_id: "100001",
+        check_in_at: "2026-01-09T20:00:00.000Z",
+        check_out_at: "2026-01-09T22:00:00.000Z",
+        status: "closed"
+      }
+    ]);
+  });
+
   it("summarizes scheduled meetings with required absences, optional meetings, open check-ins, and zero scans", async () => {
     const env = createTestEnv();
     insertStudent(env, "100001", "Bench", "Student");
@@ -245,6 +283,35 @@ describe("report builders", () => {
     });
   });
 
+  it("treats unscheduled attendance dates as required only when no scheduled meetings exist", async () => {
+    const env = createTestEnv();
+    insertStudent(env, "100001", "Bench", "Student");
+    insertStudent(env, "100002", "Drive", "Captain");
+    insertStudent(env, "999999", "Former", "Member", 0);
+    insertSession(env, "100001", "2026-01-02", "2026-01-02T20:00:00.000Z", null, "open");
+    insertSession(env, "999999", "2026-01-02", "2026-01-02T20:10:00.000Z", null, "open");
+    insertSession(env, "100002", "2026-01-09", "2026-01-09T20:00:00.000Z", "2026-01-09T22:00:00.000Z", "closed");
+
+    const rows = await buildMeetingSummaryReport(env, { startDate: "2026-01-02", endDate: "2026-01-02" });
+
+    expect(rows).toEqual([
+      {
+        meetingDate: "2026-01-02",
+        title: null,
+        required: true,
+        startsAt: undefined,
+        endsAt: undefined,
+        scheduled: false,
+        hasAttendance: true,
+        zeroScan: false,
+        presentCount: 2,
+        activePresentCount: 1,
+        absentCount: 1,
+        openCheckIns: 2
+      }
+    ]);
+  });
+
   it("returns absent active roster rows for a required meeting", async () => {
     const env = createTestEnv();
     insertStudent(env, "100001", "Bench", "Student");
@@ -263,6 +330,39 @@ describe("report builders", () => {
       endsAt: undefined,
       absentCount: 1,
       rows: [{ memberId: "100002", firstName: "Drive", lastName: "Captain" }]
+    });
+  });
+
+  it("includes meeting times and sorts absence rows by roster display order", async () => {
+    const env = createTestEnv();
+    insertStudent(env, "100001", "Zoe", "Zephyr");
+    insertStudent(env, "100002", "Alex", "Anderson");
+    insertStudent(env, "100003", "Maya", "Anderson");
+    insertStudent(env, "100004", "Bench", "Student");
+    insertMeeting(
+      env,
+      "2026-01-02",
+      1,
+      "Timed Required Build",
+      "2026-01-02T20:00:00.000Z",
+      "2026-01-02T23:00:00.000Z"
+    );
+    insertSession(env, "100004", "2026-01-02", "2026-01-02T20:05:00.000Z", null, "open");
+
+    const report = await buildMeetingAbsenceReport(env, "2026-01-02");
+
+    expect(report).toEqual({
+      meetingDate: "2026-01-02",
+      title: "Timed Required Build",
+      required: true,
+      startsAt: "2026-01-02T20:00:00.000Z",
+      endsAt: "2026-01-02T23:00:00.000Z",
+      absentCount: 3,
+      rows: [
+        { memberId: "100002", firstName: "Alex", lastName: "Anderson" },
+        { memberId: "100003", firstName: "Maya", lastName: "Anderson" },
+        { memberId: "100001", firstName: "Zoe", lastName: "Zephyr" }
+      ]
     });
   });
 
@@ -338,6 +438,57 @@ describe("report builders", () => {
       endDate: "2026-01-09"
     });
     expect(() => reportDateRangeFromSearchParams(new URLSearchParams("startDate=2026-01-09&endDate=2026-01-02"))).toThrow("startDate must be on or before endDate");
+  });
+
+  it("builds legacy export-oriented report ranges with formatted values and date filtering", async () => {
+    const env = createTestEnv();
+    insertStudent(env, "100001", "Bench", "Student");
+    insertStudent(env, "100002", "Drive", "Captain");
+    insertMeeting(env, "2026-01-02", 1, "Before Range");
+    insertMeeting(
+      env,
+      "2026-01-09",
+      1,
+      "Required Build",
+      "2026-01-09T20:00:00.000Z",
+      "2026-01-09T23:00:00.000Z"
+    );
+    insertMeeting(env, "2026-01-16", 0, "Optional Demo");
+    insertSession(env, "100001", "2026-01-02", "2026-01-02T20:00:00.000Z", null, "open");
+    insertSession(env, "100001", "2026-01-09", "2026-01-09T20:05:00.000Z", "2026-01-09T22:15:00.000Z", "closed");
+    insertSession(env, "100002", "2026-01-16", "2026-01-16T20:10:00.000Z", null, "open");
+
+    const exportData = await buildLegacySheetExport(env, { startDate: "2026-01-09", endDate: "2026-01-16" });
+
+    expect(exportData.generatedAt).toEqual(expect.any(String));
+    expect(exportData.ranges).toEqual({
+      MeetingSummary: [
+        ["1/16/2026", "Optional Demo", "optional", "", "", "scheduled", 1, "", 1, ""],
+        ["1/9/2026", "Required Build", "required", "3:00 PM", "6:00 PM", "scheduled", 1, 1, 0, ""]
+      ],
+      MeetingAbsences: [
+        ["1/9/2026", "Required Build", "100002", "Drive", "Captain"]
+      ],
+      RosterAttendance: [
+        ["100002", "Drive", "Captain", 1, 0, 1, 0, "1/16/2026", ""],
+        ["100001", "Bench", "Student", 1, 1, 0, 1, "1/9/2026", ""]
+      ],
+      AttendanceLogIn: [
+        ["100001", "1/9/2026", "3:05 PM"],
+        ["100002", "1/16/2026", "3:10 PM"]
+      ],
+      AttendanceLogOut: [
+        ["100001", "1/9/2026", "5:15 PM"]
+      ],
+      ScheduledMeetings: [
+        ["1/9/2026", "Required Build", "required", "3:00 PM", "6:00 PM", 1],
+        ["1/16/2026", "Optional Demo", "optional", "", "", 1]
+      ],
+      MemberAttendanceSummary: [
+        ["100002", "Drive", "Captain", 1, 0, 1, 0, "1/16/2026", ""],
+        ["100001", "Bench", "Student", 1, 1, 0, 1, "1/9/2026", ""]
+      ]
+    });
   });
 
   it("marks missing members as not found", async () => {
@@ -418,14 +569,23 @@ function insertSession(
   ).run();
 }
 
-function insertMeeting(env: Env, meetingDate: string, required = 1, title = `Meeting ${meetingDate}`) {
+function insertMeeting(
+  env: Env,
+  meetingDate: string,
+  required = 1,
+  title = `Meeting ${meetingDate}`,
+  startsAt: string | null = null,
+  endsAt: string | null = null
+) {
   return env.DB.prepare(
-    "INSERT INTO scheduled_meetings (id, meeting_date, title, required, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)"
+    "INSERT INTO scheduled_meetings (id, meeting_date, title, required, starts_at, ends_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
   ).bind(
     `meeting-${meetingDate}`,
     meetingDate,
     title,
     required,
+    startsAt,
+    endsAt,
     "2026-01-01T00:00:00.000Z",
     "2026-01-01T00:00:00.000Z"
   ).run();
