@@ -870,43 +870,47 @@ function MemberDetailsPanel({
             Fingerprint enrollment must run from the Raspberry Pi dashboard at http://AttKiosk:5174 because it needs direct access to the local fingerprint reader.
           </p>
         ) : null}
-        {member.active ? (
-          <form className="fingerprint-enroll-form" onSubmit={async (event) => {
-            event.preventDefault();
-            await onSubmitEnrollment(false);
-          }}>
-            <label className="field-label">
-              <span>Template slot</span>
-              <input value={enrollSlot} onChange={(event) => onEnrollSlotChange(event.target.value)} type="number" min="1" max="200" placeholder="Slot" required />
-            </label>
-            <label className="field-label">
-              <span>Finger</span>
-              <select value={normalizeFingerLabel(enrollFingerLabel)} onChange={(event) => onEnrollFingerLabelChange(event.target.value)} required>
-                {fingerLabelOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-              </select>
-            </label>
-            <button type="button" onClick={() => onEnrollSlotChange(String(nextOpenSlot))} disabled={!fingerprintEnrollmentAvailable || enrolling}>Use slot {nextOpenSlot}</button>
-            <button disabled={enrolling || !fingerprintEnrollmentAvailable || enrollMemberId !== member.memberId || overwriteBlocked}>
-              {enrolling ? "Enrolling..." : "Enroll fingerprint"}
-            </button>
-            <button
-              type="button"
-              disabled={enrolling || !fingerprintEnrollmentAvailable || enrollMemberId !== member.memberId || !enrollSlot || overwriteBlocked}
-              onClick={() => onSubmitEnrollment(true)}
-            >
-              Save mapping only
-            </button>
-          </form>
-        ) : <p className="empty-state">Reactivate this member before enrolling a fingerprint.</p>}
-        {occupiedEnrollment ? (
-          <label className="inline-check notice info">
-            <input type="checkbox" checked={confirmOverwrite} onChange={(event) => onConfirmOverwriteChange(event.target.checked)} />
-            Replace slot {occupiedEnrollment.slot}, currently mapped to {fingerprintEnrollmentName(occupiedEnrollment)}
-          </label>
+        {fingerprintEnrollmentAvailable ? (
+          <>
+            {member.active ? (
+              <form className="fingerprint-enroll-form" onSubmit={async (event) => {
+                event.preventDefault();
+                await onSubmitEnrollment(false);
+              }}>
+                <label className="field-label">
+                  <span>Template slot</span>
+                  <input value={enrollSlot} onChange={(event) => onEnrollSlotChange(event.target.value)} type="number" min="1" max="200" placeholder="Slot" required />
+                </label>
+                <label className="field-label">
+                  <span>Finger</span>
+                  <select value={normalizeFingerLabel(enrollFingerLabel)} onChange={(event) => onEnrollFingerLabelChange(event.target.value)} required>
+                    {fingerLabelOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                  </select>
+                </label>
+                <button type="button" onClick={() => onEnrollSlotChange(String(nextOpenSlot))} disabled={enrolling}>Use slot {nextOpenSlot}</button>
+                <button disabled={enrolling || enrollMemberId !== member.memberId || overwriteBlocked}>
+                  {enrolling ? "Enrolling..." : "Enroll fingerprint"}
+                </button>
+                <button
+                  type="button"
+                  disabled={enrolling || enrollMemberId !== member.memberId || !enrollSlot || overwriteBlocked}
+                  onClick={() => onSubmitEnrollment(true)}
+                >
+                  Save mapping only
+                </button>
+              </form>
+            ) : <p className="empty-state">Reactivate this member before enrolling a fingerprint.</p>}
+            {occupiedEnrollment ? (
+              <label className="inline-check notice info">
+                <input type="checkbox" checked={confirmOverwrite} onChange={(event) => onConfirmOverwriteChange(event.target.checked)} />
+                Replace slot {occupiedEnrollment.slot}, currently mapped to {fingerprintEnrollmentName(occupiedEnrollment)}
+              </label>
+            ) : null}
+            {enrollMessage && enrollMemberId === member.memberId ? <p className={`notice ${enrollMessage.kind}`}>{enrollMessage.text}</p> : null}
+            {enrollmentError ? <p className="error">{enrollmentError}</p> : null}
+            <FingerprintEnrollmentTable enrollments={memberEnrollments} onDelete={onDeleteEnrollment} onRemap={onRemapEnrollment} busy={enrolling} />
+          </>
         ) : null}
-        {enrollMessage && enrollMemberId === member.memberId ? <p className={`notice ${enrollMessage.kind}`}>{enrollMessage.text}</p> : null}
-        {enrollmentError ? <p className="error">{enrollmentError}</p> : null}
-        <FingerprintEnrollmentTable enrollments={memberEnrollments} onDelete={onDeleteEnrollment} onRemap={onRemapEnrollment} busy={enrolling} />
       </div>
     </div>
   );
