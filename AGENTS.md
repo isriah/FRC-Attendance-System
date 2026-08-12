@@ -114,7 +114,7 @@ npm --workspace <package> run <script>
 - Polish fingerprint administration by showing current slot mappings, auto-suggesting the next available slot, supporting delete/remap, and confirming before overwriting occupied slots.
 - Improve kiosk messaging with richer API-provided member messages, configurable attendance summary display, and clearer offline acknowledgements.
 - Backburnered: prepare for multi-kiosk operation with real kiosk token provisioning, per-kiosk status/sync health, enrollment visibility, and delayed sync tests.
-- Add tests for report builders, scan acknowledgement/action derivation, offline queue restart/reconnect, and delayed multi-kiosk sync ordering.
+- Add tests for report builders and scan acknowledgement/action derivation. Offline queue restart/reconnect reliability has focused coverage; delayed multi-kiosk sync ordering is backburnered with multi-kiosk work.
 
 ## Verification Expectations
 
