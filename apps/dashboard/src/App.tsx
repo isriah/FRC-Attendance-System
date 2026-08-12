@@ -126,6 +126,43 @@ interface MeetingAbsenceNotificationResult {
   warnings: string[];
 }
 
+interface MemberAttendanceReportNotificationResult {
+  memberId: string;
+  firstName: string;
+  lastName: string;
+  email: string | null;
+  reportDate: string;
+  notificationKind: "member_attendance_report";
+  providerConfigured: boolean;
+  mode: "preview" | "send";
+  sentCount: number;
+  skippedDuplicateCount: number;
+  errorCount: number;
+  recipient: {
+    memberId: string;
+    firstName: string;
+    lastName: string;
+    email: string;
+    status: "would_send" | "sent" | "error" | "skipped_duplicate";
+    error?: string;
+  } | null;
+  missingEmail: Array<{
+    memberId: string;
+    firstName: string;
+    lastName: string;
+    status: "missing_email";
+  }>;
+  report: {
+    attendanceRate: number | null;
+    totalMeetings: number;
+    presentMeetings: number;
+    missedMeetings: number;
+    missedMeetingsList: Array<{ meetingDate: string; title: string | null }>;
+    optionalMeetings: Array<{ meetingDate: string; title: string | null; attended: boolean }>;
+  };
+  warnings: string[];
+}
+
 const defaultMeetingTitle = "Regular Meeting";
 const defaultMeetingStartTime = "15:00";
 const defaultMeetingEndTime = "17:30";
@@ -329,6 +366,8 @@ function Roster({ session }: { session: DashboardSession }) {
   const [emailDrafts, setEmailDrafts] = useState<Record<string, string>>({});
   const [memberMessage, setMemberMessage] = useState<{ kind: "success" | "error"; text: string }>();
   const [busyMemberId, setBusyMemberId] = useState<string>();
+  const [memberReportEmailBusyId, setMemberReportEmailBusyId] = useState<string>();
+  const [memberReportEmailResult, setMemberReportEmailResult] = useState<MemberAttendanceReportNotificationResult>();
   const [pullingRoster, setPullingRoster] = useState(false);
   const [selectedDetailMemberId, setSelectedDetailMemberId] = useState("");
   const [enrollMemberId, setEnrollMemberId] = useState("");
@@ -409,6 +448,40 @@ function Roster({ session }: { session: DashboardSession }) {
       setMemberMessage({ kind: "error", text: friendlyDashboardError(error) });
     } finally {
       setBusyMemberId(undefined);
+    }
+  }
+
+  async function emailMemberAttendanceReport(member: MemberRow) {
+    setMemberReportEmailBusyId(member.memberId);
+    setMemberReportEmailResult(undefined);
+    setMemberMessage(undefined);
+    try {
+      const preview = await apiPost<MemberAttendanceReportNotificationResult>("/admin/notifications/member-attendance-report", {
+        memberId: member.memberId,
+        preview: true
+      }, session);
+      setMemberReportEmailResult(preview);
+      if (!preview.recipient) {
+        setMemberMessage({ kind: "error", text: `Save an email address before sending ${member.firstName} ${member.lastName}'s attendance report.` });
+        return;
+      }
+      if (!preview.providerConfigured) {
+        setMemberMessage({ kind: "success", text: `Preview ready for ${member.firstName} ${member.lastName}; email sending is not configured.` });
+        return;
+      }
+      if (!window.confirm(`Send current attendance report to ${preview.recipient.email}?`)) {
+        setMemberMessage({ kind: "success", text: `Preview ready for ${member.firstName} ${member.lastName}; send cancelled.` });
+        return;
+      }
+      const result = await apiPost<MemberAttendanceReportNotificationResult>("/admin/notifications/member-attendance-report", {
+        memberId: member.memberId
+      }, session);
+      setMemberReportEmailResult(result);
+      setMemberMessage({ kind: result.errorCount > 0 ? "error" : "success", text: memberAttendanceNotificationSummary(result) });
+    } catch (error) {
+      setMemberMessage({ kind: "error", text: friendlyDashboardError(error) });
+    } finally {
+      setMemberReportEmailBusyId(undefined);
     }
   }
 
@@ -601,7 +674,10 @@ function Roster({ session }: { session: DashboardSession }) {
                 emailDraft={emailDrafts[member.memberId] ?? member.email ?? ""}
                 onEmailDraftChange={(email) => setEmailDrafts((drafts) => ({ ...drafts, [member.memberId]: email }))}
                 onSaveEmail={() => saveMemberEmail(member)}
+                onEmailAttendanceReport={() => emailMemberAttendanceReport(member)}
                 busy={busyMemberId === member.memberId}
+                reportEmailBusy={memberReportEmailBusyId === member.memberId}
+                reportEmailResult={memberReportEmailResult?.memberId === member.memberId ? memberReportEmailResult : undefined}
                 memberReport={memberReport?.memberId === member.memberId ? memberReport : undefined}
                 memberReportError={selectedDetailMemberId === member.memberId ? memberReportError : undefined}
                 meetingSummaryRows={meetingSummaryRows}
@@ -646,7 +722,10 @@ function Roster({ session }: { session: DashboardSession }) {
                 emailDraft={emailDrafts[member.memberId] ?? member.email ?? ""}
                 onEmailDraftChange={(email) => setEmailDrafts((drafts) => ({ ...drafts, [member.memberId]: email }))}
                 onSaveEmail={() => saveMemberEmail(member)}
+                onEmailAttendanceReport={() => emailMemberAttendanceReport(member)}
                 busy={busyMemberId === member.memberId}
+                reportEmailBusy={memberReportEmailBusyId === member.memberId}
+                reportEmailResult={memberReportEmailResult?.memberId === member.memberId ? memberReportEmailResult : undefined}
                 memberReport={memberReport?.memberId === member.memberId ? memberReport : undefined}
                 memberReportError={selectedDetailMemberId === member.memberId ? memberReportError : undefined}
                 meetingSummaryRows={meetingSummaryRows}
@@ -797,7 +876,10 @@ function MemberDetailsPanel({
   emailDraft,
   onEmailDraftChange,
   onSaveEmail,
+  onEmailAttendanceReport,
   busy,
+  reportEmailBusy,
+  reportEmailResult,
   memberReport,
   memberReportError,
   meetingSummaryRows,
@@ -825,7 +907,10 @@ function MemberDetailsPanel({
   emailDraft: string;
   onEmailDraftChange: (email: string) => void;
   onSaveEmail: () => void;
+  onEmailAttendanceReport: () => void;
   busy: boolean;
+  reportEmailBusy: boolean;
+  reportEmailResult?: MemberAttendanceReportNotificationResult;
   memberReport?: MemberAttendanceReport;
   memberReportError?: string;
   meetingSummaryRows: MeetingSummaryReportRow[];
@@ -860,6 +945,7 @@ function MemberDetailsPanel({
     .map((row) => String(row.meeting_date ?? row.meetingDate ?? "")));
   const optionalMeetings = meetingSummaryRows.filter((meeting) => !meeting.required);
   const memberEnrollments = enrollments.filter((enrollment) => enrollment.memberId === member.memberId);
+  const canEmailAttendanceReport = Boolean(member.email?.trim());
 
   return (
     <div className="member-detail-panel">
@@ -874,6 +960,13 @@ function MemberDetailsPanel({
         </label>
         <button type="button" disabled={busy} onClick={onSaveEmail}>{busy ? "Saving..." : "Save email"}</button>
       </div>
+      <div className="toolbar compact">
+        <button type="button" disabled={reportEmailBusy || !canEmailAttendanceReport} onClick={onEmailAttendanceReport}>
+          {reportEmailBusy ? "Preparing..." : "Email attendance report"}
+        </button>
+        {!canEmailAttendanceReport ? <span className="muted">Save an email address before sending this report.</span> : null}
+      </div>
+      {reportEmailResult ? <p className={`notice ${reportEmailResult.errorCount > 0 ? "error" : "success"}`}>{memberAttendanceNotificationSummary(reportEmailResult)}</p> : null}
 
       {memberReportError ? <p className="error">{memberReportError}</p> : null}
       {memberReport ? (
@@ -2819,6 +2912,18 @@ function notificationStatusLabel(status: MeetingAbsenceNotificationResult["recip
   if (status === "skipped_duplicate") return "Already sent";
   if (status === "sent") return "Sent";
   return "Error";
+}
+
+function memberAttendanceNotificationSummary(result: MemberAttendanceReportNotificationResult) {
+  if (!result.recipient) return `No attendance report sent; ${result.firstName} ${result.lastName} does not have a saved email address.`;
+  if (result.mode === "preview") {
+    return result.providerConfigured
+      ? `Preview ready for ${result.recipient.email}: ${formatPercent(result.report.attendanceRate)} attendance across ${pluralize(result.report.totalMeetings, "completed required meeting")}.`
+      : `Preview ready for ${result.recipient.email}; email sending is not configured.`;
+  }
+  if (result.recipient.status === "skipped_duplicate") return `Attendance report was already sent to ${result.recipient.email} today.`;
+  if (result.recipient.status === "error") return `Attendance report failed for ${result.recipient.email}: ${result.recipient.error ?? "Unknown error"}`;
+  return `Sent attendance report to ${result.recipient.email}.`;
 }
 
 function findHeaderIndex(header: string[], names: string[]) {

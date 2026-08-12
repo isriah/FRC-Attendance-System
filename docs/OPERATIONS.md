@@ -217,9 +217,11 @@ Dashboard admins can manage database-backed OAuth access from the Admins tab by 
 
 Dashboard roster records can store an optional member email for user association. That member email does not grant dashboard admin access by itself; add the email on the Admins tab or keep it covered by the Worker env allowlist/domain.
 
-## Missed Meeting Email Notifications
+## Member Email Notifications
 
 The Worker exposes authenticated admin `POST /admin/notifications/meeting-absence` for completed required scheduled meetings. The request body accepts `meetingDate`, optional `preview`, and optional `resend`; the dashboard uses preview first, then confirms before sending when a provider is configured.
+
+The Worker also exposes authenticated admin `POST /admin/notifications/member-attendance-report` for one member's current attendance report. The request body accepts `memberId`, optional `preview`, and optional `resend`; the Roster page member details action previews first, requires confirmation before sending, and is disabled until the member has a saved email address. The report includes member name/ID, current required attendance percentage, completed required meetings attended/missed counts, missed required meeting dates, and optional/not-required meetings when available. Future and in-progress meetings are excluded from required attendance counts, matching the report endpoints. Successful member report sends use `notification_kind = 'member_attendance_report'` and the current local report date as the audit/idempotency date, so accidental same-day double-clicks are skipped by default while `resend: true` intentionally sends another copy.
 
 Production email sending uses Resend. Sending is disabled unless both `RESEND_API_KEY` and `EMAIL_FROM_ADDRESS` are configured. The deployed Worker currently has `RESEND_API_KEY`, `EMAIL_FROM_ADDRESS=attendance@robolancers.com`, and `EMAIL_FROM_NAME=FRC Attendance` configured as secrets. In disabled mode, the endpoint returns who would receive email, who is missing a member email, and a warning without writing delivery audit rows. When enabled, the Worker posts to `https://api.resend.com/emails` with `Authorization: Bearer <RESEND_API_KEY>`, a Resend idempotency key, and a JSON body containing `from`, `to`, `subject`, `html`, and `text`. The provider-specific shape is isolated in `apps/api/src/notifications.ts`; legacy `EMAIL_PROVIDER_URL` and `EMAIL_PROVIDER_API_KEY` generic HTTP settings are still accepted for non-production experiments.
 
