@@ -36,6 +36,45 @@ describe("offline scan queue restart and reconnect behavior", () => {
     expect(restartedQueue.pendingCount()).toBe(2);
   });
 
+  it("replays restarted scans in occurrence order with stable local event IDs", async () => {
+    const databasePath = tempDatabasePath();
+    const firstQueue = new OfflineQueue(databasePath);
+    const later = firstQueue.addFingerprintScan("100002", "2026-05-28T15:01:00.000Z");
+    const earlier = firstQueue.addFingerprintScan("100001", "2026-05-28T15:00:00.000Z");
+    const restartedQueue = new OfflineQueue(databasePath);
+
+    const fetchMock = vi.fn().mockImplementation(async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body)) as { kioskId: string; events: Array<{ localEventId: string; memberId: string; occurredAt: string; source: "fingerprint" }> };
+      return {
+        ok: true,
+        json: async (): Promise<KioskSyncResult> => ({
+          accepted: body.events.map((event) => scanResult(body.kioskId, event, "accepted")),
+          duplicates: [],
+          rejected: []
+        })
+      };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(new SyncClient(testConfig(), restartedQueue).flushPending()).resolves.toMatchObject({
+      accepted: [
+        { localEventId: earlier.localEventId, memberId: "100001" },
+        { localEventId: later.localEventId, memberId: "100002" }
+      ]
+    });
+
+    const [, requestInit] = fetchMock.mock.calls[0] ?? [];
+    if (!requestInit) throw new Error("Expected sync request to be sent");
+    expect(JSON.parse(String(requestInit.body))).toEqual({
+      kioskId: "bench-01",
+      events: [
+        { localEventId: earlier.localEventId, memberId: "100001", occurredAt: earlier.occurredAt, source: "fingerprint" },
+        { localEventId: later.localEventId, memberId: "100002", occurredAt: later.occurredAt, source: "fingerprint" }
+      ]
+    });
+    expect(restartedQueue.pending()).toEqual([]);
+  });
+
   it("leaves scans pending after an outage and clears them after reconnect", async () => {
     const queue = new OfflineQueue(tempDatabasePath());
     const event = queue.addFingerprintScan("100001", "2026-05-28T15:00:00.000Z");
@@ -80,6 +119,61 @@ describe("offline scan queue restart and reconnect behavior", () => {
     expect(queue.pendingCount()).toBe(0);
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
+
+  it("keeps every pending scan cached after repeated failed sync attempts", async () => {
+    const queue = new OfflineQueue(tempDatabasePath());
+    const first = queue.addFingerprintScan("100001", "2026-05-28T15:00:00.000Z");
+    const second = queue.addFingerprintScan("100002", "2026-05-28T15:01:00.000Z");
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 503,
+        text: async () => "temporary outage"
+      })
+      .mockRejectedValueOnce(new Error("network unreachable"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const sync = new SyncClient(testConfig(), queue);
+
+    await expect(sync.flushPending()).rejects.toThrow("Sync failed: 503 temporary outage");
+    expect(queue.pending()).toMatchObject([
+      { localEventId: first.localEventId, memberId: "100001", syncError: "temporary outage" },
+      { localEventId: second.localEventId, memberId: "100002", syncError: "temporary outage" }
+    ]);
+
+    await expect(sync.flushPending()).rejects.toThrow("network unreachable");
+    expect(queue.pending()).toMatchObject([
+      { localEventId: first.localEventId, memberId: "100001", syncError: "temporary outage" },
+      { localEventId: second.localEventId, memberId: "100002", syncError: "temporary outage" }
+    ]);
+    expect(queue.pendingCount()).toBe(2);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("clears duplicate and rejected local events after the API accounts for them", async () => {
+    const queue = new OfflineQueue(tempDatabasePath());
+    const accepted = queue.addFingerprintScan("100001", "2026-05-28T15:00:00.000Z");
+    const duplicate = queue.addFingerprintScan("100001", "2026-05-28T15:00:30.000Z");
+    const rejected = queue.addFingerprintScan("999999", "2026-05-28T15:01:00.000Z");
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async (): Promise<KioskSyncResult> => ({
+        accepted: [scanResult("bench-01", accepted, "accepted")],
+        duplicates: [scanResult("bench-01", duplicate, "duplicate")],
+        rejected: [{ ...rejected, reason: "member is not active in roster" }]
+      })
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(new SyncClient(testConfig(), queue).flushPending()).resolves.toMatchObject({
+      accepted: [{ localEventId: accepted.localEventId }],
+      duplicates: [{ localEventId: duplicate.localEventId }],
+      rejected: [{ localEventId: rejected.localEventId }]
+    });
+
+    expect(queue.pending()).toEqual([]);
+    expect(queue.pendingCount()).toBe(0);
+  });
 });
 
 function tempDatabasePath(): string {
@@ -98,5 +192,17 @@ function testConfig(): KioskConfig {
     displayStatePort: 8788,
     selfRestartDelayMs: 1000,
     systemRebootDelayMs: 1000
+  };
+}
+
+function scanResult(kioskId: string, event: { localEventId: string; memberId: string; occurredAt: string; source: "fingerprint" }, status: "accepted" | "duplicate") {
+  return {
+    id: `${kioskId}:${event.localEventId}`,
+    kioskId,
+    localEventId: event.localEventId,
+    memberId: event.memberId,
+    occurredAt: event.occurredAt,
+    source: event.source,
+    status
   };
 }
