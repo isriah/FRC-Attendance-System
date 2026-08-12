@@ -81,8 +81,8 @@ npm --workspace <package> run <script>
 - API admin auth is configured for Google OAuth client `180849199739-v04bktp7rfmimgjpvohmq7pinrrpr337.apps.googleusercontent.com` with `isriahk@gmail.com` allowlisted.
 - Roster CSV sync currently expects `memberId,firstName,lastName`.
 - Roster `memberId` is stored internally as `students.student_id`.
-- Dashboard roster management defaults to active members, with separate tabs for deactivated member management and roster import. Deactivate/reactivate preserves attendance history; hard delete requires typed confirmation and removes associated member-owned attendance/event/fingerprint mapping rows without removing dashboard admin users.
-- Fingerprint enrollment is available from the dashboard roster tab.
+- Dashboard roster management defaults to active members, with separate tabs for deactivated member management and roster import. Deactivate/reactivate preserves attendance history; hard delete requires typed confirmation and removes associated member-owned attendance/event/fingerprint mapping rows without removing dashboard admin users. The default roster table stays compact; member email editing, attendance details, and per-member fingerprint enrollment live in the row details flow.
+- Fingerprint enrollment is available from active member row details in the Pi-local dashboard, using fixed finger-label options instead of free-text labels.
 - Fingerprint templates remain local on the sensor. The kiosk SQLite DB stores slot-to-member mappings.
 - Kiosk scan acknowledgements cover known accepted scans, duplicates, unknown fingerprints, rejected/inactive members, and optional attendance summaries.
 - Dashboard kiosk controls can queue per-kiosk remote commands for active kiosks: restart display, restart kiosk services, or reboot system. Kiosk services poll the API for these commands with their kiosk token and execute only allowlisted local actions.
