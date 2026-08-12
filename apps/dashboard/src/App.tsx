@@ -297,6 +297,7 @@ function Roster({ session }: { session: DashboardSession }) {
     session
   );
   const [rosterViewTab, setRosterViewTab] = useState<RosterViewTab>("active");
+  const [rosterSearch, setRosterSearch] = useState("");
   const [importText, setImportText] = useState("memberId,firstName,lastName,email\n100001,Bench,Member,bench@example.org");
   const [importMessage, setImportMessage] = useState<string>();
   const [emailDrafts, setEmailDrafts] = useState<Record<string, string>>({});
@@ -320,6 +321,7 @@ function Roster({ session }: { session: DashboardSession }) {
   );
   const activeMembers = data?.members.filter((member) => member.active) ?? [];
   const deactivatedMembers = data?.members.filter((member) => !member.active) ?? [];
+  const rosterSearchQuery = rosterSearch.trim();
   const attendanceByMemberId = new Map((rosterSummary?.members ?? []).map((member) => [member.memberId, member]));
   const activeRosterRows = activeMembers.map((member) => {
     const attendance = attendanceByMemberId.get(member.memberId);
@@ -328,6 +330,10 @@ function Roster({ session }: { session: DashboardSession }) {
       attendance: formatPercent(attendance?.attendanceRate ?? null)
     };
   });
+  const filteredActiveRosterRows = activeRosterRows.filter((member) => memberMatchesRosterSearch(member, rosterSearchQuery));
+  const filteredDeactivatedMembers = deactivatedMembers.filter((member) => memberMatchesRosterSearch(member, rosterSearchQuery));
+  const activeEmptyMessage = rosterSearchQuery ? "No active members match this search." : "No active members yet.";
+  const deactivatedEmptyMessage = rosterSearchQuery ? "No deactivated members match this search." : "No deactivated members.";
   const enrollments = enrollmentData?.enrollments ?? [];
   const meetingSummaryRows = meetingSummary?.meetings ?? [];
   const nextOpenSlot = nextAvailableFingerprintSlot(enrollments);
@@ -527,22 +533,35 @@ function Roster({ session }: { session: DashboardSession }) {
           <h2>Roster</h2>
           <span className="muted">{activeMembers.length} active, {deactivatedMembers.length} deactivated</span>
         </div>
-        <div className="meeting-tabs">
-          {([
-            ["active", "Active Members"],
-            ["deactivated", "Deactivated Members"],
-            ["import", "Roster Import"]
-          ] as Array<[RosterViewTab, string]>).map(([value, label]) => (
-            <button key={value} type="button" className={rosterViewTab === value ? "active" : ""} onClick={() => setRosterViewTab(value)}>
-              {label}
-            </button>
-          ))}
+        <div className="roster-controls">
+          <div className="meeting-tabs">
+            {([
+              ["active", "Active Members"],
+              ["deactivated", "Deactivated Members"],
+              ["import", "Roster Import"]
+            ] as Array<[RosterViewTab, string]>).map(([value, label]) => (
+              <button key={value} type="button" className={rosterViewTab === value ? "active" : ""} onClick={() => setRosterViewTab(value)}>
+                {label}
+              </button>
+            ))}
+          </div>
+          {rosterViewTab !== "import" ? (
+            <label className="roster-search">
+              <span>Search</span>
+              <input
+                value={rosterSearch}
+                onChange={(event) => setRosterSearch(event.target.value)}
+                placeholder="ID or name"
+                aria-label="Search roster by member ID or name"
+              />
+            </label>
+          ) : null}
         </div>
         {memberMessage ? <p className={`notice ${memberMessage.kind}`}>{memberMessage.text}</p> : null}
         {error ?? rosterSummaryError ? <p className="error">{error ?? rosterSummaryError}</p> : null}
         {rosterViewTab === "active" ? (
           <MemberManagementTable
-            members={activeRosterRows}
+            members={filteredActiveRosterRows}
             busyMemberId={busyMemberId}
             onDeactivate={(member) => setMemberActive(member, false)}
             onReactivate={(member) => setMemberActive(member, true)}
@@ -581,13 +600,13 @@ function Roster({ session }: { session: DashboardSession }) {
                 onRemapEnrollment={startRemapEnrollment}
               />
             )}
-            emptyMessage="No active members yet."
+            emptyMessage={activeEmptyMessage}
             showAttendance
           />
         ) : null}
         {rosterViewTab === "deactivated" ? (
           <MemberManagementTable
-            members={deactivatedMembers}
+            members={filteredDeactivatedMembers}
             busyMemberId={busyMemberId}
             onDeactivate={(member) => setMemberActive(member, false)}
             onReactivate={(member) => setMemberActive(member, true)}
@@ -626,7 +645,7 @@ function Roster({ session }: { session: DashboardSession }) {
                 onRemapEnrollment={startRemapEnrollment}
               />
             )}
-            emptyMessage="No deactivated members."
+            emptyMessage={deactivatedEmptyMessage}
           />
         ) : null}
         {rosterViewTab === "import" ? (
@@ -2390,6 +2409,20 @@ function parseRosterCsv(text: string) {
     if (!memberId || !firstName || !lastName) throw new Error(`Roster row ${index + 1} must include member ID, first name, and last name`);
     return email ? { memberId, firstName, lastName, email } : { memberId, firstName, lastName };
   });
+}
+
+function memberMatchesRosterSearch(member: MemberRow, query: string) {
+  const normalizedQuery = query.toLowerCase();
+  if (!normalizedQuery) return true;
+  const firstName = member.firstName.toLowerCase();
+  const lastName = member.lastName.toLowerCase();
+  return [
+    member.memberId.toLowerCase(),
+    firstName,
+    lastName,
+    `${firstName} ${lastName}`,
+    `${lastName} ${firstName}`
+  ].some((value) => value.includes(normalizedQuery));
 }
 
 function localDateInputValue(date = new Date()) {
