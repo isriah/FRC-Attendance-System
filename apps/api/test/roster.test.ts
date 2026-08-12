@@ -70,7 +70,7 @@ describe("roster sync", () => {
     ]);
   });
 
-  it("hard deletes member-owned roster, attendance, event, and fingerprint rows without deleting admin users", async () => {
+  it("hard deletes member-owned roster, attendance, event, fingerprint, and notification rows without deleting admin users", async () => {
     const env = createRosterTestEnv();
 
     await syncRoster(env, [
@@ -91,6 +91,7 @@ describe("roster sync", () => {
     await expectRowCount(env, "attendance_sessions", "student_id", "100001", 0);
     await expectRowCount(env, "manual_events", "student_id", "100001", 0);
     await expectRowCount(env, "fingerprint_enrollments", "student_id", "100001", 0);
+    await expectRowCount(env, "notification_deliveries", "student_id", "100001", 0);
     const admin = await env.DB.prepare("SELECT active FROM admin_users WHERE email = ?").bind("ada@example.org").first<{ active: number }>();
     expect(admin?.active).toBe(1);
   });
@@ -151,6 +152,19 @@ async function seedMemberData(env: Env, memberId: string) {
   await env.DB.prepare(`
     INSERT INTO fingerprint_enrollments (student_id, kiosk_id, template_slot, finger_label, enrolled_at)
     VALUES (?, 'bench-01', 1, 'right-index', '2026-01-10T14:00:00.000Z')
+  `).bind(memberId).run();
+  await env.DB.prepare(`
+    INSERT INTO notification_deliveries (
+      id,
+      notification_kind,
+      meeting_date,
+      student_id,
+      recipient_email,
+      status,
+      sent_at,
+      created_at,
+      updated_at
+    ) VALUES ('notification-1', 'meeting_absence', '2026-01-10', ?, 'ada@example.org', 'sent', '2026-01-11T00:00:00.000Z', '2026-01-11T00:00:00.000Z', '2026-01-11T00:00:00.000Z')
   `).bind(memberId).run();
 }
 
@@ -228,6 +242,21 @@ function createRosterTestEnv(): Env {
       status TEXT NOT NULL,
       source_event_ids TEXT NOT NULL,
       rebuilt_at TEXT NOT NULL
+    );
+
+    CREATE TABLE notification_deliveries (
+      id TEXT PRIMARY KEY,
+      notification_kind TEXT NOT NULL,
+      meeting_date TEXT NOT NULL,
+      student_id TEXT NOT NULL,
+      recipient_email TEXT NOT NULL,
+      status TEXT NOT NULL,
+      provider_message_id TEXT,
+      error_message TEXT,
+      sent_at TEXT,
+      error_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
     );
   `);
 
