@@ -722,8 +722,8 @@ function MemberManagementTable({
                     <button type="button" disabled={busyMemberId === member.memberId} onClick={() => onToggleDetails(member)}>
                       {selectedMemberId === member.memberId ? "Hide details" : "Details"}
                     </button>
-                    {member.active ? (
-                      <button type="button" disabled={busyMemberId === member.memberId || !fingerprintEnrollmentAvailable} onClick={() => onEnrollFingerprint(member)}>Enroll fingerprint</button>
+                    {member.active && fingerprintEnrollmentAvailable ? (
+                      <button type="button" disabled={busyMemberId === member.memberId} onClick={() => onEnrollFingerprint(member)}>Enroll fingerprint</button>
                     ) : null}
                     {member.active ? (
                       <button type="button" disabled={busyMemberId === member.memberId} onClick={() => onDeactivate(member)}>Deactivate</button>
