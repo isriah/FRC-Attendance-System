@@ -16,7 +16,7 @@ Current production dashboard:
 
 - Cloudflare Pages project: `frc-attendance-dashboard`
 - Pages URL: `https://frc-attendance-dashboard.pages.dev`
-- Latest verified deployment: `https://9ce3910c.frc-attendance-dashboard.pages.dev`
+- Latest verified deployment: `https://3cd95a98.frc-attendance-dashboard.pages.dev`
 - API base URL baked into the uploaded Vite build: `https://frc-attendance-api.frc-attendance.workers.dev`
 - Google OAuth client ID baked into the uploaded Vite build: `180849199739-v04bktp7rfmimgjpvohmq7pinrrpr337.apps.googleusercontent.com`
 
@@ -182,6 +182,8 @@ Deployment `https://9ce3910c.frc-attendance-dashboard.pages.dev` polishes Meetin
 Bench Pi update on 2026-08-11 pulled main through commit `319f96f398c1bd8535e8036ce9205b7b76ab2992` and restarted `frc-dashboard-ui`, `frc-bench-api`, and `frc-kiosk-service`. The Pi-local dashboard serves at `http://192.168.0.154:5174` from the workstation and `http://localhost:5174` on the Pi; direct `http://AttKiosk:5174` returned 403 from Vite host checking. The served dashboard source includes the fingerprint mapping `Remap` action, bench API health returned ok, and `frc-kiosk-service` reported `Fingerprint reader online`.
 
 Worker version `312ce5fb-729e-4124-9b33-411a56e0e9af` adds clearer member-facing kiosk acknowledgement copy for accepted, duplicate, rejected/inactive, unknown fingerprint, and offline-saved scans, plus `KIOSK_SHOW_ATTENDANCE_SUMMARY` to control whether attendance summary text appears in kiosk acknowledgement detail. Bench Pi update on 2026-08-11 pulled main through commit `97a0a1985b9577d29c81a82a3a0f2dd0466a5b80` and restarted `frc-bench-api`, `frc-kiosk-service`, and `frc-kiosk-ui`. Production Worker/dashboard smoke and Pi-local roster pull smoke passed; bench API health returned ok, kiosk UI served at `http://192.168.0.154:5173`, and `frc-kiosk-service` reported `Fingerprint reader online`.
+
+Deployment `https://3cd95a98.frc-attendance-dashboard.pages.dev` adds roster-page attendance percentages per active member, using the existing roster attendance summary report so required scheduled meetings drive the percentage and optional meetings do not count against members. Production Worker/dashboard smoke and Pi-local roster pull smoke passed on 2026-08-12. Bench Pi update on 2026-08-12 pulled main through commit `ae727a92e4e8a143adff6b3e9ee10e608f48b1d1` and restarted `frc-dashboard-ui` and `frc-bench-api`; the Pi-local dashboard served at `http://192.168.0.154:5174` and included the roster attendance UI.
 
 The dashboard login UI follows the same boundary: when `VITE_GOOGLE_CLIENT_ID` is configured, it shows Google sign-in and a production notice that email-only local login is disabled. The email-only form is rendered only for local development builds with no Google client ID.
 
