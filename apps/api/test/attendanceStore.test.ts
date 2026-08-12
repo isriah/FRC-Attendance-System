@@ -44,6 +44,55 @@ describe("kiosk sync acknowledgements", () => {
     });
   });
 
+  it("derives normal single-kiosk acknowledgement actions across repeated scans", async () => {
+    const env = createTestEnv();
+
+    const result = await syncKioskEvents(env, "bench-01", [
+      {
+        localEventId: "scan-1",
+        memberId: "100001",
+        occurredAt: "2026-01-02T20:00:00.000Z",
+        source: "fingerprint"
+      },
+      {
+        localEventId: "scan-2",
+        memberId: "100001",
+        occurredAt: "2026-01-02T22:00:00.000Z",
+        source: "fingerprint"
+      },
+      {
+        localEventId: "scan-3",
+        memberId: "100001",
+        occurredAt: "2026-01-02T23:00:00.000Z",
+        source: "fingerprint"
+      }
+    ]);
+
+    expect(result.acknowledgements).toEqual([
+      expect.objectContaining({
+        localEventId: "scan-1",
+        status: "accepted",
+        action: "check_in",
+        kioskMessage: "Welcome, Bench Student",
+        kioskDetail: "Checked in at 3:00 PM. Attendance 100% (1/1)"
+      }),
+      expect.objectContaining({
+        localEventId: "scan-2",
+        status: "accepted",
+        action: "check_out",
+        kioskMessage: "Goodbye, Bench Student",
+        kioskDetail: "Checked out at 5:00 PM. Attendance 100% (1/1)"
+      }),
+      expect.objectContaining({
+        localEventId: "scan-3",
+        status: "accepted",
+        action: "check_in",
+        kioskMessage: "Welcome, Bench Student",
+        kioskDetail: "Checked in at 6:00 PM. Attendance 100% (1/1)"
+      })
+    ]);
+  });
+
   it("can hide attendance summaries from member-facing kiosk details", async () => {
     const env = createTestEnv({ KIOSK_SHOW_ATTENDANCE_SUMMARY: "false" });
 
@@ -87,6 +136,44 @@ describe("kiosk sync acknowledgements", () => {
       kioskMessage: "Already recorded",
       kioskDetail: "Bench Student, your attendance was already recorded. Please wait a moment before scanning again.",
       message: "Bench Student was already recorded."
+    });
+  });
+
+  it("treats the duplicate window endpoint as inclusive", async () => {
+    const env = createTestEnv();
+
+    await syncKioskEvents(env, "bench-01", [{
+      localEventId: "scan-1",
+      memberId: "100001",
+      occurredAt: "2026-01-02T20:00:00.000Z",
+      source: "fingerprint"
+    }]);
+
+    const exactBoundary = await syncKioskEvents(env, "bench-01", [{
+      localEventId: "scan-90s",
+      memberId: "100001",
+      occurredAt: "2026-01-02T20:01:30.000Z",
+      source: "fingerprint"
+    }]);
+    const justOutsideBoundary = await syncKioskEvents(env, "bench-01", [{
+      localEventId: "scan-91s",
+      memberId: "100001",
+      occurredAt: "2026-01-02T20:01:31.000Z",
+      source: "fingerprint"
+    }]);
+
+    expect(exactBoundary.acknowledgements?.[0]).toMatchObject({
+      localEventId: "scan-90s",
+      status: "duplicate",
+      kioskMessage: "Already recorded",
+      kioskDetail: "Bench Student, your attendance was already recorded. Please wait a moment before scanning again."
+    });
+    expect(justOutsideBoundary.acknowledgements?.[0]).toMatchObject({
+      localEventId: "scan-91s",
+      status: "accepted",
+      action: "check_out",
+      kioskMessage: "Goodbye, Bench Student",
+      kioskDetail: "Checked out at 3:01 PM. Attendance 100% (1/1)"
     });
   });
 
@@ -294,6 +381,76 @@ describe("kiosk sync acknowledgements", () => {
       kioskMessage: "Roster issue",
       kioskDetail: "Inactive Member, this Member ID is not active. Ask a mentor for help.",
       message: "this Member ID is not active. Ask a mentor for help."
+    });
+  });
+
+  it("uses Member ID fallback copy when rejected scans have no roster name", async () => {
+    const env = createTestEnv();
+
+    const rejected = await syncKioskEvents(env, "bench-01", [{
+      localEventId: "scan-missing-member",
+      memberId: "999999",
+      occurredAt: "2026-01-02T20:00:00.000Z",
+      source: "fingerprint"
+    }]);
+
+    expect(rejected.acknowledgements?.[0]).toMatchObject({
+      localEventId: "scan-missing-member",
+      memberId: "999999",
+      status: "rejected",
+      displayName: undefined,
+      kioskMessage: "Roster issue",
+      kioskDetail: "Member ID 999999, this Member ID is not active. Ask a mentor for help.",
+      message: "this Member ID is not active. Ask a mentor for help."
+    });
+  });
+
+  it("uses Member ID fallback copy when replayed accepted and duplicate scans lose their roster name", async () => {
+    const env = createTestEnv();
+
+    await syncKioskEvents(env, "bench-01", [{
+      localEventId: "scan-accepted",
+      memberId: "100001",
+      occurredAt: "2026-01-02T20:00:00.000Z",
+      source: "fingerprint"
+    }]);
+    await syncKioskEvents(env, "bench-01", [{
+      localEventId: "scan-duplicate",
+      memberId: "100001",
+      occurredAt: "2026-01-02T20:00:30.000Z",
+      source: "fingerprint"
+    }]);
+    await env.DB.prepare("DELETE FROM students WHERE student_id = ?").bind("100001").run();
+
+    const acceptedReplay = await syncKioskEvents(env, "bench-01", [{
+      localEventId: "scan-accepted",
+      memberId: "100001",
+      occurredAt: "2026-01-02T20:00:00.000Z",
+      source: "fingerprint"
+    }]);
+    const duplicateReplay = await syncKioskEvents(env, "bench-01", [{
+      localEventId: "scan-duplicate",
+      memberId: "100001",
+      occurredAt: "2026-01-02T20:00:30.000Z",
+      source: "fingerprint"
+    }]);
+
+    expect(acceptedReplay.acknowledgements?.[0]).toMatchObject({
+      localEventId: "scan-accepted",
+      status: "accepted",
+      displayName: undefined,
+      action: "check_in",
+      kioskMessage: "Welcome, Member ID 100001",
+      kioskDetail: "Checked in at 3:00 PM.",
+      message: "Welcome, Member ID 100001"
+    });
+    expect(duplicateReplay.acknowledgements?.[0]).toMatchObject({
+      localEventId: "scan-duplicate",
+      status: "duplicate",
+      displayName: undefined,
+      kioskMessage: "Already recorded",
+      kioskDetail: "Member ID 100001, your attendance was already recorded. Please wait a moment before scanning again.",
+      message: "Scan was already recorded."
     });
   });
 

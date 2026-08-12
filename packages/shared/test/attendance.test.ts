@@ -20,7 +20,9 @@ describe("attendance rules", () => {
   it("suppresses scans within the duplicate window", () => {
     const previous = scan("a", "123", "2026-01-01T20:00:00.000Z");
     expect(isDuplicateScan(previous, { memberId: "123", occurredAt: "2026-01-01T20:01:00.000Z" })).toBe(true);
-    expect(isDuplicateScan(previous, { memberId: "123", occurredAt: "2026-01-01T20:02:00.000Z" })).toBe(false);
+    expect(isDuplicateScan(previous, { memberId: "123", occurredAt: "2026-01-01T20:01:30.000Z" })).toBe(true);
+    expect(isDuplicateScan(previous, { memberId: "123", occurredAt: "2026-01-01T20:01:31.000Z" })).toBe(false);
+    expect(isDuplicateScan(previous, { memberId: "456", occurredAt: "2026-01-01T20:01:00.000Z" })).toBe(false);
   });
 
   it("auto toggles check-in and check-out sessions", () => {
@@ -36,6 +38,32 @@ describe("attendance rules", () => {
       checkInAt: "2026-01-01T20:00:00.000Z",
       checkOutAt: "2026-01-01T22:00:00.000Z"
     });
+  });
+
+  it("continues normal check-in and check-out alternation for later scans", () => {
+    const sessions = deriveAttendanceSessions([
+      scan("first-in", "123", "2026-01-01T20:00:00.000Z"),
+      scan("first-out", "123", "2026-01-01T21:00:00.000Z"),
+      scan("second-in", "123", "2026-01-01T22:00:00.000Z"),
+      scan("second-out", "123", "2026-01-01T23:00:00.000Z")
+    ]);
+
+    expect(sessions).toEqual([
+      expect.objectContaining({
+        memberId: "123",
+        status: "closed",
+        checkInAt: "2026-01-01T20:00:00.000Z",
+        checkOutAt: "2026-01-01T21:00:00.000Z",
+        sourceEventIds: ["first-in", "first-out"]
+      }),
+      expect.objectContaining({
+        memberId: "123",
+        status: "closed",
+        checkInAt: "2026-01-01T22:00:00.000Z",
+        checkOutAt: "2026-01-01T23:00:00.000Z",
+        sourceEventIds: ["second-in", "second-out"]
+      })
+    ]);
   });
 
   it("leaves sessions open when checkout is missing", () => {
