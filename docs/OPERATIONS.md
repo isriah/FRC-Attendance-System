@@ -5,7 +5,7 @@
 Current production API:
 
 - Worker URL: `https://frc-attendance-api.frc-attendance.workers.dev`
-- Latest deployed Worker version: `cb053a95-5869-4e62-b0e5-042382958721`
+- Latest deployed Worker version: `638f0cbe-6869-481b-bd5f-906b22b31e95`
 - D1 database: `frc-attendance`
 - D1 database ID: `c02c0ca8-033b-435f-ae21-2d8f3b203b22`
 - Applied remote migrations: `0001_initial.sql` through `0006_notification_deliveries.sql`
@@ -199,6 +199,8 @@ Deployment `https://0c2ffd86.frc-attendance-dashboard.pages.dev` and Worker vers
 
 Deployment `https://4810fab3.frc-attendance-dashboard.pages.dev` and Worker version `cb053a95-5869-4e62-b0e5-042382958721` add missed-meeting absence email previews/sends for completed required scheduled meetings, roster search by member ID/name, and web-dashboard hiding of unavailable fingerprint detail controls. Remote D1 migration `0006_notification_deliveries.sql` was applied. Email sending remains preview-only until `RESEND_API_KEY` and `EMAIL_FROM_ADDRESS` are configured. Production Worker/dashboard smoke and Pi-local roster pull smoke passed on 2026-08-12. Bench Pi update on 2026-08-12 pulled main through commit `d30e35e65bab1d7a7c23abf1b4fe4be13c57ef06` and restarted `frc-dashboard-ui` and `frc-bench-api`.
 
+Worker version `638f0cbe-6869-481b-bd5f-906b22b31e95` deploys first-class Resend delivery for missed-meeting emails. Worker secrets `RESEND_API_KEY`, `EMAIL_FROM_ADDRESS`, and `EMAIL_FROM_NAME` are configured remotely; `EMAIL_FROM_ADDRESS` is `attendance@robolancers.com` and `EMAIL_FROM_NAME` is `FRC Attendance`. Worker health passed on 2026-08-12. Terminal preview smoke was not run because production admin routes require a Google ID token when `GOOGLE_CLIENT_ID` is configured.
+
 The dashboard login UI follows the same boundary: when `VITE_GOOGLE_CLIENT_ID` is configured, it shows Google sign-in and a production notice that email-only local login is disabled. The email-only form is rendered only for local development builds with no Google client ID.
 
 For local development only, if no Google client ID is configured, the dashboard can send an `x-admin-email` header and the API will still enforce the configured allowlist.
@@ -219,7 +221,7 @@ Dashboard roster records can store an optional member email for user association
 
 The Worker exposes authenticated admin `POST /admin/notifications/meeting-absence` for completed required scheduled meetings. The request body accepts `meetingDate`, optional `preview`, and optional `resend`; the dashboard uses preview first, then confirms before sending when a provider is configured.
 
-Production email sending uses Resend. Sending is disabled unless both `RESEND_API_KEY` and `EMAIL_FROM_ADDRESS` are configured. In disabled mode, the endpoint returns who would receive email, who is missing a member email, and a warning without writing delivery audit rows. When enabled, the Worker posts to `https://api.resend.com/emails` with `Authorization: Bearer <RESEND_API_KEY>`, a Resend idempotency key, and a JSON body containing `from`, `to`, `subject`, `html`, and `text`. The provider-specific shape is isolated in `apps/api/src/notifications.ts`; legacy `EMAIL_PROVIDER_URL` and `EMAIL_PROVIDER_API_KEY` generic HTTP settings are still accepted for non-production experiments.
+Production email sending uses Resend. Sending is disabled unless both `RESEND_API_KEY` and `EMAIL_FROM_ADDRESS` are configured. The deployed Worker currently has `RESEND_API_KEY`, `EMAIL_FROM_ADDRESS=attendance@robolancers.com`, and `EMAIL_FROM_NAME=FRC Attendance` configured as secrets. In disabled mode, the endpoint returns who would receive email, who is missing a member email, and a warning without writing delivery audit rows. When enabled, the Worker posts to `https://api.resend.com/emails` with `Authorization: Bearer <RESEND_API_KEY>`, a Resend idempotency key, and a JSON body containing `from`, `to`, `subject`, `html`, and `text`. The provider-specific shape is isolated in `apps/api/src/notifications.ts`; legacy `EMAIL_PROVIDER_URL` and `EMAIL_PROVIDER_API_KEY` generic HTTP settings are still accepted for non-production experiments.
 
 Resend setup:
 
