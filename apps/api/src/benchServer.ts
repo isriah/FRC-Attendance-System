@@ -1341,15 +1341,16 @@ function buildBenchMeetingSummaryReport(range: BenchReportDateRange = {}, limit 
     .filter((meeting) => !isBenchMeetingComplete(meeting))
     .map((meeting) => meeting.meeting_date));
   const meetings = allMeetings.filter((meeting) => !incompleteScheduledDates.has(meeting.meeting_date));
+  const meetingsByDate = new Map(meetings.map((meeting) => [meeting.meeting_date, meeting]));
   const reportDate = benchCurrentReportDate();
   const sessions = deriveBenchSessions().filter((session) => (
     isDateInRange(session.meetingDate, range) &&
     isDateComplete(session.meetingDate, reportDate) &&
-    !incompleteScheduledDates.has(session.meetingDate)
+    !incompleteScheduledDates.has(session.meetingDate) &&
+    (range.includeUnscheduled || meetingsByDate.has(session.meetingDate))
   ));
   const activeStudentRows = db.prepare("SELECT student_id FROM students WHERE active = 1").all() as Array<{ student_id: string }>;
   const activememberIds = new Set(activeStudentRows.map((student) => student.student_id));
-  const meetingsByDate = new Map(meetings.map((meeting) => [meeting.meeting_date, meeting]));
   const sessionsByDate = sessions.reduce<Map<string, { presentCount: number; activePresentCount: number; openCheckIns: number; presentStudents: Set<string>; activePresentStudents: Set<string> }>>((groups, session) => {
     const group = groups.get(session.meetingDate) ?? {
       presentCount: 0,
