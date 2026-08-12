@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, Fragment, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { apiBaseUrl, apiDelete, apiGet, apiPost, apiPut, type DashboardSession } from "./api";
 import "./styles.css";
@@ -107,6 +107,18 @@ const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
 const googleAuthEnabled = Boolean(googleClientId);
 const fingerprintEnrollmentAvailable = !apiBaseUrl.includes("workers.dev");
 const productionRosterPullAvailable = fingerprintEnrollmentAvailable;
+const fingerLabelOptions = [
+  ["right-thumb", "Right thumb"],
+  ["right-index", "Right index"],
+  ["right-middle", "Right middle"],
+  ["right-ring", "Right ring"],
+  ["right-pinky", "Right pinky"],
+  ["left-thumb", "Left thumb"],
+  ["left-index", "Left index"],
+  ["left-middle", "Left middle"],
+  ["left-ring", "Left ring"],
+  ["left-pinky", "Left pinky"]
+] as const;
 const weekdayOptions = [
   { value: 0, label: "Sun" },
   { value: 1, label: "Mon" },
@@ -279,6 +291,7 @@ function Overview({ session }: { session: DashboardSession }) {
 function Roster({ session }: { session: DashboardSession }) {
   const { data, error, reload } = useApi<{ members: MemberRow[] }>("/admin/members", session);
   const { data: rosterSummary, error: rosterSummaryError, reload: reloadRosterSummary } = useApi<{ members: RosterAttendanceSummaryRow[] }>("/admin/reports/roster-attendance", session);
+  const { data: meetingSummary } = useApi<{ meetings: MeetingSummaryReportRow[] }>("/admin/reports/meetings", session);
   const { data: enrollmentData, error: enrollmentError, reload: reloadEnrollments } = useOptionalApi<{ enrollments: FingerprintEnrollment[] }>(
     fingerprintEnrollmentAvailable ? "/admin/fingerprint/enrollments" : undefined,
     session
@@ -290,12 +303,21 @@ function Roster({ session }: { session: DashboardSession }) {
   const [memberMessage, setMemberMessage] = useState<{ kind: "success" | "error"; text: string }>();
   const [busyMemberId, setBusyMemberId] = useState<string>();
   const [pullingRoster, setPullingRoster] = useState(false);
+  const [selectedDetailMemberId, setSelectedDetailMemberId] = useState("");
   const [enrollMemberId, setEnrollMemberId] = useState("");
   const [enrollSlot, setEnrollSlot] = useState("");
   const [enrollFingerLabel, setEnrollFingerLabel] = useState("right-index");
   const [confirmOverwrite, setConfirmOverwrite] = useState(false);
   const [enrollMessage, setEnrollMessage] = useState<{ kind: "info" | "success" | "error"; text: string }>();
   const [enrolling, setEnrolling] = useState(false);
+  const { data: memberReport, error: memberReportError, reload: reloadMemberReport } = useOptionalApi<MemberAttendanceReport>(
+    selectedDetailMemberId ? `/admin/reports/member?memberId=${encodeURIComponent(selectedDetailMemberId)}` : undefined,
+    session
+  );
+  const { data: sessionRows } = useOptionalApi<{ sessions: Array<Record<string, unknown>> }>(
+    selectedDetailMemberId ? "/admin/reports/sessions" : undefined,
+    session
+  );
   const activeMembers = data?.members.filter((member) => member.active) ?? [];
   const deactivatedMembers = data?.members.filter((member) => !member.active) ?? [];
   const attendanceByMemberId = new Map((rosterSummary?.members ?? []).map((member) => [member.memberId, member]));
@@ -303,16 +325,19 @@ function Roster({ session }: { session: DashboardSession }) {
     const attendance = attendanceByMemberId.get(member.memberId);
     return {
       ...member,
-      attendance: formatPercent(attendance?.attendanceRate ?? null),
-      requiredMeetings: attendance?.requiredMeetings ?? 0
+      attendance: formatPercent(attendance?.attendanceRate ?? null)
     };
   });
   const enrollments = enrollmentData?.enrollments ?? [];
+  const meetingSummaryRows = meetingSummary?.meetings ?? [];
   const nextOpenSlot = nextAvailableFingerprintSlot(enrollments);
   const selectedSlot = Number(enrollSlot);
-  const occupiedEnrollment = enrollments.find((enrollment) => enrollment.slot === selectedSlot);
+  const occupiedEnrollment = Number.isFinite(selectedSlot) && selectedSlot > 0
+    ? enrollments.find((enrollment) => enrollment.slot === selectedSlot)
+    : undefined;
   const selectedEnrollmentMember = activeMembers.find((member) => member.memberId === enrollMemberId);
   const overwriteBlocked = Boolean(occupiedEnrollment && !confirmOverwrite);
+  const selectedDetailMember = data?.members.find((member) => member.memberId === selectedDetailMemberId);
 
   useEffect(() => {
     if (!fingerprintEnrollmentAvailable || enrollSlot) return;
@@ -322,6 +347,11 @@ function Roster({ session }: { session: DashboardSession }) {
   useEffect(() => {
     setConfirmOverwrite(false);
   }, [enrollSlot, enrollMemberId]);
+
+  useEffect(() => {
+    if (!selectedDetailMember?.active) return;
+    setEnrollMemberId(selectedDetailMember.memberId);
+  }, [selectedDetailMember?.active, selectedDetailMember?.memberId]);
 
   useEffect(() => {
     if (!data?.members) return;
@@ -342,6 +372,7 @@ function Roster({ session }: { session: DashboardSession }) {
       await apiPut(`/admin/members/${encodeURIComponent(member.memberId)}/email`, { email: email || null }, session);
       setMemberMessage({ kind: "success", text: `Saved email for ${member.firstName} ${member.lastName}.` });
       reload();
+      reloadMemberReport();
     } catch (error) {
       setMemberMessage({ kind: "error", text: friendlyDashboardError(error) });
     } finally {
@@ -385,6 +416,7 @@ function Roster({ session }: { session: DashboardSession }) {
     try {
       await apiDelete(`/admin/members/${encodeURIComponent(member.memberId)}`, session);
       setMemberMessage({ kind: "success", text: `Hard deleted ${member.firstName} ${member.lastName} and associated member data.` });
+      if (selectedDetailMemberId === member.memberId) setSelectedDetailMemberId("");
       reload();
       reloadRosterSummary();
       reloadEnrollments();
@@ -400,6 +432,13 @@ function Roster({ session }: { session: DashboardSession }) {
       setEnrollMessage({
         kind: "error",
         text: "Open the Pi dashboard at http://AttKiosk:5174 to enroll fingerprints. The production dashboard cannot access the local reader."
+      });
+      return;
+    }
+    if (!selectedEnrollmentMember) {
+      setEnrollMessage({
+        kind: "error",
+        text: "Open an active member's details before enrolling a fingerprint."
       });
       return;
     }
@@ -457,14 +496,28 @@ function Roster({ session }: { session: DashboardSession }) {
   }
 
   function startRemapEnrollment(enrollment: FingerprintEnrollment) {
+    setSelectedDetailMemberId(enrollment.memberId);
     setEnrollMemberId(enrollment.memberId);
     setEnrollSlot(String(enrollment.slot));
-    setEnrollFingerLabel(enrollment.fingerLabel ?? "");
+    setEnrollFingerLabel(normalizeFingerLabel(enrollment.fingerLabel));
     setConfirmOverwrite(false);
     setEnrollMessage({
       kind: "info",
       text: `Slot ${enrollment.slot} is loaded for remapping. Check the replace confirmation before saving changes.`
     });
+  }
+
+  function openMemberDetails(member: MemberRow, focusEnrollment = false) {
+    setSelectedDetailMemberId((current) => current === member.memberId && !focusEnrollment ? "" : member.memberId);
+    if (member.active) {
+      setEnrollMemberId(member.memberId);
+      if (focusEnrollment || !enrollSlot) setEnrollSlot(String(nextOpenSlot));
+      if (!fingerLabelOptions.some(([value]) => value === enrollFingerLabel)) setEnrollFingerLabel("right-index");
+    }
+    if (focusEnrollment) {
+      setEnrollMessage(undefined);
+      setConfirmOverwrite(false);
+    }
   }
 
   return (
@@ -485,21 +538,49 @@ function Roster({ session }: { session: DashboardSession }) {
             </button>
           ))}
         </div>
-        <p className="notice info">
-          Deactivate members to preserve attendance history. Hard delete permanently removes associated member data and requires typed confirmation.
-        </p>
         {memberMessage ? <p className={`notice ${memberMessage.kind}`}>{memberMessage.text}</p> : null}
         {error ?? rosterSummaryError ? <p className="error">{error ?? rosterSummaryError}</p> : null}
         {rosterViewTab === "active" ? (
           <MemberManagementTable
             members={activeRosterRows}
-            drafts={emailDrafts}
             busyMemberId={busyMemberId}
-            onDraftChange={(memberId, email) => setEmailDrafts((drafts) => ({ ...drafts, [memberId]: email }))}
-            onSaveEmail={saveMemberEmail}
             onDeactivate={(member) => setMemberActive(member, false)}
             onReactivate={(member) => setMemberActive(member, true)}
             onHardDelete={hardDeleteMember}
+            onToggleDetails={(member) => openMemberDetails(member)}
+            onEnrollFingerprint={(member) => openMemberDetails(member, true)}
+            selectedMemberId={selectedDetailMemberId}
+            renderDetails={(member) => (
+              <MemberDetailsPanel
+                member={member}
+                emailDraft={emailDrafts[member.memberId] ?? member.email ?? ""}
+                onEmailDraftChange={(email) => setEmailDrafts((drafts) => ({ ...drafts, [member.memberId]: email }))}
+                onSaveEmail={() => saveMemberEmail(member)}
+                busy={busyMemberId === member.memberId}
+                memberReport={memberReport?.memberId === member.memberId ? memberReport : undefined}
+                memberReportError={selectedDetailMemberId === member.memberId ? memberReportError : undefined}
+                meetingSummaryRows={meetingSummaryRows}
+                sessionRows={sessionRows?.sessions ?? []}
+                fingerprintEnrollmentAvailable={fingerprintEnrollmentAvailable}
+                enrollments={enrollments}
+                enrollMemberId={enrollMemberId}
+                enrollSlot={enrollSlot}
+                enrollFingerLabel={enrollFingerLabel}
+                occupiedEnrollment={occupiedEnrollment}
+                confirmOverwrite={confirmOverwrite}
+                overwriteBlocked={overwriteBlocked}
+                enrolling={enrolling}
+                enrollMessage={enrollMessage}
+                enrollmentError={enrollmentError}
+                nextOpenSlot={nextOpenSlot}
+                onEnrollSlotChange={setEnrollSlot}
+                onEnrollFingerLabelChange={setEnrollFingerLabel}
+                onConfirmOverwriteChange={setConfirmOverwrite}
+                onSubmitEnrollment={submitFingerprintEnrollment}
+                onDeleteEnrollment={deleteEnrollment}
+                onRemapEnrollment={startRemapEnrollment}
+              />
+            )}
             emptyMessage="No active members yet."
             showAttendance
           />
@@ -507,13 +588,44 @@ function Roster({ session }: { session: DashboardSession }) {
         {rosterViewTab === "deactivated" ? (
           <MemberManagementTable
             members={deactivatedMembers}
-            drafts={emailDrafts}
             busyMemberId={busyMemberId}
-            onDraftChange={(memberId, email) => setEmailDrafts((drafts) => ({ ...drafts, [memberId]: email }))}
-            onSaveEmail={saveMemberEmail}
             onDeactivate={(member) => setMemberActive(member, false)}
             onReactivate={(member) => setMemberActive(member, true)}
             onHardDelete={hardDeleteMember}
+            onToggleDetails={(member) => openMemberDetails(member)}
+            onEnrollFingerprint={(member) => openMemberDetails(member, true)}
+            selectedMemberId={selectedDetailMemberId}
+            renderDetails={(member) => (
+              <MemberDetailsPanel
+                member={member}
+                emailDraft={emailDrafts[member.memberId] ?? member.email ?? ""}
+                onEmailDraftChange={(email) => setEmailDrafts((drafts) => ({ ...drafts, [member.memberId]: email }))}
+                onSaveEmail={() => saveMemberEmail(member)}
+                busy={busyMemberId === member.memberId}
+                memberReport={memberReport?.memberId === member.memberId ? memberReport : undefined}
+                memberReportError={selectedDetailMemberId === member.memberId ? memberReportError : undefined}
+                meetingSummaryRows={meetingSummaryRows}
+                sessionRows={sessionRows?.sessions ?? []}
+                fingerprintEnrollmentAvailable={fingerprintEnrollmentAvailable}
+                enrollments={enrollments}
+                enrollMemberId={enrollMemberId}
+                enrollSlot={enrollSlot}
+                enrollFingerLabel={enrollFingerLabel}
+                occupiedEnrollment={occupiedEnrollment}
+                confirmOverwrite={confirmOverwrite}
+                overwriteBlocked={overwriteBlocked}
+                enrolling={enrolling}
+                enrollMessage={enrollMessage}
+                enrollmentError={enrollmentError}
+                nextOpenSlot={nextOpenSlot}
+                onEnrollSlotChange={setEnrollSlot}
+                onEnrollFingerLabelChange={setEnrollFingerLabel}
+                onConfirmOverwriteChange={setConfirmOverwrite}
+                onSubmitEnrollment={submitFingerprintEnrollment}
+                onDeleteEnrollment={deleteEnrollment}
+                onRemapEnrollment={startRemapEnrollment}
+              />
+            )}
             emptyMessage="No deactivated members."
           />
         ) : null}
@@ -556,128 +668,246 @@ function Roster({ session }: { session: DashboardSession }) {
           </form>
         ) : null}
       </section>
-      <section>
-        <h2>Fingerprint Enrollment</h2>
-        {!fingerprintEnrollmentAvailable ? (
-          <p className="notice info">
-            Fingerprint enrollment must run from the Raspberry Pi dashboard at http://AttKiosk:5174 because it needs direct access to the local fingerprint reader.
-          </p>
-        ) : null}
-        <form className="toolbar wrap" onSubmit={async (event) => {
-          event.preventDefault();
-          await submitFingerprintEnrollment(false);
-        }}>
-          <select value={enrollMemberId} onChange={(event) => setEnrollMemberId(event.target.value)} required>
-            <option value="">Select member</option>
-            {activeMembers.map((member) => (
-              <option key={member.memberId} value={member.memberId}>
-                {member.memberId} - {member.firstName} {member.lastName}
-              </option>
-            ))}
-          </select>
-          <label className="field-label">
-            <span>Template slot</span>
-            <input value={enrollSlot} onChange={(event) => setEnrollSlot(event.target.value)} type="number" min="1" max="200" placeholder="Slot" required />
-          </label>
-          <input value={enrollFingerLabel} onChange={(event) => setEnrollFingerLabel(event.target.value)} placeholder="Finger label" />
-          <button type="button" onClick={() => setEnrollSlot(String(nextOpenSlot))} disabled={!fingerprintEnrollmentAvailable || enrolling}>Use slot {nextOpenSlot}</button>
-          <button disabled={enrolling || !fingerprintEnrollmentAvailable || overwriteBlocked}>{enrolling ? "Enrolling..." : "Enroll fingerprint"}</button>
-          <button type="button" disabled={enrolling || !fingerprintEnrollmentAvailable || !enrollMemberId || !enrollSlot || overwriteBlocked} onClick={() => submitFingerprintEnrollment(true)}>
-            Save mapping only
-          </button>
-        </form>
-        {fingerprintEnrollmentAvailable ? (
-          <p className="slot-suggestion">
-            Suggested next open slot: <button type="button" onClick={() => setEnrollSlot(String(nextOpenSlot))} disabled={enrolling}>{nextOpenSlot}</button>
-          </p>
-        ) : null}
-        {occupiedEnrollment ? (
-          <label className="inline-check notice info">
-            <input type="checkbox" checked={confirmOverwrite} onChange={(event) => setConfirmOverwrite(event.target.checked)} />
-            Replace slot {occupiedEnrollment.slot}, currently mapped to {fingerprintEnrollmentName(occupiedEnrollment)}
-          </label>
-        ) : null}
-        {enrollMessage ? <p className={`notice ${enrollMessage.kind}`}>{enrollMessage.text}</p> : null}
-        {enrollmentError ? <p className="error">{enrollmentError}</p> : null}
-        {fingerprintEnrollmentAvailable ? (
-          <FingerprintEnrollmentTable enrollments={enrollments} onDelete={deleteEnrollment} onRemap={startRemapEnrollment} busy={enrolling} />
-        ) : null}
-      </section>
     </>
   );
 }
 
 function MemberManagementTable({
   members,
-  drafts,
   busyMemberId,
-  onDraftChange,
-  onSaveEmail,
   onDeactivate,
   onReactivate,
   onHardDelete,
+  onToggleDetails,
+  onEnrollFingerprint,
+  selectedMemberId,
+  renderDetails,
   emptyMessage,
   showAttendance = false
 }: {
   members: Array<MemberRow & { attendance?: string; requiredMeetings?: number | string }>;
-  drafts: Record<string, string>;
   busyMemberId?: string;
-  onDraftChange: (memberId: string, email: string) => void;
-  onSaveEmail: (member: MemberRow) => void;
   onDeactivate: (member: MemberRow) => void;
   onReactivate: (member: MemberRow) => void;
   onHardDelete: (member: MemberRow) => void;
+  onToggleDetails: (member: MemberRow) => void;
+  onEnrollFingerprint: (member: MemberRow) => void;
+  selectedMemberId: string;
+  renderDetails: (member: MemberRow) => JSX.Element;
   emptyMessage: string;
   showAttendance?: boolean;
 }) {
   if (members.length === 0) return <p className="empty-state">{emptyMessage}</p>;
+  const columnCount = showAttendance ? 4 : 3;
   return (
     <div className="data-table-wrap">
       <table className="data-table roster-member-table">
         <thead>
           <tr>
             <th>Member ID</th>
-            <th>First Name</th>
-            <th>Last Name</th>
-            <th>Email</th>
+            <th>Name</th>
             {showAttendance ? <th>Attendance</th> : null}
-            {showAttendance ? <th>Required Meetings</th> : null}
             <th>Actions</th>
           </tr>
         </thead>
         <tbody>
           {members.map((member) => (
-            <tr key={member.memberId}>
-              <td>{member.memberId}</td>
-              <td>{member.firstName}</td>
-              <td>{member.lastName}</td>
-              <td>
-                <input
-                  type="email"
-                  value={drafts[member.memberId] ?? member.email ?? ""}
-                  onChange={(event) => onDraftChange(member.memberId, event.target.value)}
-                  placeholder="name@example.org"
-                />
-              </td>
-              {showAttendance ? <td>{member.attendance ?? ""}</td> : null}
-              {showAttendance ? <td>{member.requiredMeetings ?? ""}</td> : null}
-              <td>
-                <div className="mapping-actions">
-                  <button type="button" disabled={busyMemberId === member.memberId} onClick={() => onSaveEmail(member)}>
-                    {busyMemberId === member.memberId ? "Saving..." : "Save email"}
-                  </button>
-                  {member.active ? (
-                    <button type="button" disabled={busyMemberId === member.memberId} onClick={() => onDeactivate(member)}>Deactivate</button>
-                  ) : (
-                    <button type="button" disabled={busyMemberId === member.memberId} onClick={() => onReactivate(member)}>Reactivate</button>
-                  )}
-                  <button type="button" className="danger-button" disabled={busyMemberId === member.memberId} onClick={() => onHardDelete(member)}>Hard delete</button>
-                </div>
-              </td>
-            </tr>
+            <Fragment key={member.memberId}>
+              <tr>
+                <td>{member.memberId}</td>
+                <td>{member.firstName} {member.lastName}</td>
+                {showAttendance ? <td>{member.attendance ?? ""}</td> : null}
+                <td>
+                  <div className="mapping-actions roster-row-actions">
+                    <button type="button" disabled={busyMemberId === member.memberId} onClick={() => onToggleDetails(member)}>
+                      {selectedMemberId === member.memberId ? "Hide details" : "Details"}
+                    </button>
+                    {member.active ? (
+                      <button type="button" disabled={busyMemberId === member.memberId || !fingerprintEnrollmentAvailable} onClick={() => onEnrollFingerprint(member)}>Enroll fingerprint</button>
+                    ) : null}
+                    {member.active ? (
+                      <button type="button" disabled={busyMemberId === member.memberId} onClick={() => onDeactivate(member)}>Deactivate</button>
+                    ) : (
+                      <button type="button" disabled={busyMemberId === member.memberId} onClick={() => onReactivate(member)}>Reactivate</button>
+                    )}
+                    <button type="button" className="danger-button" disabled={busyMemberId === member.memberId} onClick={() => onHardDelete(member)}>Hard delete</button>
+                  </div>
+                </td>
+              </tr>
+              {selectedMemberId === member.memberId ? (
+                <tr className="member-detail-row">
+                  <td colSpan={columnCount}>{renderDetails(member)}</td>
+                </tr>
+              ) : null}
+            </Fragment>
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+function MemberDetailsPanel({
+  member,
+  emailDraft,
+  onEmailDraftChange,
+  onSaveEmail,
+  busy,
+  memberReport,
+  memberReportError,
+  meetingSummaryRows,
+  sessionRows,
+  fingerprintEnrollmentAvailable,
+  enrollments,
+  enrollMemberId,
+  enrollSlot,
+  enrollFingerLabel,
+  occupiedEnrollment,
+  confirmOverwrite,
+  overwriteBlocked,
+  enrolling,
+  enrollMessage,
+  enrollmentError,
+  nextOpenSlot,
+  onEnrollSlotChange,
+  onEnrollFingerLabelChange,
+  onConfirmOverwriteChange,
+  onSubmitEnrollment,
+  onDeleteEnrollment,
+  onRemapEnrollment
+}: {
+  member: MemberRow;
+  emailDraft: string;
+  onEmailDraftChange: (email: string) => void;
+  onSaveEmail: () => void;
+  busy: boolean;
+  memberReport?: MemberAttendanceReport;
+  memberReportError?: string;
+  meetingSummaryRows: MeetingSummaryReportRow[];
+  sessionRows: Array<Record<string, unknown>>;
+  fingerprintEnrollmentAvailable: boolean;
+  enrollments: FingerprintEnrollment[];
+  enrollMemberId: string;
+  enrollSlot: string;
+  enrollFingerLabel: string;
+  occupiedEnrollment?: FingerprintEnrollment;
+  confirmOverwrite: boolean;
+  overwriteBlocked: boolean;
+  enrolling: boolean;
+  enrollMessage?: { kind: "info" | "success" | "error"; text: string };
+  enrollmentError?: string;
+  nextOpenSlot: number;
+  onEnrollSlotChange: (slot: string) => void;
+  onEnrollFingerLabelChange: (label: string) => void;
+  onConfirmOverwriteChange: (confirm: boolean) => void;
+  onSubmitEnrollment: (mapOnly?: boolean) => void | Promise<void>;
+  onDeleteEnrollment: (slot: number) => void;
+  onRemapEnrollment: (enrollment: FingerprintEnrollment) => void;
+}) {
+  const meetingsByDate = new Map(meetingSummaryRows.map((meeting) => [meeting.meetingDate, meeting]));
+  const missedMeetings = memberReport?.absentDates.map((date) => meetingsByDate.get(date) ?? {
+    meetingDate: date,
+    title: null,
+    required: true
+  }) ?? [];
+  const optionalAttendanceDates = new Set(sessionRows
+    .filter((row) => String(row.member_id ?? row.memberId ?? "") === member.memberId && Number(row.required ?? 1) === 0)
+    .map((row) => String(row.meeting_date ?? row.meetingDate ?? "")));
+  const optionalMeetings = meetingSummaryRows.filter((meeting) => !meeting.required);
+  const memberEnrollments = enrollments.filter((enrollment) => enrollment.memberId === member.memberId);
+
+  return (
+    <div className="member-detail-panel">
+      <div className="member-detail-grid">
+        <div>
+          <h3>{member.firstName} {member.lastName}</h3>
+          <p className="report-context">{member.memberId}</p>
+        </div>
+        <label className="field-label member-email-field">
+          <span>Email</span>
+          <input type="email" value={emailDraft} onChange={(event) => onEmailDraftChange(event.target.value)} placeholder="name@example.org" />
+        </label>
+        <button type="button" disabled={busy} onClick={onSaveEmail}>{busy ? "Saving..." : "Save email"}</button>
+      </div>
+
+      {memberReportError ? <p className="error">{memberReportError}</p> : null}
+      {memberReport ? (
+        <>
+          <div className="grid compact-grid member-metrics">
+            <Metric label="Required Attendance" value={formatPercent(memberReport.attendanceRate)} />
+            <Metric label="Required Present" value={memberReport.presentMeetings} />
+            <Metric label="Required Missed" value={memberReport.missedMeetings} />
+          </div>
+          <div className="member-detail-lists">
+            <div>
+              <h4>Missed Required Meetings</h4>
+              {missedMeetings.length > 0 ? (
+                <ul className="plain-list">
+                  {missedMeetings.map((meeting) => <li key={meeting.meetingDate}>{meetingSummaryLabel(meeting)}</li>)}
+                </ul>
+              ) : <p className="empty-state">No missed required meetings in the current report range.</p>}
+            </div>
+            <div>
+              <h4>Optional Meetings</h4>
+              {optionalMeetings.length > 0 ? (
+                <ul className="plain-list">
+                  {optionalMeetings.map((meeting) => (
+                    <li key={meeting.meetingDate}>
+                      {meetingSummaryLabel(meeting)} {optionalAttendanceDates.has(meeting.meetingDate) ? "(attended, not counted)" : "(not required)"}
+                    </li>
+                  ))}
+                </ul>
+              ) : <p className="empty-state">No optional meetings are available in the current report range.</p>}
+            </div>
+          </div>
+        </>
+      ) : <p className="empty-state">Loading attendance details...</p>}
+
+      <div className="fingerprint-detail">
+        <h4>Fingerprint</h4>
+        {!fingerprintEnrollmentAvailable ? (
+          <p className="notice info">
+            Fingerprint enrollment must run from the Raspberry Pi dashboard at http://AttKiosk:5174 because it needs direct access to the local fingerprint reader.
+          </p>
+        ) : null}
+        {member.active ? (
+          <form className="fingerprint-enroll-form" onSubmit={async (event) => {
+            event.preventDefault();
+            await onSubmitEnrollment(false);
+          }}>
+            <label className="field-label">
+              <span>Template slot</span>
+              <input value={enrollSlot} onChange={(event) => onEnrollSlotChange(event.target.value)} type="number" min="1" max="200" placeholder="Slot" required />
+            </label>
+            <label className="field-label">
+              <span>Finger</span>
+              <select value={normalizeFingerLabel(enrollFingerLabel)} onChange={(event) => onEnrollFingerLabelChange(event.target.value)} required>
+                {fingerLabelOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              </select>
+            </label>
+            <button type="button" onClick={() => onEnrollSlotChange(String(nextOpenSlot))} disabled={!fingerprintEnrollmentAvailable || enrolling}>Use slot {nextOpenSlot}</button>
+            <button disabled={enrolling || !fingerprintEnrollmentAvailable || enrollMemberId !== member.memberId || overwriteBlocked}>
+              {enrolling ? "Enrolling..." : "Enroll fingerprint"}
+            </button>
+            <button
+              type="button"
+              disabled={enrolling || !fingerprintEnrollmentAvailable || enrollMemberId !== member.memberId || !enrollSlot || overwriteBlocked}
+              onClick={() => onSubmitEnrollment(true)}
+            >
+              Save mapping only
+            </button>
+          </form>
+        ) : <p className="empty-state">Reactivate this member before enrolling a fingerprint.</p>}
+        {occupiedEnrollment ? (
+          <label className="inline-check notice info">
+            <input type="checkbox" checked={confirmOverwrite} onChange={(event) => onConfirmOverwriteChange(event.target.checked)} />
+            Replace slot {occupiedEnrollment.slot}, currently mapped to {fingerprintEnrollmentName(occupiedEnrollment)}
+          </label>
+        ) : null}
+        {enrollMessage && enrollMemberId === member.memberId ? <p className={`notice ${enrollMessage.kind}`}>{enrollMessage.text}</p> : null}
+        {enrollmentError ? <p className="error">{enrollmentError}</p> : null}
+        <FingerprintEnrollmentTable enrollments={memberEnrollments} onDelete={onDeleteEnrollment} onRemap={onRemapEnrollment} busy={enrolling} />
+      </div>
     </div>
   );
 }
@@ -2281,6 +2511,16 @@ function nextAvailableFingerprintSlot(enrollments: FingerprintEnrollment[], pend
     if (!occupiedSlots.has(slot)) return slot;
   }
   return 200;
+}
+
+function normalizeFingerLabel(value?: string) {
+  return value && fingerLabelOptions.some(([option]) => option === value) ? value : "right-index";
+}
+
+function meetingSummaryLabel(meeting: Pick<MeetingSummaryReportRow, "meetingDate" | "title" | "startsAt" | "endsAt">) {
+  const title = meeting.title ?? "Unscheduled attendance";
+  const time = meetingTimeRange({ startsAt: meeting.startsAt, endsAt: meeting.endsAt });
+  return `${meeting.meetingDate} - ${title}${time ? `, ${time}` : ""}`;
 }
 
 function fingerprintEnrollmentName(enrollment: FingerprintEnrollment) {
