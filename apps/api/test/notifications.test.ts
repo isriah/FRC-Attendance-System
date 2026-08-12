@@ -81,11 +81,38 @@ describe("meeting absence notifications", () => {
     expect(await response.json()).toEqual({ error: "Meeting must be completed before missed-meeting emails can be sent" });
   });
 
-  it("sends through the configured provider and skips prior deliveries by default", async () => {
+  it("stays preview-only when a Resend key is set without a from address", async () => {
     const env = createTestEnv({
-      EMAIL_PROVIDER_URL: "https://email.test/send",
-      EMAIL_PROVIDER_API_KEY: "test-key",
-      EMAIL_FROM_ADDRESS: "attendance@example.org"
+      RESEND_API_KEY: "re_test-key"
+    });
+    insertStudent(env, "100001", "Absent", "Member", "absent@example.org");
+    insertMeeting(env, "2026-01-02", 1, "Required Build");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await request(env, "/admin/notifications/meeting-absence", {
+      meetingDate: "2026-01-02"
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      providerConfigured: false,
+      mode: "preview",
+      recipients: [{
+        memberId: "100001",
+        email: "absent@example.org",
+        status: "would_send"
+      }]
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(countRows(env, "notification_deliveries")).toBe(0);
+  });
+
+  it("sends through Resend and skips prior deliveries by default", async () => {
+    const env = createTestEnv({
+      RESEND_API_KEY: "re_test-key",
+      EMAIL_FROM_ADDRESS: "attendance@example.org",
+      EMAIL_FROM_NAME: "Team Attendance"
     });
     insertStudent(env, "100001", "Present", "Member", "present@example.org");
     insertStudent(env, "100002", "Already", "Sent", "already@example.org");
@@ -120,6 +147,47 @@ describe("meeting absence notifications", () => {
       ]
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith("https://api.resend.com/emails", expect.objectContaining({
+      method: "POST",
+      headers: expect.objectContaining({
+        authorization: "Bearer re_test-key",
+        "content-type": "application/json",
+        "Idempotency-Key": "meeting_absence:2026-01-02:100003:needs@example.org"
+      })
+    }));
+    const resendBody = fetchJsonBody(fetchMock);
+    expect(resendBody).toMatchObject({
+      from: "Team Attendance <attendance@example.org>",
+      to: ["needs@example.org"],
+      subject: "Missed meeting: Required Build"
+    });
+    expect(resendBody.html).toContain("Our attendance records show");
+    expect(resendBody.text).toContain("Hi Needs,");
+    expect(sentDeliveryEmails(env)).toEqual(["already@example.org", "needs@example.org"]);
+    expect(providerMessageIds(env)).toEqual(["provider-1"]);
+  });
+
+  it("keeps backwards-compatible generic HTTP provider support", async () => {
+    const env = createTestEnv({
+      EMAIL_PROVIDER_URL: "https://email.test/send",
+      EMAIL_PROVIDER_API_KEY: "test-key",
+      EMAIL_FROM_ADDRESS: "attendance@example.org"
+    });
+    insertStudent(env, "100001", "Needs", "Email", "needs@example.org");
+    insertMeeting(env, "2026-01-02", 1, "Required Build");
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ messageId: "generic-1" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await request(env, "/admin/notifications/meeting-absence", {
+      meetingDate: "2026-01-02"
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      providerConfigured: true,
+      mode: "send",
+      sentCount: 1
+    });
     expect(fetchMock).toHaveBeenCalledWith("https://email.test/send", expect.objectContaining({
       method: "POST",
       headers: expect.objectContaining({
@@ -127,7 +195,20 @@ describe("meeting absence notifications", () => {
         "content-type": "application/json"
       })
     }));
-    expect(sentDeliveryEmails(env)).toEqual(["already@example.org", "needs@example.org"]);
+    const genericBody = fetchJsonBody(fetchMock);
+    expect(genericBody).toMatchObject({
+      from: {
+        email: "attendance@example.org",
+        name: "FRC Attendance"
+      },
+      to: [{ email: "needs@example.org" }],
+      metadata: {
+        notificationKind: "meeting_absence",
+        meetingDate: "2026-01-02",
+        memberId: "100001"
+      }
+    });
+    expect(providerMessageIds(env)).toEqual(["generic-1"]);
   });
 });
 
@@ -292,6 +373,22 @@ function sentDeliveryEmails(env: Env): string[] {
     ORDER BY recipient_email
   `).all() as Array<{ recipient_email: string }>;
   return rows.map((row) => row.recipient_email);
+}
+
+function providerMessageIds(env: Env): string[] {
+  const rows = (env.DB as unknown as ReturnType<typeof d1>).sqlite.prepare(`
+    SELECT provider_message_id
+    FROM notification_deliveries
+    WHERE provider_message_id IS NOT NULL
+    ORDER BY provider_message_id
+  `).all() as Array<{ provider_message_id: string }>;
+  return rows.map((row) => row.provider_message_id);
+}
+
+function fetchJsonBody(fetchMock: ReturnType<typeof vi.fn>) {
+  const init = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
+  if (!init || typeof init.body !== "string") throw new Error("Expected fetch JSON body");
+  return JSON.parse(init.body) as Record<string, unknown>;
 }
 
 function d1(sqlite: Database.Database) {
