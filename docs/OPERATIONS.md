@@ -9,6 +9,7 @@ Current production API:
 - D1 database: `frc-attendance`
 - D1 database ID: `c02c0ca8-033b-435f-ae21-2d8f3b203b22`
 - Applied remote migrations: `0001_initial.sql` through `0005_student_email.sql`
+- Source migration `0006_notification_deliveries.sql` adds missed-meeting notification audit tracking and must be applied before enabling production sends.
 - Workers account subdomain: `frc-attendance.workers.dev`
 - Registered bench kiosk: `bench-01`
 
@@ -57,6 +58,10 @@ This repeatable check verifies the production Worker `/health` response, verifie
    - `GOOGLE_ALLOWED_EMAILS`: comma-separated bootstrap mentor emails.
    - `GOOGLE_ALLOWED_DOMAIN`: optional bootstrap Google Workspace domain.
    - `DUPLICATE_WINDOW_SECONDS`: default `90`.
+   - `EMAIL_PROVIDER_URL`: optional HTTP email provider endpoint for missed-meeting notifications.
+   - `EMAIL_PROVIDER_API_KEY`: optional bearer token for the configured email provider; store as a secret when used.
+   - `EMAIL_FROM_ADDRESS`: required with `EMAIL_PROVIDER_URL` to enable actual sends.
+   - `EMAIL_FROM_NAME`: optional display name, defaults to `FRC Attendance`.
 
 6. Deploy the Worker:
 
@@ -208,6 +213,16 @@ The env allowlist/domain are retained as bootstrap access so an existing deploym
 Dashboard admins can manage database-backed OAuth access from the Admins tab by email, active status, and `mentor`/`admin` role. The role is stored for policy and audit use; current dashboard routes require an authenticated active admin but do not yet restrict actions by role.
 
 Dashboard roster records can store an optional member email for user association. That member email does not grant dashboard admin access by itself; add the email on the Admins tab or keep it covered by the Worker env allowlist/domain.
+
+## Missed Meeting Email Notifications
+
+The Worker exposes authenticated admin `POST /admin/notifications/meeting-absence` for completed required scheduled meetings. The request body accepts `meetingDate`, optional `preview`, and optional `resend`; the dashboard uses preview first, then confirms before sending when a provider is configured.
+
+Sending is disabled unless both `EMAIL_PROVIDER_URL` and `EMAIL_FROM_ADDRESS` are configured. In disabled mode, the endpoint returns who would receive email, who is missing a member email, and a warning without writing delivery audit rows. When enabled, the Worker posts a generic JSON payload to `EMAIL_PROVIDER_URL` with an optional `Authorization: Bearer <EMAIL_PROVIDER_API_KEY>` header. The provider-specific shape is intentionally isolated in `apps/api/src/notifications.ts` so another HTTP provider can be added later without changing absence selection.
+
+Migration `0006_notification_deliveries.sql` creates `notification_deliveries` for audit and duplicate prevention. It tracks notification kind, meeting date, member ID, recipient email, status, provider message ID, error message, and sent/error timestamps. Successful prior deliveries are skipped by default; `resend: true` includes them again.
+
+Member notification emails are roster metadata only. They are separate from dashboard admin emails and do not grant API or dashboard access.
 
 ## Kiosk Provisioning
 

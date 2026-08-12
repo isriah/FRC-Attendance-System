@@ -100,6 +100,32 @@ interface BulkMeetingEditState {
   notes: string;
 }
 
+interface MeetingAbsenceNotificationResult {
+  meetingDate: string;
+  title: string | null;
+  notificationKind: "meeting_absence";
+  providerConfigured: boolean;
+  mode: "preview" | "send";
+  sentCount: number;
+  skippedDuplicateCount: number;
+  errorCount: number;
+  recipients: Array<{
+    memberId: string;
+    firstName: string;
+    lastName: string;
+    email: string;
+    status: "would_send" | "sent" | "error" | "skipped_duplicate";
+    error?: string;
+  }>;
+  missingEmail: Array<{
+    memberId: string;
+    firstName: string;
+    lastName: string;
+    status: "missing_email";
+  }>;
+  warnings: string[];
+}
+
 const defaultMeetingTitle = "Regular Meeting";
 const defaultMeetingStartTime = "15:00";
 const defaultMeetingEndTime = "17:30";
@@ -1103,6 +1129,8 @@ function Meetings({ session }: { session: DashboardSession }) {
   const [bulkEditState, setBulkEditState] = useState<BulkMeetingEditState>(emptyBulkMeetingEdit());
   const [bulkEditing, setBulkEditing] = useState(false);
   const [calendarMonth, setCalendarMonth] = useState("");
+  const [notificationResult, setNotificationResult] = useState<MeetingAbsenceNotificationResult>();
+  const [notificationBusyDate, setNotificationBusyDate] = useState("");
   const meetings = data?.meetings ?? [];
   const selectedMeetings = meetings.filter((meeting) => selectedMeetingIds.includes(meeting.id));
   const allMeetingsSelected = meetings.length > 0 && selectedMeetingIds.length === meetings.length;
@@ -1143,6 +1171,10 @@ function Meetings({ session }: { session: DashboardSession }) {
   useEffect(() => {
     setSelectedMeetingIds((ids) => ids.filter((id) => meetings.some((meeting) => meeting.id === id)));
   }, [meetings]);
+
+  useEffect(() => {
+    setNotificationResult(undefined);
+  }, [selectedMeetingDate]);
 
   async function submitMeeting(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1371,6 +1403,40 @@ function Meetings({ session }: { session: DashboardSession }) {
     }
   }
 
+  async function emailAbsentMembers(meetingDate: string) {
+    setNotificationBusyDate(meetingDate);
+    setMessage(undefined);
+    try {
+      const preview = await apiPost<MeetingAbsenceNotificationResult>("/admin/notifications/meeting-absence", {
+        meetingDate,
+        preview: true
+      }, session);
+      setNotificationResult(preview);
+      const sendableCount = preview.recipients.filter((recipient) => recipient.status === "would_send").length;
+      if (!preview.providerConfigured) {
+        setMessage({ kind: "success", text: `Preview ready for ${pluralize(sendableCount, "member")}; email sending is not configured.` });
+        return;
+      }
+      if (sendableCount === 0) {
+        setMessage({ kind: "success", text: "No unsent absent members with email addresses for this meeting." });
+        return;
+      }
+      if (!window.confirm(`Send missed-meeting email to ${pluralize(sendableCount, "absent member")}?`)) return;
+      const result = await apiPost<MeetingAbsenceNotificationResult>("/admin/notifications/meeting-absence", {
+        meetingDate
+      }, session);
+      setNotificationResult(result);
+      setMessage({
+        kind: result.errorCount > 0 ? "error" : "success",
+        text: `Sent ${pluralize(result.sentCount, "email")}${result.skippedDuplicateCount > 0 ? `; skipped ${pluralize(result.skippedDuplicateCount, "duplicate")}` : ""}.`
+      });
+    } catch (err) {
+      setMessage({ kind: "error", text: friendlyDashboardError(err) });
+    } finally {
+      setNotificationBusyDate("");
+    }
+  }
+
   const meetingForm = (
     <form className="meeting-form" onSubmit={submitMeeting}>
       <label className="field-label">
@@ -1487,10 +1553,13 @@ function Meetings({ session }: { session: DashboardSession }) {
               presenceError={selectedPresenceError}
               absencesError={selectedAbsencesError}
                 saving={saving}
+                notificationResult={notificationResult?.meetingDate === selectedMeetingDate ? notificationResult : undefined}
+                notificationBusy={notificationBusyDate === selectedMeetingDate}
                 onEdit={startEditing}
                 onDelete={deleteMeeting}
                 onConvert={startConvertingUnscheduled}
                 onClear={clearUnscheduledAttendance}
+                onEmailAbsent={emailAbsentMembers}
               />
           </>
         ) : null}
@@ -1738,7 +1807,10 @@ function MeetingDetails({
   onEdit,
   onDelete,
   onConvert,
-  onClear
+  onClear,
+  notificationResult,
+  notificationBusy,
+  onEmailAbsent
 }: {
   meeting?: ScheduledMeeting;
   summary?: MeetingSummaryReportRow;
@@ -1748,10 +1820,13 @@ function MeetingDetails({
   presenceError?: string;
   absencesError?: string;
   saving: boolean;
+  notificationResult?: MeetingAbsenceNotificationResult;
+  notificationBusy: boolean;
   onEdit: (meeting: ScheduledMeeting) => void;
   onDelete: (meeting: ScheduledMeeting) => void;
   onConvert: (summary: MeetingSummaryReportRow) => void;
   onClear: (summary: MeetingSummaryReportRow) => void;
+  onEmailAbsent: (meetingDate: string) => void;
 }) {
   if (!meeting && !summary) {
     return <p className="empty-state">Select a meeting on the calendar to see attendance details.</p>;
@@ -1798,6 +1873,7 @@ function MeetingDetails({
           ) : meeting ? (
             <>
               <MeetingRequirementBadge required={meeting.required} />
+              {required ? <button type="button" onClick={() => onEmailAbsent(meeting.meetingDate)} disabled={saving || notificationBusy}>{notificationBusy ? "Checking..." : "Email absent members"}</button> : null}
               <button type="button" onClick={() => onEdit(meeting)} disabled={saving}>Edit</button>
               <button type="button" onClick={() => onDelete(meeting)} disabled={saving}>Delete</button>
             </>
@@ -1819,6 +1895,7 @@ function MeetingDetails({
       </div>
       {presenceError ? <p className="error">{presenceError}</p> : null}
       {absencesError ? <p className="error">{absencesError}</p> : null}
+      {notificationResult ? <NotificationResultPanel result={notificationResult} /> : null}
       <div className="meeting-detail-grid">
         <div>
           <div className="meeting-detail-subheading">
@@ -1841,6 +1918,40 @@ function MeetingDetails({
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function NotificationResultPanel({ result }: { result: MeetingAbsenceNotificationResult }) {
+  const recipientRows = result.recipients.map((recipient) => ({
+    memberId: recipient.memberId,
+    firstName: recipient.firstName,
+    lastName: recipient.lastName,
+    email: recipient.email,
+    status: notificationStatusLabel(recipient.status),
+    error: recipient.error ?? ""
+  }));
+  const missingRows = result.missingEmail.map((recipient) => ({
+    memberId: recipient.memberId,
+    firstName: recipient.firstName,
+    lastName: recipient.lastName,
+    status: "Missing email"
+  }));
+  const noticeKind = result.errorCount > 0 ? "error" : result.mode === "send" ? "success" : "info";
+
+  return (
+    <div className="notification-result">
+      <p className={`notice ${noticeKind}`}>
+        {notificationSummary(result)}
+      </p>
+      {result.warnings.length > 0 ? <p className="report-context">{result.warnings.join(" ")}</p> : null}
+      {recipientRows.length > 0 ? <DataTable rows={recipientRows} columns={["memberId", "firstName", "lastName", "email", "status", "error"]} density="compact" /> : null}
+      {missingRows.length > 0 ? (
+        <>
+          <p className="report-context">{pluralize(missingRows.length, "absent member")} missing email.</p>
+          <DataTable rows={missingRows} columns={["memberId", "firstName", "lastName", "status"]} density="compact" />
+        </>
+      ) : null}
     </div>
   );
 }
@@ -1989,6 +2100,8 @@ function Reports({ session }: { session: DashboardSession }) {
   const [showUnscheduledAttendance, setShowUnscheduledAttendance] = useState(false);
   const [attendanceActionMessage, setAttendanceActionMessage] = useState<{ kind: "success" | "error"; text: string }>();
   const [attendanceActionBusyDate, setAttendanceActionBusyDate] = useState("");
+  const [absenceNotificationResult, setAbsenceNotificationResult] = useState<MeetingAbsenceNotificationResult>();
+  const [absenceNotificationBusyDate, setAbsenceNotificationBusyDate] = useState("");
   const reportQuery = reportRangeQuery(reportStartDate, reportEndDate, showUnscheduledAttendance);
   const { data: meetingSummary, error: meetingSummaryError, reload: reloadMeetingSummary } = useApi<{ meetings: MeetingSummaryReportRow[] }>(`/admin/reports/meetings${reportQuery}`, session);
   const { data: rosterSummary, error: rosterSummaryError, reload: reloadRosterSummary } = useApi<{ members: RosterAttendanceSummaryRow[] }>(`/admin/reports/roster-attendance${reportQuery}`, session);
@@ -2060,6 +2173,40 @@ function Reports({ session }: { session: DashboardSession }) {
     }
   }
 
+  async function emailAbsentMembersFromReport(meetingDate: string) {
+    setAbsenceNotificationBusyDate(meetingDate);
+    setAttendanceActionMessage(undefined);
+    try {
+      const preview = await apiPost<MeetingAbsenceNotificationResult>("/admin/notifications/meeting-absence", {
+        meetingDate,
+        preview: true
+      }, session);
+      setAbsenceNotificationResult(preview);
+      const sendableCount = preview.recipients.filter((recipient) => recipient.status === "would_send").length;
+      if (!preview.providerConfigured) {
+        setAttendanceActionMessage({ kind: "success", text: `Preview ready for ${pluralize(sendableCount, "member")}; email sending is not configured.` });
+        return;
+      }
+      if (sendableCount === 0) {
+        setAttendanceActionMessage({ kind: "success", text: "No unsent absent members with email addresses for this meeting." });
+        return;
+      }
+      if (!window.confirm(`Send missed-meeting email to ${pluralize(sendableCount, "absent member")}?`)) return;
+      const result = await apiPost<MeetingAbsenceNotificationResult>("/admin/notifications/meeting-absence", {
+        meetingDate
+      }, session);
+      setAbsenceNotificationResult(result);
+      setAttendanceActionMessage({
+        kind: result.errorCount > 0 ? "error" : "success",
+        text: `Sent ${pluralize(result.sentCount, "email")}${result.skippedDuplicateCount > 0 ? `; skipped ${pluralize(result.skippedDuplicateCount, "duplicate")}` : ""}.`
+      });
+    } catch (err) {
+      setAttendanceActionMessage({ kind: "error", text: friendlyDashboardError(err) });
+    } finally {
+      setAbsenceNotificationBusyDate("");
+    }
+  }
+
   return (
     <>
       <section>
@@ -2113,6 +2260,9 @@ function Reports({ session }: { session: DashboardSession }) {
             ))}
           </select>
           <button disabled={!absenceDate} onClick={reloadAbsences}>Refresh Absences</button>
+          <button disabled={!absenceDate || absenceNotificationBusyDate === absenceDate} onClick={() => emailAbsentMembersFromReport(absenceDate)}>
+            {absenceNotificationBusyDate === absenceDate ? "Checking..." : "Email absent members"}
+          </button>
         </div>
         <p className="report-context">
           {absences
@@ -2122,6 +2272,7 @@ function Reports({ session }: { session: DashboardSession }) {
             : "Pick a meeting to see the active members who missed it."}
         </p>
         {absencesError ? <p className="error">{absencesError}</p> : null}
+        {absenceNotificationResult?.meetingDate === absenceDate ? <NotificationResultPanel result={absenceNotificationResult} /> : null}
         <DataTable rows={absences?.rows ?? []} columns={["memberId", "firstName", "lastName"]} />
       </section>
 
@@ -2614,6 +2765,23 @@ function meetingTimeRange(meeting: Pick<ScheduledMeeting, "startsAt" | "endsAt">
   if (meeting.startsAt && meeting.endsAt) return `${formatTime(meeting.startsAt)} - ${formatTime(meeting.endsAt)}`;
   if (meeting.startsAt) return `Starts ${formatTime(meeting.startsAt)}`;
   return `Ends ${formatTime(meeting.endsAt)}`;
+}
+
+function notificationSummary(result: MeetingAbsenceNotificationResult) {
+  const deliverableCount = result.recipients.filter((recipient) => recipient.status === "would_send").length;
+  if (result.mode === "preview") {
+    return result.providerConfigured
+      ? `${pluralize(deliverableCount, "absent member")} ready to email; ${pluralize(result.missingEmail.length, "missing email")}.`
+      : `${pluralize(deliverableCount, "absent member")} would receive email; provider not configured. ${pluralize(result.missingEmail.length, "missing email")}.`;
+  }
+  return `Sent ${pluralize(result.sentCount, "email")}; skipped ${pluralize(result.skippedDuplicateCount, "duplicate")}; ${pluralize(result.errorCount, "error")}.`;
+}
+
+function notificationStatusLabel(status: MeetingAbsenceNotificationResult["recipients"][number]["status"]) {
+  if (status === "would_send") return "Would send";
+  if (status === "skipped_duplicate") return "Already sent";
+  if (status === "sent") return "Sent";
+  return "Error";
 }
 
 function findHeaderIndex(header: string[], names: string[]) {
