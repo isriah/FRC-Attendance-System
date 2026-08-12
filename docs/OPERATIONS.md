@@ -5,7 +5,7 @@
 Current production API:
 
 - Worker URL: `https://frc-attendance-api.frc-attendance.workers.dev`
-- Latest deployed Worker version: `0a86a165-d6b9-4c90-a66e-80e35e3a44d2`
+- Latest deployed Worker version: `33c96de6-761d-4fe5-8568-1335ecd2a2de`
 - D1 database: `frc-attendance`
 - D1 database ID: `c02c0ca8-033b-435f-ae21-2d8f3b203b22`
 - Applied remote migrations: `0001_initial.sql` through `0006_notification_deliveries.sql`
@@ -16,7 +16,7 @@ Current production dashboard:
 
 - Cloudflare Pages project: `frc-attendance-dashboard`
 - Pages URL: `https://frc-attendance-dashboard.pages.dev`
-- Latest verified deployment: `https://4810fab3.frc-attendance-dashboard.pages.dev`
+- Latest verified deployment: `https://4bbc28eb.frc-attendance-dashboard.pages.dev`
 - API base URL baked into the uploaded Vite build: `https://frc-attendance-api.frc-attendance.workers.dev`
 - Google OAuth client ID baked into the uploaded Vite build: `180849199739-v04bktp7rfmimgjpvohmq7pinrrpr337.apps.googleusercontent.com`
 
@@ -200,6 +200,8 @@ Deployment `https://0c2ffd86.frc-attendance-dashboard.pages.dev` and Worker vers
 Deployment `https://4810fab3.frc-attendance-dashboard.pages.dev` and Worker version `cb053a95-5869-4e62-b0e5-042382958721` add missed-meeting absence email previews/sends for completed required scheduled meetings, roster search by member ID/name, and web-dashboard hiding of unavailable fingerprint detail controls. Remote D1 migration `0006_notification_deliveries.sql` was applied. Email sending remains preview-only until `RESEND_API_KEY` and `EMAIL_FROM_ADDRESS` are configured. Production Worker/dashboard smoke and Pi-local roster pull smoke passed on 2026-08-12. Bench Pi update on 2026-08-12 pulled main through commit `d30e35e65bab1d7a7c23abf1b4fe4be13c57ef06` and restarted `frc-dashboard-ui` and `frc-bench-api`.
 
 Worker version `0a86a165-d6b9-4c90-a66e-80e35e3a44d2` deploys first-class Resend delivery for missed-meeting emails from merged `main`. Worker secrets `RESEND_API_KEY`, `EMAIL_FROM_ADDRESS`, and `EMAIL_FROM_NAME` are configured remotely; `EMAIL_FROM_ADDRESS` is `attendance@robolancers.com` and `EMAIL_FROM_NAME` is `FRC Attendance`. Worker health passed on 2026-08-12, and the notification endpoint returned `401` without admin auth. Terminal preview smoke was not run because production admin routes require a Google ID token when `GOOGLE_CLIENT_ID` is configured.
+
+Deployment `https://4bbc28eb.frc-attendance-dashboard.pages.dev` and Worker version `33c96de6-761d-4fe5-8568-1335ecd2a2de` add the Roster member-detail action to preview and send a member's current attendance report by email. Member report emails use Resend delivery, `notification_kind = 'member_attendance_report'`, and same-day duplicate protection by default. Production Worker/dashboard smoke and Pi-local roster pull smoke passed on 2026-08-12; the new member report endpoint returned `401` without admin auth.
 
 The dashboard login UI follows the same boundary: when `VITE_GOOGLE_CLIENT_ID` is configured, it shows Google sign-in and a production notice that email-only local login is disabled. The email-only form is rendered only for local development builds with no Google client ID.
 
