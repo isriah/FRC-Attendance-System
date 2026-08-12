@@ -16,7 +16,7 @@ Current production dashboard:
 
 - Cloudflare Pages project: `frc-attendance-dashboard`
 - Pages URL: `https://frc-attendance-dashboard.pages.dev`
-- Latest verified deployment: `https://4bbc28eb.frc-attendance-dashboard.pages.dev`
+- Latest verified deployment: `https://2ded3f58.frc-attendance-dashboard.pages.dev`
 - API base URL baked into the uploaded Vite build: `https://frc-attendance-api.frc-attendance.workers.dev`
 - Google OAuth client ID baked into the uploaded Vite build: `180849199739-v04bktp7rfmimgjpvohmq7pinrrpr337.apps.googleusercontent.com`
 
@@ -202,6 +202,8 @@ Deployment `https://4810fab3.frc-attendance-dashboard.pages.dev` and Worker vers
 Worker version `0a86a165-d6b9-4c90-a66e-80e35e3a44d2` deploys first-class Resend delivery for missed-meeting emails from merged `main`. Worker secrets `RESEND_API_KEY`, `EMAIL_FROM_ADDRESS`, and `EMAIL_FROM_NAME` are configured remotely; `EMAIL_FROM_ADDRESS` is `attendance@robolancers.com` and `EMAIL_FROM_NAME` is `FRC Attendance`. Worker health passed on 2026-08-12, and the notification endpoint returned `401` without admin auth. Terminal preview smoke was not run because production admin routes require a Google ID token when `GOOGLE_CLIENT_ID` is configured.
 
 Deployment `https://4bbc28eb.frc-attendance-dashboard.pages.dev` and Worker version `33c96de6-761d-4fe5-8568-1335ecd2a2de` add the Roster member-detail action to preview and send a member's current attendance report by email. Member report emails use Resend delivery, `notification_kind = 'member_attendance_report'`, and same-day duplicate protection by default. Production Worker/dashboard smoke and Pi-local roster pull smoke passed on 2026-08-12; the new member report endpoint returned `401` without admin auth.
+
+Deployment `https://2ded3f58.frc-attendance-dashboard.pages.dev` fixes Meetings calendar event subtext so missing completed-report rows no longer display as permanent `Loading...`. Calendar cards now show loading only while report data is pending, then show present/absent counts, `Upcoming`, `No attendance yet`, `0 present`, or `Report unavailable` as appropriate. Dashboard smoke passed against the immutable deployment URL on 2026-08-12; canonical Pages smoke initially saw stale bundle config immediately after deploy.
 
 The dashboard login UI follows the same boundary: when `VITE_GOOGLE_CLIENT_ID` is configured, it shows Google sign-in and a production notice that email-only local login is disabled. The email-only form is rendered only for local development builds with no Google client ID.
 
