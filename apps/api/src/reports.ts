@@ -96,13 +96,13 @@ export function reportDateRangeFromSearchParams(searchParams: URLSearchParams): 
   return range;
 }
 
-export async function buildAttendanceSessionReport(env: Env, range: ReportDateRange = {}, limit = 500): Promise<AttendanceSessionReportRow[]> {
+export async function buildAttendanceSessionReport(env: Env, range: ReportDateRange = {}, limit = 500, now = new Date()): Promise<AttendanceSessionReportRow[]> {
   const scheduledMeetings = await env.DB.prepare(`
-    SELECT meeting_date, title, required
+    SELECT meeting_date, title, required, ends_at
     FROM scheduled_meetings
     ${whereDateRange("meeting_date", range)}
     ORDER BY meeting_date DESC
-  `).bind(...dateRangeParams(range)).all<{ meeting_date: string; title: string; required: number }>();
+  `).bind(...dateRangeParams(range)).all<{ meeting_date: string; title: string; required: number; ends_at: string | null }>();
   const sessions = await env.DB.prepare(`
     SELECT
       attendance_sessions.student_id,
@@ -126,8 +126,16 @@ export async function buildAttendanceSessionReport(env: Env, range: ReportDateRa
     required: number;
   }>();
 
-  const sessionDates = new Set(sessions.results.map((session) => session.meeting_date));
-  const sessionRows: AttendanceSessionReportRow[] = sessions.results.map((session) => ({
+  const incompleteScheduledDates = new Set(scheduledMeetings.results
+    .filter((meeting) => !isMeetingComplete(meeting, env, now))
+    .map((meeting) => meeting.meeting_date));
+  const completedScheduledMeetings = scheduledMeetings.results.filter((meeting) => !incompleteScheduledDates.has(meeting.meeting_date));
+  const reportDate = currentReportDate(env, now);
+  const visibleSessions = sessions.results.filter((session) => (
+    isReportDateComplete(session.meeting_date, reportDate) && !incompleteScheduledDates.has(session.meeting_date)
+  ));
+  const sessionDates = new Set(visibleSessions.map((session) => session.meeting_date));
+  const sessionRows: AttendanceSessionReportRow[] = visibleSessions.map((session) => ({
     meeting_date: session.meeting_date,
     meeting_title: session.meeting_title,
     required: Number(session.required),
@@ -137,7 +145,7 @@ export async function buildAttendanceSessionReport(env: Env, range: ReportDateRa
     check_out_at: session.check_out_at,
     status: session.status
   }));
-  const zeroScanRows: AttendanceSessionReportRow[] = scheduledMeetings.results
+  const zeroScanRows: AttendanceSessionReportRow[] = completedScheduledMeetings
     .filter((meeting) => !sessionDates.has(meeting.meeting_date))
     .map((meeting) => ({
       meeting_date: meeting.meeting_date,
@@ -155,7 +163,7 @@ export async function buildAttendanceSessionReport(env: Env, range: ReportDateRa
     .slice(0, limit);
 }
 
-export async function buildMeetingSummaryReport(env: Env, range: ReportDateRange = {}, limit = 500): Promise<MeetingSummaryReportRow[]> {
+export async function buildMeetingSummaryReport(env: Env, range: ReportDateRange = {}, limit = 500, now = new Date()): Promise<MeetingSummaryReportRow[]> {
   const [scheduledMeetings, sessions, activeStudentCount, hasScheduledMeetings] = await Promise.all([
     env.DB.prepare(`
       SELECT meeting_date, title, required, starts_at, ends_at
@@ -191,8 +199,16 @@ export async function buildMeetingSummaryReport(env: Env, range: ReportDateRange
   ]);
 
   const activeCount = Number(activeStudentCount?.count ?? 0);
-  const meetingsByDate = new Map(scheduledMeetings.results.map((meeting) => [meeting.meeting_date, meeting]));
-  const sessionsByDate = new Map(sessions.results.map((session) => [session.meeting_date, session]));
+  const reportDate = currentReportDate(env, now);
+  const incompleteScheduledDates = new Set(scheduledMeetings.results
+    .filter((meeting) => !isMeetingComplete(meeting, env, now))
+    .map((meeting) => meeting.meeting_date));
+  const completedScheduledMeetings = scheduledMeetings.results.filter((meeting) => !incompleteScheduledDates.has(meeting.meeting_date));
+  const visibleSessions = sessions.results.filter((session) => (
+    isReportDateComplete(session.meeting_date, reportDate) && !incompleteScheduledDates.has(session.meeting_date)
+  ));
+  const meetingsByDate = new Map(completedScheduledMeetings.map((meeting) => [meeting.meeting_date, meeting]));
+  const sessionsByDate = new Map(visibleSessions.map((session) => [session.meeting_date, session]));
   const dates = [...new Set([...meetingsByDate.keys(), ...sessionsByDate.keys()])].sort((left, right) => right.localeCompare(left));
 
   return dates.map((meetingDate) => {
@@ -251,7 +267,7 @@ export async function buildPresenceReport(env: Env, date = meetingDateForTimesta
   };
 }
 
-export async function buildMeetingAbsenceReport(env: Env, meetingDate: string): Promise<MeetingAbsenceReport> {
+export async function buildMeetingAbsenceReport(env: Env, meetingDate: string, now = new Date()): Promise<MeetingAbsenceReport> {
   const date = requireIsoDate(meetingDate, "date");
   const meeting = await env.DB.prepare(`
     SELECT meeting_date, title, required, starts_at, ends_at
@@ -265,13 +281,14 @@ export async function buildMeetingAbsenceReport(env: Env, meetingDate: string): 
   `).bind(date).all<{ student_id: string }>();
   const presentIds = new Set(presentStudents.results.map((row) => row.student_id));
   const required = meeting ? Boolean(meeting.required) : !(await hasAnyScheduledMeetings(env)) && presentIds.size > 0;
+  const countAbsences = required && (!meeting || isMeetingComplete(meeting, env, now));
   const activeStudents = await env.DB.prepare(`
     SELECT student_id, first_name, last_name
     FROM students
     WHERE active = 1
     ORDER BY last_name, first_name
   `).all<{ student_id: string; first_name: string; last_name: string }>();
-  const rows = required
+  const rows = countAbsences
     ? activeStudents.results
       .filter((student) => !presentIds.has(student.student_id))
       .map((student) => ({
@@ -292,7 +309,7 @@ export async function buildMeetingAbsenceReport(env: Env, meetingDate: string): 
   };
 }
 
-export async function buildRosterAttendanceSummary(env: Env, range: ReportDateRange = {}): Promise<RosterAttendanceSummaryRow[]> {
+export async function buildRosterAttendanceSummary(env: Env, range: ReportDateRange = {}, now = new Date()): Promise<RosterAttendanceSummaryRow[]> {
   const activeStudents = await env.DB.prepare(`
     SELECT student_id, first_name, last_name
     FROM students
@@ -301,7 +318,7 @@ export async function buildRosterAttendanceSummary(env: Env, range: ReportDateRa
   `).all<{ student_id: string; first_name: string; last_name: string }>();
 
   return Promise.all(activeStudents.results.map(async (student) => {
-    const report = await buildMemberAttendanceReport(env, student.student_id, range);
+    const report = await buildMemberAttendanceReport(env, student.student_id, range, now);
     return {
       memberId: report.memberId,
       firstName: report.firstName,
@@ -317,13 +334,13 @@ export async function buildRosterAttendanceSummary(env: Env, range: ReportDateRa
   }));
 }
 
-export async function buildMemberAttendanceReport(env: Env, memberId: string, range: ReportDateRange = {}): Promise<MemberAttendanceReport> {
+export async function buildMemberAttendanceReport(env: Env, memberId: string, range: ReportDateRange = {}, now = new Date()): Promise<MemberAttendanceReport> {
   const student = await env.DB.prepare(
     "SELECT student_id, first_name, last_name FROM students WHERE student_id = ?"
   ).bind(memberId).first<{ student_id: string; first_name: string; last_name: string }>();
   if (!student) throw Object.assign(new Error("Member not found"), { status: 404 });
 
-  const meetingDates = await requiredMeetingDates(env, range);
+  const meetingDates = await requiredMeetingDates(env, range, now);
   const sessions = await env.DB.prepare(
     `
       SELECT meeting_date, status, check_in_at
@@ -362,16 +379,16 @@ export async function buildMemberAttendanceReport(env: Env, memberId: string, ra
   };
 }
 
-async function requiredMeetingDates(env: Env, range: ReportDateRange) {
+async function requiredMeetingDates(env: Env, range: ReportDateRange, now: Date) {
   if (await hasAnyScheduledMeetings(env)) {
     const scheduledDates = await env.DB.prepare(`
-      SELECT meeting_date
+      SELECT meeting_date, ends_at
       FROM scheduled_meetings
       WHERE required = 1
       ${whereDateRange("meeting_date", range, "AND")}
       ORDER BY meeting_date
-    `).bind(...dateRangeParams(range)).all<{ meeting_date: string }>();
-    return scheduledDates.results;
+    `).bind(...dateRangeParams(range)).all<{ meeting_date: string; ends_at: string | null }>();
+    return scheduledDates.results.filter((meeting) => isMeetingComplete(meeting, env, now));
   }
 
   const sessionDates = await env.DB.prepare(`
@@ -380,7 +397,8 @@ async function requiredMeetingDates(env: Env, range: ReportDateRange) {
     ${whereDateRange("meeting_date", range)}
     ORDER BY meeting_date
   `).bind(...dateRangeParams(range)).all<{ meeting_date: string }>();
-  return sessionDates.results;
+  const reportDate = currentReportDate(env, now);
+  return sessionDates.results.filter((row) => isReportDateComplete(row.meeting_date, reportDate));
 }
 
 async function hasAnyScheduledMeetings(env: Env): Promise<boolean> {
@@ -402,4 +420,17 @@ function whereDateRange(column: string, range: ReportDateRange, prefix: "WHERE" 
 
 function dateRangeParams(range: ReportDateRange): string[] {
   return [range.startDate, range.endDate].filter((value): value is string => Boolean(value));
+}
+
+function isMeetingComplete(meeting: { meeting_date: string; ends_at: string | null }, env: Env, now: Date): boolean {
+  if (meeting.ends_at) return new Date(meeting.ends_at).getTime() <= now.getTime();
+  return isReportDateComplete(meeting.meeting_date, currentReportDate(env, now));
+}
+
+function isReportDateComplete(meetingDate: string, reportDate: string): boolean {
+  return meetingDate <= reportDate;
+}
+
+function currentReportDate(env: Env, now: Date): string {
+  return meetingDateForTimestamp(now.toISOString(), env.TIME_ZONE);
 }

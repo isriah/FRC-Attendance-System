@@ -132,6 +132,69 @@ describe("report builders", () => {
     });
   });
 
+  it("excludes future required meetings from member and roster attendance counts", async () => {
+    const env = createTestEnv();
+    const now = new Date("2026-01-02T22:30:00.000Z");
+    insertStudent(env, "100001", "Bench", "Member");
+    insertStudent(env, "100002", "Drive", "Captain");
+    insertMeeting(
+      env,
+      "2026-01-02",
+      1,
+      "Completed Build",
+      "2026-01-02T20:00:00.000Z",
+      "2026-01-02T22:00:00.000Z"
+    );
+    insertMeeting(
+      env,
+      "2026-01-09",
+      1,
+      "Future Build",
+      "2026-01-09T20:00:00.000Z",
+      "2026-01-09T22:00:00.000Z"
+    );
+    insertMeeting(env, "2026-01-10", 1, "Future Date-Only Build");
+    insertSession(env, "100001", "2026-01-02", "2026-01-02T20:05:00.000Z", "2026-01-02T22:10:00.000Z", "closed");
+
+    const memberReport = await buildMemberAttendanceReport(env, "100001", {}, now);
+    const rosterSummary = await buildRosterAttendanceSummary(env, {}, now);
+
+    expect(memberReport).toMatchObject({
+      totalMeetings: 1,
+      presentMeetings: 1,
+      missedMeetings: 0,
+      attendanceRate: 1,
+      presentDates: ["2026-01-02"],
+      absentDates: []
+    });
+    expect(rosterSummary).toEqual([
+      {
+        memberId: "100002",
+        firstName: "Drive",
+        lastName: "Captain",
+        requiredMeetings: 1,
+        presentMeetings: 0,
+        missedMeetings: 1,
+        attendanceRate: 0,
+        lastSeenAt: undefined,
+        openSessionDates: [],
+        openSessionWarning: false
+      },
+      {
+        memberId: "100001",
+        firstName: "Bench",
+        lastName: "Member",
+        requiredMeetings: 1,
+        presentMeetings: 1,
+        missedMeetings: 0,
+        attendanceRate: 1,
+        lastSeenAt: "2026-01-02T20:05:00.000Z",
+        openSessionDates: [],
+        openSessionWarning: false
+      }
+    ]);
+  });
+
   it("includes scheduled meetings with no scans in the session report", async () => {
     const env = createTestEnv();
     insertStudent(env, "100001", "Bench", "Student");
@@ -163,6 +226,44 @@ describe("report builders", () => {
         status: "open"
       }
     ]);
+  });
+
+  it("hides future scheduled meetings from default meeting reports", async () => {
+    const env = createTestEnv();
+    const now = new Date("2026-01-02T22:30:00.000Z");
+    insertStudent(env, "100001", "Bench", "Member");
+    insertStudent(env, "100002", "Drive", "Captain");
+    insertMeeting(
+      env,
+      "2026-01-02",
+      1,
+      "Completed Build",
+      "2026-01-02T20:00:00.000Z",
+      "2026-01-02T22:00:00.000Z"
+    );
+    insertMeeting(
+      env,
+      "2026-01-03",
+      0,
+      "Future Optional",
+      "2026-01-03T20:00:00.000Z",
+      "2026-01-03T22:00:00.000Z"
+    );
+    insertMeeting(env, "2026-01-09", 1, "Future Date-Only Required");
+    insertSession(env, "100001", "2026-01-02", "2026-01-02T20:05:00.000Z", "2026-01-02T22:10:00.000Z", "closed");
+
+    const meetingSummary = await buildMeetingSummaryReport(env, {}, 500, now);
+    const sessionRows = await buildAttendanceSessionReport(env, {}, 500, now);
+
+    expect(meetingSummary.map((meeting) => meeting.meetingDate)).toEqual(["2026-01-02"]);
+    expect(meetingSummary[0]).toMatchObject({
+      meetingDate: "2026-01-02",
+      required: true,
+      presentCount: 1,
+      activePresentCount: 1,
+      absentCount: 1
+    });
+    expect(sessionRows.map((row) => row.meeting_date)).toEqual(["2026-01-02"]);
   });
 
   it("filters session report rows by date range before adding zero-scan scheduled meetings", async () => {
@@ -376,6 +477,30 @@ describe("report builders", () => {
     expect(report.required).toBe(false);
     expect(report.absentCount).toBe(0);
     expect(report.rows).toEqual([]);
+  });
+
+  it("does not mark absences for required meetings that have not ended yet", async () => {
+    const env = createTestEnv();
+    insertStudent(env, "100001", "Bench", "Student");
+    insertStudent(env, "100002", "Drive", "Captain");
+    insertMeeting(
+      env,
+      "2026-01-02",
+      1,
+      "In Progress Build",
+      "2026-01-02T20:00:00.000Z",
+      "2026-01-02T23:00:00.000Z"
+    );
+
+    const report = await buildMeetingAbsenceReport(env, "2026-01-02", new Date("2026-01-02T22:30:00.000Z"));
+
+    expect(report).toMatchObject({
+      meetingDate: "2026-01-02",
+      title: "In Progress Build",
+      required: true,
+      absentCount: 0,
+      rows: []
+    });
   });
 
   it("excludes optional scheduled meetings from roster attendance percentages", async () => {

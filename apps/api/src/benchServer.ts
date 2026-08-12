@@ -1194,12 +1194,21 @@ interface BenchReportDateRange {
   endDate?: string;
 }
 
-function buildMemberAttendanceReport(memberId: string, range: BenchReportDateRange = {}) {
+function buildMemberAttendanceReport(memberId: string, range: BenchReportDateRange = {}, now = new Date()) {
   const student = db.prepare("SELECT student_id, first_name, last_name FROM students WHERE student_id = ?").get(memberId) as { student_id: string; first_name: string; last_name: string } | undefined;
   if (!student) throw httpError(404, "Member not found");
 
-  const sessions = deriveBenchSessions().filter((session) => isDateInRange(session.meetingDate, range));
-  const allDates = benchReportMeetingDates(range);
+  const reportDate = benchCurrentReportDate(now);
+  const incompleteScheduledDates = new Set(benchScheduledMeetings()
+    .filter((meeting) => isDateInRange(meeting.meeting_date, range))
+    .filter((meeting) => !isBenchMeetingComplete(meeting, now))
+    .map((meeting) => meeting.meeting_date));
+  const sessions = deriveBenchSessions().filter((session) => (
+    isDateInRange(session.meetingDate, range) &&
+    isDateComplete(session.meetingDate, reportDate) &&
+    !incompleteScheduledDates.has(session.meetingDate)
+  ));
+  const allDates = benchReportMeetingDates(range, now);
   const allDateSet = new Set(allDates);
   const studentSessions = sessions.filter((session) => session.memberId === memberId);
   const presentDates = [...new Set(studentSessions.map((session) => session.meetingDate))].filter((date) => allDateSet.has(date));
@@ -1228,13 +1237,18 @@ function buildMemberAttendanceReport(memberId: string, range: BenchReportDateRan
 }
 
 function buildBenchAttendanceSessionReport(range: BenchReportDateRange = {}, limit = 500) {
-  const meetings = (db.prepare("SELECT meeting_date, title, required FROM scheduled_meetings ORDER BY meeting_date DESC").all() as Array<{
-    meeting_date: string;
-    title: string;
-    required: number;
-  }>).filter((meeting) => isDateInRange(meeting.meeting_date, range));
+  const allMeetings = benchScheduledMeetings().filter((meeting) => isDateInRange(meeting.meeting_date, range));
+  const incompleteScheduledDates = new Set(allMeetings
+    .filter((meeting) => !isBenchMeetingComplete(meeting))
+    .map((meeting) => meeting.meeting_date));
+  const meetings = allMeetings.filter((meeting) => !incompleteScheduledDates.has(meeting.meeting_date));
   const meetingsByDate = new Map(meetings.map((meeting) => [meeting.meeting_date, meeting]));
-  const sessions = deriveBenchSessions().filter((session) => isDateInRange(session.meetingDate, range));
+  const reportDate = benchCurrentReportDate();
+  const sessions = deriveBenchSessions().filter((session) => (
+    isDateInRange(session.meetingDate, range) &&
+    isDateComplete(session.meetingDate, reportDate) &&
+    !incompleteScheduledDates.has(session.meetingDate)
+  ));
   const sessionDates = new Set(sessions.map((session) => session.meetingDate));
   const sessionRows = sessions.map((session) => {
     const meeting = meetingsByDate.get(session.meetingDate);
@@ -1268,14 +1282,17 @@ function buildBenchAttendanceSessionReport(range: BenchReportDateRange = {}, lim
 }
 
 function buildBenchMeetingSummaryReport(range: BenchReportDateRange = {}, limit = 500) {
-  const meetings = (db.prepare("SELECT meeting_date, title, required, starts_at, ends_at FROM scheduled_meetings ORDER BY meeting_date DESC").all() as Array<{
-    meeting_date: string;
-    title: string;
-    required: number;
-    starts_at: string | null;
-    ends_at: string | null;
-  }>).filter((meeting) => isDateInRange(meeting.meeting_date, range));
-  const sessions = deriveBenchSessions().filter((session) => isDateInRange(session.meetingDate, range));
+  const allMeetings = benchScheduledMeetings().filter((meeting) => isDateInRange(meeting.meeting_date, range));
+  const incompleteScheduledDates = new Set(allMeetings
+    .filter((meeting) => !isBenchMeetingComplete(meeting))
+    .map((meeting) => meeting.meeting_date));
+  const meetings = allMeetings.filter((meeting) => !incompleteScheduledDates.has(meeting.meeting_date));
+  const reportDate = benchCurrentReportDate();
+  const sessions = deriveBenchSessions().filter((session) => (
+    isDateInRange(session.meetingDate, range) &&
+    isDateComplete(session.meetingDate, reportDate) &&
+    !incompleteScheduledDates.has(session.meetingDate)
+  ));
   const activeStudentRows = db.prepare("SELECT student_id FROM students WHERE active = 1").all() as Array<{ student_id: string }>;
   const activememberIds = new Set(activeStudentRows.map((student) => student.student_id));
   const meetingsByDate = new Map(meetings.map((meeting) => [meeting.meeting_date, meeting]));
@@ -1337,12 +1354,13 @@ function buildBenchMeetingAbsenceReport(meetingDate: string) {
   } | undefined;
   const presentIds = new Set(deriveBenchSessions().filter((session) => session.meetingDate === date).map((session) => session.memberId));
   const required = meeting ? Boolean(meeting.required) : !benchHasScheduledMeetings() && presentIds.size > 0;
+  const countAbsences = required && (!meeting || isBenchMeetingComplete(meeting));
   const students = db.prepare("SELECT student_id, first_name, last_name FROM students WHERE active = 1 ORDER BY last_name, first_name").all() as Array<{
     student_id: string;
     first_name: string;
     last_name: string;
   }>;
-  const rows = required
+  const rows = countAbsences
     ? students
       .filter((student) => !presentIds.has(student.student_id))
       .map((student) => ({ memberId: student.student_id, firstName: student.first_name, lastName: student.last_name }))
@@ -1463,17 +1481,45 @@ function buildBenchLegacySheetExport(range: BenchReportDateRange = {}) {
   };
 }
 
-function benchReportMeetingDates(range: BenchReportDateRange): string[] {
+function benchReportMeetingDates(range: BenchReportDateRange, now = new Date()): string[] {
   if (benchHasScheduledMeetings()) {
-    const rows = (db.prepare("SELECT meeting_date FROM scheduled_meetings WHERE required = 1 ORDER BY meeting_date").all() as Array<{ meeting_date: string }>)
-      .filter((row) => isDateInRange(row.meeting_date, range));
-    return [...new Set(rows.map((row) => row.meeting_date))];
+    const rows = benchScheduledMeetings()
+      .filter((row) => row.required === 1 && isDateInRange(row.meeting_date, range) && isBenchMeetingComplete(row, now));
+    return [...new Set(rows.map((row) => row.meeting_date))].sort();
   }
-  return [...new Set(deriveBenchSessions().filter((session) => isDateInRange(session.meetingDate, range)).map((session) => session.meetingDate))].sort();
+  const reportDate = benchCurrentReportDate(now);
+  return [...new Set(deriveBenchSessions()
+    .filter((session) => isDateInRange(session.meetingDate, range) && isDateComplete(session.meetingDate, reportDate))
+    .map((session) => session.meetingDate))].sort();
 }
 
 function benchHasScheduledMeetings(): boolean {
   return (db.prepare("SELECT COUNT(*) AS count FROM scheduled_meetings").get() as { count: number }).count > 0;
+}
+
+function benchScheduledMeetings(): Array<{
+  meeting_date: string;
+  title: string;
+  required: number;
+  starts_at: string | null;
+  ends_at: string | null;
+}> {
+  return db.prepare("SELECT meeting_date, title, required, starts_at, ends_at FROM scheduled_meetings ORDER BY meeting_date DESC").all() as Array<{
+    meeting_date: string;
+    title: string;
+    required: number;
+    starts_at: string | null;
+    ends_at: string | null;
+  }>;
+}
+
+function isBenchMeetingComplete(meeting: { meeting_date: string; ends_at: string | null }, now = new Date()): boolean {
+  if (meeting.ends_at) return new Date(meeting.ends_at).getTime() <= now.getTime();
+  return isDateComplete(meeting.meeting_date, benchCurrentReportDate(now));
+}
+
+function benchCurrentReportDate(now = new Date()): string {
+  return meetingDateForTimestamp(now.toISOString());
 }
 
 function benchReportDateRangeFromUrl(url: URL): BenchReportDateRange {
@@ -1492,6 +1538,10 @@ function isDateInRange(meetingDate: string, range: BenchReportDateRange): boolea
   if (range.startDate && meetingDate < range.startDate) return false;
   if (range.endDate && meetingDate > range.endDate) return false;
   return true;
+}
+
+function isDateComplete(meetingDate: string, reportDate: string): boolean {
+  return meetingDate <= reportDate;
 }
 
 function deriveBenchSessions(): AttendanceSession[] {
