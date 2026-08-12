@@ -5,7 +5,7 @@
 Current production API:
 
 - Worker URL: `https://frc-attendance-api.frc-attendance.workers.dev`
-- Latest deployed Worker version: `66df18f9-1a01-4e70-a7f8-4d135bf94a46`
+- Latest deployed Worker version: `312ce5fb-729e-4124-9b33-411a56e0e9af`
 - D1 database: `frc-attendance`
 - D1 database ID: `c02c0ca8-033b-435f-ae21-2d8f3b203b22`
 - Applied remote migrations: `0001_initial.sql` through `0005_student_email.sql`
@@ -180,6 +180,8 @@ Deployment `https://50ac4035.frc-attendance-dashboard.pages.dev` adds bulk meeti
 Deployment `https://9ce3910c.frc-attendance-dashboard.pages.dev` polishes Meetings UI layout: the All Meetings bulk-edit checkbox rows align with their corresponding fields, the active Add/Edit Meeting tab stays visible but no longer resets the form when clicked again, and meeting start/end time fields share a row when responsive space allows. No Worker change or D1 migration was required. Production Worker/dashboard smoke passed on 2026-08-11 with Pi skipped.
 
 Bench Pi update on 2026-08-11 pulled main through commit `319f96f398c1bd8535e8036ce9205b7b76ab2992` and restarted `frc-dashboard-ui`, `frc-bench-api`, and `frc-kiosk-service`. The Pi-local dashboard serves at `http://192.168.0.154:5174` from the workstation and `http://localhost:5174` on the Pi; direct `http://AttKiosk:5174` returned 403 from Vite host checking. The served dashboard source includes the fingerprint mapping `Remap` action, bench API health returned ok, and `frc-kiosk-service` reported `Fingerprint reader online`.
+
+Worker version `312ce5fb-729e-4124-9b33-411a56e0e9af` adds clearer member-facing kiosk acknowledgement copy for accepted, duplicate, rejected/inactive, unknown fingerprint, and offline-saved scans, plus `KIOSK_SHOW_ATTENDANCE_SUMMARY` to control whether attendance summary text appears in kiosk acknowledgement detail. Bench Pi update on 2026-08-11 pulled main through commit `97a0a1985b9577d29c81a82a3a0f2dd0466a5b80` and restarted `frc-bench-api`, `frc-kiosk-service`, and `frc-kiosk-ui`. Production Worker/dashboard smoke and Pi-local roster pull smoke passed; bench API health returned ok, kiosk UI served at `http://192.168.0.154:5173`, and `frc-kiosk-service` reported `Fingerprint reader online`.
 
 The dashboard login UI follows the same boundary: when `VITE_GOOGLE_CLIENT_ID` is configured, it shows Google sign-in and a production notice that email-only local login is disabled. The email-only form is rendered only for local development builds with no Google client ID.
 

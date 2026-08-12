@@ -92,7 +92,7 @@ npm --workspace <package> run <script>
 - Dashboard source now renders the local email-only login only when `VITE_GOOGLE_CLIENT_ID` is unset. When Google auth is configured, the login screen presents Google sign-in and clearly states that email-only local login is disabled.
 - The bench Raspberry Pi kiosk `bench-01` is registered in remote D1 and the installed user service on `AttKiosk` points at `https://frc-attendance-api.frc-attendance.workers.dev` via a systemd user drop-in. Offline queue replay against remote D1 was verified on 2026-05-28 with local event `remote-replay-1de1a877-fa2c-482f-b388-335758e663de`, which synced as an accepted scan for member `100001`.
 - SSH to the bench Pi must use the kiosk account explicitly: `ssh attkiosk@AttKiosk`. Do not use plain `ssh AttKiosk`, because that defaults to the local workstation username and fails when the local user is not `attkiosk`.
-- Current feature-completion priority is validating the deployed mentor-ready reporting workflows with real roster data, then polishing report/export formatting or Google Sheets integration from mentor feedback.
+- Current feature-completion priority is kiosk/member-facing polish and focused reliability tests until real roster and meeting data are available for reporting validation. Multi-kiosk functionality is backburnered for now.
 
 ## Development Guardrails
 
@@ -113,7 +113,7 @@ npm --workspace <package> run <script>
   2. Polish report/export formatting or Google Sheets integration based on mentor feedback.
 - Polish fingerprint administration by showing current slot mappings, auto-suggesting the next available slot, supporting delete/remap, and confirming before overwriting occupied slots.
 - Improve kiosk messaging with richer API-provided member messages, configurable attendance summary display, and clearer offline acknowledgements.
-- Prepare for multi-kiosk operation with real kiosk token provisioning, per-kiosk status/sync health, enrollment visibility, and delayed sync tests.
+- Backburnered: prepare for multi-kiosk operation with real kiosk token provisioning, per-kiosk status/sync health, enrollment visibility, and delayed sync tests.
 - Add tests for report builders, scan acknowledgement/action derivation, offline queue restart/reconnect, and delayed multi-kiosk sync ordering.
 
 ## Verification Expectations
