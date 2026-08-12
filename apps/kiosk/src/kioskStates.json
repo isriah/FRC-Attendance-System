@@ -67,8 +67,8 @@
   },
   "rejected": {
     "display": {
-      "message": "Scan rejected",
-      "detail": "Ask a mentor for help"
+      "message": "Scan needs help",
+      "detail": "Ask a mentor for help."
     },
     "led": {
       "color": "red",
@@ -82,7 +82,7 @@
   "unknown": {
     "display": {
       "message": "Fingerprint not recognized",
-      "detail": "Try again or ask a mentor for help."
+      "detail": "Try again with the same finger, or ask a mentor for help."
     },
     "led": {
       "color": "red",
@@ -95,8 +95,8 @@
   },
   "offline": {
     "display": {
-      "message": "Connection offline",
-      "detail": "Scan saved locally and will sync when the connection returns."
+      "message": "Saved for sync",
+      "detail": "Your scan was saved on this kiosk and will sync automatically when the connection returns."
     },
     "led": {
       "color": "red",

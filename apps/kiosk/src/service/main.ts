@@ -44,7 +44,7 @@ bridge.on("bridge-event", async (event: FingerprintBridgeEvent) => {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       health.lastSyncError = message;
-      display.setOffline("Scan saved locally and will sync when the connection returns.");
+      display.setOffline("Your scan was saved on this kiosk and will sync automatically when the connection returns.");
       bridge.setLedState("offline");
       console.log(`Offline or sync failed; scan remains cached: ${message}`);
       reportHealth();

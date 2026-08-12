@@ -12,12 +12,12 @@ describe("display state acknowledgements", () => {
       displayName: "Bench Student",
       attendanceSummary: "Attendance 100% (1/1)",
       kioskMessage: "Welcome, Bench Student",
-      kioskDetail: "Checked in at 3:00 PM - Attendance 100% (1/1)",
+      kioskDetail: "Checked in at 3:00 PM. Attendance 100% (1/1)",
       message: "Welcome, Bench Student"
     })).toEqual({
       status: "welcome",
       message: "Welcome, Bench Student",
-      detail: "Checked in at 3:00 PM - Attendance 100% (1/1)"
+      detail: "Checked in at 3:00 PM. Attendance 100% (1/1)"
     });
   });
 
@@ -28,12 +28,12 @@ describe("display state acknowledgements", () => {
       status: "duplicate",
       displayName: "Bench Student",
       kioskMessage: "Already recorded",
-      kioskDetail: "Bench Student - This scan was just counted. Please wait before scanning again.",
+      kioskDetail: "Bench Student, your attendance was already recorded. Please wait a moment before scanning again.",
       message: "Bench Student was already recorded."
     })).toEqual({
       status: "duplicate",
       message: "Already recorded",
-      detail: "Bench Student - This scan was just counted. Please wait before scanning again."
+      detail: "Bench Student, your attendance was already recorded. Please wait a moment before scanning again."
     });
   });
 
@@ -46,12 +46,12 @@ describe("display state acknowledgements", () => {
       displayName: "Test Person",
       attendanceSummary: "Attendance 100% (1/1)",
       kioskMessage: "Goodbye, Test Person",
-      kioskDetail: "Checked out at 5:00 PM - Attendance 100% (1/1)",
+      kioskDetail: "Checked out at 5:00 PM. Attendance 100% (1/1)",
       message: "Goodbye, Test Person"
     })).toEqual({
       status: "goodbye",
       message: "Goodbye, Test Person",
-      detail: "Checked out at 5:00 PM - Attendance 100% (1/1)"
+      detail: "Checked out at 5:00 PM. Attendance 100% (1/1)"
     });
   });
 
@@ -61,12 +61,12 @@ describe("display state acknowledgements", () => {
       memberId: "qa-inactive",
       status: "rejected",
       kioskMessage: "Roster issue",
-      kioskDetail: "Member qa-inactive - Member is not active in the roster.",
-      message: "Member is not active in the roster."
+      kioskDetail: "Member ID qa-inactive, this Member ID is not active. Ask a mentor for help.",
+      message: "this Member ID is not active. Ask a mentor for help."
     })).toEqual({
       status: "rejected",
       message: "Roster issue",
-      detail: "Member qa-inactive - Member is not active in the roster."
+      detail: "Member ID qa-inactive, this Member ID is not active. Ask a mentor for help."
     });
   });
 
@@ -104,8 +104,50 @@ describe("display state acknowledgements", () => {
 
     expect(server.current()).toMatchObject({
       status: "welcome",
-      message: "Scan accepted",
-      detail: "Member 100001"
+      message: "Scan saved",
+      detail: "Member ID 100001 recorded."
+    });
+  });
+
+  it("uses human-friendly fallback copy for duplicate and rejected sync results", () => {
+    const server = new DisplayStateServer();
+
+    server.setSyncResult("local-duplicate", "100001", {
+      accepted: [],
+      duplicates: [{
+        id: "bench-01:local-duplicate",
+        kioskId: "bench-01",
+        localEventId: "local-duplicate",
+        memberId: "100001",
+        occurredAt: new Date().toISOString(),
+        source: "fingerprint",
+        status: "duplicate"
+      }],
+      rejected: []
+    });
+
+    expect(server.current()).toMatchObject({
+      status: "duplicate",
+      message: "Already recorded",
+      detail: "Member ID 100001 was already recorded. Attendance was not changed."
+    });
+
+    server.setSyncResult("local-rejected", "100002", {
+      accepted: [],
+      duplicates: [],
+      rejected: [{
+        localEventId: "local-rejected",
+        memberId: "100002",
+        occurredAt: new Date().toISOString(),
+        source: "fingerprint",
+        reason: "member is not active in roster"
+      }]
+    });
+
+    expect(server.current()).toMatchObject({
+      status: "rejected",
+      message: "Scan needs help",
+      detail: "Member ID 100002 is not active. Ask a mentor for help."
     });
   });
 

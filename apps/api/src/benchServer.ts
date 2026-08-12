@@ -154,7 +154,7 @@ const server = createServer(async (request, response) => {
       setDisplayState({
         status: "unknown",
         message: "Fingerprint not recognized",
-        detail: "Try again or ask a mentor for help."
+        detail: "Try again with the same finger, or ask a mentor for help."
       });
       sendJson(response, 200, latestDisplayState);
       return;
@@ -961,7 +961,8 @@ function buildAcknowledgement(
   const student = db.prepare("SELECT first_name, last_name FROM students WHERE student_id = ?").get(input.memberId) as { first_name: string; last_name: string } | undefined;
   const displayName = student ? `${student.first_name} ${student.last_name}` : undefined;
   const attendance = student ? buildBenchAttendanceSummary(input.memberId) : { rate: null };
-  const memberLabel = displayName ?? `Member ${input.memberId}`;
+  const showAttendanceSummary = kioskShowsAttendanceSummary();
+  const memberLabel = displayName ?? memberIdLabel(input.memberId);
   const scannedAt = formatKioskTime(input.occurredAt);
 
   if (status === "duplicate") {
@@ -973,13 +974,15 @@ function buildAcknowledgement(
       attendanceRate: attendance.rate,
       attendanceSummary: attendance.summary,
       kioskMessage: "Already recorded",
-      kioskDetail: [memberLabel, "This scan was just counted. Please wait before scanning again."].join(" - "),
+      kioskDetail: `${memberLabel}, your attendance was already recorded. Please wait a moment before scanning again.`,
       message: displayName ? `${displayName} was already recorded.` : "Scan was already recorded."
     };
   }
 
   if (status === "rejected") {
-    const rosterMessage = reason === "member is not active in roster" || reason === "student is not active in roster" ? "Member is not active in the roster." : "Scan could not be accepted.";
+    const rosterMessage = reason === "member is not active in roster" || reason === "student is not active in roster"
+      ? "this Member ID is not active. Ask a mentor for help."
+      : "This scan could not be accepted. Ask a mentor for help.";
     return {
       localEventId: input.localEventId,
       memberId: input.memberId,
@@ -988,7 +991,7 @@ function buildAcknowledgement(
       attendanceRate: attendance.rate,
       attendanceSummary: attendance.summary,
       kioskMessage: "Roster issue",
-      kioskDetail: [memberLabel, rosterMessage].join(" - "),
+      kioskDetail: `${memberLabel}, ${rosterMessage}`,
       message: rosterMessage
     };
   }
@@ -996,6 +999,7 @@ function buildAcknowledgement(
   const action = nextAcceptedScanAction(input.memberId, input.occurredAt);
   const actionLabel = action === "check_out" ? "Checked out" : "Checked in";
   const greeting = action === "check_out" ? "Goodbye" : "Welcome";
+  const attendanceDetail = showAttendanceSummary ? attendance.summary : undefined;
   return {
     localEventId: input.localEventId,
     memberId: input.memberId,
@@ -1004,9 +1008,9 @@ function buildAcknowledgement(
     action,
     attendanceRate: attendance.rate,
     attendanceSummary: attendance.summary,
-    kioskMessage: `${greeting}, ${displayName ?? input.memberId}`,
-    kioskDetail: [`${actionLabel} at ${scannedAt}`, attendance.summary].filter(Boolean).join(" - "),
-    message: action === "check_in" ? `Welcome, ${displayName ?? input.memberId}` : `Goodbye, ${displayName ?? input.memberId}`
+    kioskMessage: `${greeting}, ${displayName ?? memberIdLabel(input.memberId)}`,
+    kioskDetail: [`${actionLabel} at ${scannedAt}.`, attendanceDetail].filter(Boolean).join(" "),
+    message: action === "check_in" ? `Welcome, ${displayName ?? memberIdLabel(input.memberId)}` : `Goodbye, ${displayName ?? memberIdLabel(input.memberId)}`
   };
 }
 
@@ -1028,7 +1032,7 @@ function displayStateForAcknowledgement(acknowledgement: KioskScanAcknowledgemen
   if (acknowledgement.status === "rejected") {
     return {
       status: "rejected",
-      message: acknowledgement.kioskMessage ?? "Scan rejected",
+      message: acknowledgement.kioskMessage ?? "Scan needs help",
       detail: acknowledgement.kioskDetail ?? acknowledgement.message
     };
   }
@@ -1036,8 +1040,18 @@ function displayStateForAcknowledgement(acknowledgement: KioskScanAcknowledgemen
   return {
     status: acknowledgement.action === "check_out" ? "goodbye" : "welcome",
     message: acknowledgement.kioskMessage ?? (acknowledgement.action === "check_out" ? "Goodbye" : "Welcome"),
-    detail: acknowledgement.kioskDetail ?? [acknowledgement.displayName ?? `Member ${acknowledgement.memberId}`, acknowledgement.attendanceSummary].filter(Boolean).join(" - ")
+    detail: acknowledgement.kioskDetail ?? [acknowledgement.displayName ?? memberIdLabel(acknowledgement.memberId), acknowledgement.attendanceSummary].filter(Boolean).join(" - ")
   };
+}
+
+function memberIdLabel(memberId: string): string {
+  return `Member ID ${memberId}`;
+}
+
+function kioskShowsAttendanceSummary(): boolean {
+  const value = process.env.KIOSK_SHOW_ATTENDANCE_SUMMARY;
+  if (value === undefined || value === "") return true;
+  return !["0", "false", "no", "off"].includes(value.trim().toLowerCase());
 }
 
 function buildBenchAttendanceSummary(memberId: string): { rate: number | null; summary?: string } {

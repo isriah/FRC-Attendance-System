@@ -73,8 +73,8 @@ export class DisplayStateServer {
     if (accepted) {
       this.set({
         status: "welcome",
-        message: "Scan accepted",
-        detail: `Member ${memberId}`
+        message: "Scan saved",
+        detail: `${memberIdLabel(memberId)} recorded.`
       });
       return;
     }
@@ -84,7 +84,7 @@ export class DisplayStateServer {
       this.set({
         status: "duplicate",
         message: "Already recorded",
-        detail: `Member ${memberId}`
+        detail: `${memberIdLabel(memberId)} was already recorded. Attendance was not changed.`
       });
       return;
     }
@@ -93,8 +93,8 @@ export class DisplayStateServer {
     if (rejected) {
       this.set({
         status: "rejected",
-        message: "Scan rejected",
-        detail: rejected.reason
+        message: "Scan needs help",
+        detail: rejectionDetail(memberId, rejected.reason)
       });
     }
   }
@@ -150,8 +150,19 @@ export function displayStateForAcknowledgement(acknowledgement: KioskScanAcknowl
   return {
     status: acknowledgement.action === "check_out" ? "goodbye" : "welcome",
     message: acknowledgement.kioskMessage ?? baseDisplayState(acknowledgement.action === "check_out" ? "goodbye" : "welcome").message,
-    detail: acknowledgement.kioskDetail ?? [acknowledgement.displayName ?? `Member ${acknowledgement.memberId}`, acknowledgement.attendanceSummary].filter(Boolean).join(" - ")
+    detail: acknowledgement.kioskDetail ?? [acknowledgement.displayName ?? memberIdLabel(acknowledgement.memberId), acknowledgement.attendanceSummary].filter(Boolean).join(" - ")
   };
+}
+
+function memberIdLabel(memberId: string): string {
+  return `Member ID ${memberId}`;
+}
+
+function rejectionDetail(memberId: string, reason: string): string {
+  if (reason === "member is not active in roster" || reason === "student is not active in roster") {
+    return `${memberIdLabel(memberId)} is not active. Ask a mentor for help.`;
+  }
+  return `${memberIdLabel(memberId)} could not be accepted. Ask a mentor for help.`;
 }
 
 function withTimestamp(state: Omit<KioskDisplayState, "updatedAt">): KioskDisplayState {

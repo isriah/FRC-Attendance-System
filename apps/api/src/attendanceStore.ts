@@ -179,7 +179,8 @@ async function buildAcknowledgement(env: Env, acknowledgement: AcknowledgementIn
   ).bind(acknowledgement.input.memberId).first<{ first_name: string; last_name: string }>();
   const displayName = student ? `${student.first_name} ${student.last_name}` : undefined;
   const attendance = await attendanceSummary(env, acknowledgement.input.memberId);
-  const memberLabel = displayName ?? `Member ${acknowledgement.input.memberId}`;
+  const showAttendanceSummary = kioskShowsAttendanceSummary(env);
+  const memberLabel = displayName ?? memberIdLabel(acknowledgement.input.memberId);
   const scannedAt = formatKioskTime(acknowledgement.input.occurredAt, env.TIME_ZONE);
 
   if (acknowledgement.status === "duplicate") {
@@ -191,15 +192,15 @@ async function buildAcknowledgement(env: Env, acknowledgement: AcknowledgementIn
       attendanceRate: attendance.rate,
       attendanceSummary: attendance.summary,
       kioskMessage: "Already recorded",
-      kioskDetail: [memberLabel, "This scan was just counted. Please wait before scanning again."].join(" - "),
+      kioskDetail: `${memberLabel}, your attendance was already recorded. Please wait a moment before scanning again.`,
       message: displayName ? `${displayName} was already recorded.` : "Scan was already recorded."
     };
   }
 
   if (acknowledgement.status === "rejected") {
     const rosterMessage = acknowledgement.reason === "member is not active in roster" || acknowledgement.reason === "student is not active in roster"
-      ? "Member is not active in the roster."
-      : "Scan could not be accepted.";
+      ? "this Member ID is not active. Ask a mentor for help."
+      : "This scan could not be accepted. Ask a mentor for help.";
     return {
       localEventId: acknowledgement.input.localEventId,
       memberId: acknowledgement.input.memberId,
@@ -208,13 +209,14 @@ async function buildAcknowledgement(env: Env, acknowledgement: AcknowledgementIn
       attendanceRate: attendance.rate,
       attendanceSummary: attendance.summary,
       kioskMessage: "Roster issue",
-      kioskDetail: [memberLabel, rosterMessage].join(" - "),
+      kioskDetail: `${memberLabel}, ${rosterMessage}`,
       message: rosterMessage
     };
   }
 
   const actionLabel = acknowledgement.action === "check_out" ? "Checked out" : "Checked in";
   const greeting = acknowledgement.action === "check_out" ? "Goodbye" : "Welcome";
+  const attendanceDetail = showAttendanceSummary ? attendance.summary : undefined;
   return {
     localEventId: acknowledgement.input.localEventId,
     memberId: acknowledgement.input.memberId,
@@ -223,9 +225,9 @@ async function buildAcknowledgement(env: Env, acknowledgement: AcknowledgementIn
     action: acknowledgement.action,
     attendanceRate: attendance.rate,
     attendanceSummary: attendance.summary,
-    kioskMessage: `${greeting}, ${displayName ?? acknowledgement.input.memberId}`,
-    kioskDetail: [`${actionLabel} at ${scannedAt}`, attendance.summary].filter(Boolean).join(" - "),
-    message: acknowledgement.action === "check_out" ? `Goodbye, ${displayName ?? acknowledgement.input.memberId}` : `Welcome, ${displayName ?? acknowledgement.input.memberId}`
+    kioskMessage: `${greeting}, ${displayName ?? memberIdLabel(acknowledgement.input.memberId)}`,
+    kioskDetail: [`${actionLabel} at ${scannedAt}.`, attendanceDetail].filter(Boolean).join(" "),
+    message: acknowledgement.action === "check_out" ? `Goodbye, ${displayName ?? memberIdLabel(acknowledgement.input.memberId)}` : `Welcome, ${displayName ?? memberIdLabel(acknowledgement.input.memberId)}`
   };
 }
 
@@ -265,6 +267,16 @@ function normalizeKioskSyncEvent(input: KioskSyncEventInput): NormalizedKioskSyn
 }
 
 type NormalizedKioskSyncEventInput = KioskSyncEventInput & { memberId: string };
+
+function memberIdLabel(memberId: string): string {
+  return `Member ID ${memberId}`;
+}
+
+function kioskShowsAttendanceSummary(env: Env): boolean {
+  const value = env.KIOSK_SHOW_ATTENDANCE_SUMMARY;
+  if (value === undefined || value === "") return true;
+  return !["0", "false", "no", "off"].includes(value.trim().toLowerCase());
+}
 
 function formatKioskTime(occurredAt: string, timeZone?: string): string {
   try {

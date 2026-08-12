@@ -21,7 +21,7 @@ describe("kiosk sync acknowledgements", () => {
       displayName: "Bench Student",
       action: "check_in",
       kioskMessage: "Welcome, Bench Student",
-      kioskDetail: "Checked in at 3:00 PM - Attendance 100% (1/1)",
+      kioskDetail: "Checked in at 3:00 PM. Attendance 100% (1/1)",
       message: "Welcome, Bench Student",
       attendanceSummary: "Attendance 100% (1/1)"
     });
@@ -38,8 +38,26 @@ describe("kiosk sync acknowledgements", () => {
       status: "accepted",
       action: "check_out",
       kioskMessage: "Goodbye, Bench Student",
-      kioskDetail: "Checked out at 5:00 PM - Attendance 100% (1/1)",
+      kioskDetail: "Checked out at 5:00 PM. Attendance 100% (1/1)",
       message: "Goodbye, Bench Student",
+      attendanceSummary: "Attendance 100% (1/1)"
+    });
+  });
+
+  it("can hide attendance summaries from member-facing kiosk details", async () => {
+    const env = createTestEnv({ KIOSK_SHOW_ATTENDANCE_SUMMARY: "false" });
+
+    const result = await syncKioskEvents(env, "bench-01", [{
+      localEventId: "scan-no-summary",
+      memberId: "100001",
+      occurredAt: "2026-01-02T20:00:00.000Z",
+      source: "fingerprint"
+    }]);
+
+    expect(result.acknowledgements?.[0]).toMatchObject({
+      status: "accepted",
+      kioskMessage: "Welcome, Bench Student",
+      kioskDetail: "Checked in at 3:00 PM.",
       attendanceSummary: "Attendance 100% (1/1)"
     });
   });
@@ -67,7 +85,7 @@ describe("kiosk sync acknowledgements", () => {
       status: "duplicate",
       displayName: "Bench Student",
       kioskMessage: "Already recorded",
-      kioskDetail: "Bench Student - This scan was just counted. Please wait before scanning again.",
+      kioskDetail: "Bench Student, your attendance was already recorded. Please wait a moment before scanning again.",
       message: "Bench Student was already recorded."
     });
   });
@@ -274,8 +292,8 @@ describe("kiosk sync acknowledgements", () => {
       status: "rejected",
       displayName: "Inactive Member",
       kioskMessage: "Roster issue",
-      kioskDetail: "Inactive Member - Member is not active in the roster.",
-      message: "Member is not active in the roster."
+      kioskDetail: "Inactive Member, this Member ID is not active. Ask a mentor for help.",
+      message: "this Member ID is not active. Ask a mentor for help."
     });
   });
 
@@ -467,7 +485,7 @@ describe("kiosk sync acknowledgements", () => {
       status: "accepted",
       action: "check_in",
       kioskMessage: "Welcome, Bench Student",
-      kioskDetail: "Checked in at 3:00 PM - Attendance 100% (1/1)",
+      kioskDetail: "Checked in at 3:00 PM. Attendance 100% (1/1)",
       message: "Welcome, Bench Student"
     });
   });
@@ -500,13 +518,13 @@ describe("kiosk sync acknowledgements", () => {
       status: "accepted",
       action: "check_out",
       kioskMessage: "Goodbye, Bench Student",
-      kioskDetail: "Checked out at 5:00 PM - Attendance 100% (1/1)",
+      kioskDetail: "Checked out at 5:00 PM. Attendance 100% (1/1)",
       message: "Goodbye, Bench Student"
     });
   });
 });
 
-function createTestEnv(): Env {
+function createTestEnv(overrides: Partial<Env> = {}): Env {
   const sqlite = new Database(":memory:");
   sqlite.exec(`
     CREATE TABLE students (
@@ -569,7 +587,8 @@ function createTestEnv(): Env {
   return {
     DB: d1(sqlite),
     TIME_ZONE: "America/New_York",
-    DUPLICATE_WINDOW_SECONDS: "90"
+    DUPLICATE_WINDOW_SECONDS: "90",
+    ...overrides
   } as unknown as Env;
 }
 

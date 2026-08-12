@@ -5,4 +5,5 @@ export interface Env {
   GOOGLE_ALLOWED_DOMAIN: string;
   GOOGLE_CLIENT_ID: string;
   DUPLICATE_WINDOW_SECONDS: string;
+  KIOSK_SHOW_ATTENDANCE_SUMMARY?: string;
 }
