@@ -5,7 +5,7 @@
 Current production API:
 
 - Worker URL: `https://frc-attendance-api.frc-attendance.workers.dev`
-- Latest deployed Worker version: `4ba522eb-fff5-4af4-81e3-bd57df941df9`
+- Latest deployed Worker version: `e72a04d8-be30-45e2-b4b6-c71970b22fc5`
 - D1 database: `frc-attendance`
 - D1 database ID: `c02c0ca8-033b-435f-ae21-2d8f3b203b22`
 - Applied remote migrations: `0001_initial.sql` through `0007_student_discord_user_id.sql`
@@ -206,7 +206,9 @@ Deployment `https://4bbc28eb.frc-attendance-dashboard.pages.dev` and Worker vers
 
 Deployment `https://2ded3f58.frc-attendance-dashboard.pages.dev` fixes Meetings calendar event subtext so missing completed-report rows no longer display as permanent `Loading...`. Calendar cards now show loading only while report data is pending, then show present/absent counts, `Upcoming`, `No attendance yet`, `0 present`, or `Report unavailable` as appropriate. Dashboard smoke passed against the immutable deployment URL on 2026-08-12; canonical Pages smoke initially saw stale bundle config immediately after deploy.
 
-Deployment `https://85462f9f.frc-attendance-dashboard.pages.dev` and Worker version `4ba522eb-fff5-4af4-81e3-bd57df941df9` add initial Discord missing-member notification support. Remote D1 migration `0007_student_discord_user_id.sql` was applied. The dashboard can store member Discord user IDs and preview/confirm pings for absent members on completed required meetings. Production does not yet have `DISCORD_MISSING_MEMBERS_WEBHOOK_URL` configured, so Discord sends remain preview-only until that Worker secret is added. Production API/dashboard smoke passed on 2026-08-14 with Pi skipped because the bench Pi was unreachable by hostname and last known IP.
+Deployment `https://85462f9f.frc-attendance-dashboard.pages.dev` and Worker version `4ba522eb-fff5-4af4-81e3-bd57df941df9` add initial Discord missing-member notification support. Remote D1 migration `0007_student_discord_user_id.sql` was applied. The dashboard can store member Discord user IDs and preview/confirm pings for absent members on completed required meetings. Production API/dashboard smoke passed on 2026-08-14 with Pi skipped because the bench Pi was unreachable by hostname and last known IP.
+
+Worker version `e72a04d8-be30-45e2-b4b6-c71970b22fc5` configures production `DISCORD_MISSING_MEMBERS_WEBHOOK_URL` as a Worker secret, enabling Discord missing-member sends after dashboard preview/confirmation. The secret name was confirmed with `wrangler secret list`; production API/dashboard smoke passed on 2026-08-14 with Pi skipped because the bench Pi hostname did not resolve. The Discord endpoint returned `401 Missing admin identity` without admin auth. No real Discord message was sent from terminal smoke because no production admin Google ID token/session was available.
 
 The dashboard login UI follows the same boundary: when `VITE_GOOGLE_CLIENT_ID` is configured, it shows Google sign-in and a production notice that email-only local login is disabled. The email-only form is rendered only for local development builds with no Google client ID.
 
@@ -266,7 +268,7 @@ The Worker source exposes authenticated admin `POST /admin/notifications/discord
 
 Discord delivery uses one configured channel webhook message per meeting, not a gateway bot. The message mentions only saved Discord user IDs as `<@id>` and sends Discord `allowed_mentions` with `parse: []` plus the explicit `users` list, so `@everyone`, `@here`, and accidental role/user parsing are not enabled. Optional meetings and future/in-progress meetings are rejected using the same completed-required-meeting guard as missed-meeting emails.
 
-Sending is disabled unless `DISCORD_MISSING_MEMBERS_WEBHOOK_URL` or fallback `DISCORD_WEBHOOK_URL` is configured. In disabled mode, the endpoint returns preview data and warnings without writing delivery audit rows. Successful sends use `notification_kind = 'discord_missing_members'` in `notification_deliveries`; the existing `recipient_email` compatibility column stores the Discord user ID for duplicate detection. Prior successful pings for the same meeting/member are skipped by default; `resend: true` intentionally includes them again.
+Production has `DISCORD_MISSING_MEMBERS_WEBHOOK_URL` configured as a Worker secret. Sending is disabled unless `DISCORD_MISSING_MEMBERS_WEBHOOK_URL` or fallback `DISCORD_WEBHOOK_URL` is configured. In disabled mode, the endpoint returns preview data and warnings without writing delivery audit rows. Successful sends use `notification_kind = 'discord_missing_members'` in `notification_deliveries`; the existing `recipient_email` compatibility column stores the Discord user ID for duplicate detection. Prior successful pings for the same meeting/member are skipped by default; `resend: true` intentionally includes them again.
 
 Discord setup:
 
