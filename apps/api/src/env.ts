@@ -11,4 +11,6 @@ export interface Env {
   EMAIL_PROVIDER_API_KEY?: string;
   EMAIL_FROM_ADDRESS?: string;
   EMAIL_FROM_NAME?: string;
+  DISCORD_MISSING_MEMBERS_WEBHOOK_URL?: string;
+  DISCORD_WEBHOOK_URL?: string;
 }

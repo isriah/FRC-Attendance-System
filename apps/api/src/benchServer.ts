@@ -30,6 +30,7 @@ db.exec(`
     first_name TEXT NOT NULL,
     last_name TEXT NOT NULL,
     email TEXT,
+    discord_user_id TEXT,
     active INTEGER NOT NULL DEFAULT 1
   );
 
@@ -96,6 +97,7 @@ ensureColumn("kiosks", "pending_scan_count", "INTEGER NOT NULL DEFAULT 0");
 ensureColumn("kiosks", "last_sync_at", "TEXT");
 ensureColumn("kiosks", "last_sync_error", "TEXT");
 ensureColumn("students", "email", "TEXT");
+ensureColumn("students", "discord_user_id", "TEXT");
 
 async function seedBenchData() {
   db.prepare(`
@@ -229,7 +231,7 @@ const server = createServer(async (request, response) => {
       const url = new URL(request.url, `http://${request.headers.host ?? "localhost"}`);
       const active = url.searchParams.get("active");
       const activeWhere = active === null ? "" : "WHERE active = ?";
-      const statement = db.prepare(`SELECT student_id, first_name, last_name, email, active FROM students ${activeWhere} ORDER BY last_name, first_name`);
+      const statement = db.prepare(`SELECT student_id, first_name, last_name, email, discord_user_id, active FROM students ${activeWhere} ORDER BY last_name, first_name`);
       const students = active === null ? statement.all() : statement.all(active === "true" || active === "1" ? 1 : 0);
       const members = students.map(rowToMember);
       sendJson(response, 200, url.pathname === "/admin/members" ? { members } : { students, members });
@@ -242,6 +244,15 @@ const server = createServer(async (request, response) => {
       if (!memberId) throw httpError(400, "Member id is required");
       const body = await readBody<{ email?: string | null }>(request);
       sendJson(response, 200, updateStudentEmail(decodeURIComponent(memberId), body.email ?? null));
+      return;
+    }
+
+    const adminStudentDiscord = request.url?.match(/^\/admin\/(?:members|students)\/([^/]+)\/discord$/);
+    if (adminStudentDiscord && request.method === "PUT") {
+      const memberId = adminStudentDiscord[1];
+      if (!memberId) throw httpError(400, "Member id is required");
+      const body = await readBody<{ discordUserId?: string | null; discord_user_id?: string | null }>(request);
+      sendJson(response, 200, updateStudentDiscordUserId(decodeURIComponent(memberId), body.discordUserId ?? body.discord_user_id ?? null));
       return;
     }
 
@@ -455,12 +466,13 @@ function updateKioskHealth(report: KioskHealthReport) {
 }
 
 function rowToMember(row: unknown) {
-  const member = row as { student_id: string; first_name: string; last_name: string; email?: string | null; active: number };
+  const member = row as { student_id: string; first_name: string; last_name: string; email?: string | null; discord_user_id?: string | null; active: number };
   return {
     memberId: member.student_id,
     firstName: member.first_name,
     lastName: member.last_name,
     email: member.email ?? null,
+    discordUserId: member.discord_user_id ?? null,
     active: Boolean(member.active)
   };
 }
@@ -475,19 +487,20 @@ function syncRoster(members: RosterMemberInput[]) {
   const normalizedMembers = normalizeRosterMembers(members);
   const seen = new Set<string>();
   const upsert = db.prepare(`
-    INSERT INTO students (student_id, first_name, last_name, email, active)
-    VALUES (?, ?, ?, ?, 1)
+    INSERT INTO students (student_id, first_name, last_name, email, discord_user_id, active)
+    VALUES (?, ?, ?, ?, ?, 1)
     ON CONFLICT(student_id) DO UPDATE SET
       first_name = excluded.first_name,
       last_name = excluded.last_name,
       email = COALESCE(excluded.email, students.email),
+      discord_user_id = COALESCE(excluded.discord_user_id, students.discord_user_id),
       active = 1
   `);
 
   const transaction = db.transaction(() => {
     for (const member of normalizedMembers) {
       seen.add(member.memberId);
-      upsert.run(member.memberId, member.firstName, member.lastName, member.email ?? null);
+      upsert.run(member.memberId, member.firstName, member.lastName, member.email ?? null, member.discordUserId ?? null);
     }
     if (normalizedMembers.length > 0) {
       const deactivateMissing = db.prepare(`UPDATE students SET active = 0 WHERE student_id NOT IN (${normalizedMembers.map(() => "?").join(",")})`);
@@ -506,6 +519,14 @@ function updateStudentEmail(memberId: string, email: string | null) {
   const result = db.prepare("UPDATE students SET email = ? WHERE student_id = ?").run(normalizedEmail ?? null, normalizedMemberId);
   if (result.changes === 0) throw httpError(404, "Member not found");
   return { memberId: normalizedMemberId, email: normalizedEmail ?? null };
+}
+
+function updateStudentDiscordUserId(memberId: string, discordUserId: string | null) {
+  const normalizedMemberId = requireNonEmptyString(memberId, "memberId");
+  const normalizedDiscordUserId = normalizeOptionalDiscordUserId(discordUserId ?? undefined);
+  const result = db.prepare("UPDATE students SET discord_user_id = ? WHERE student_id = ?").run(normalizedDiscordUserId ?? null, normalizedMemberId);
+  if (result.changes === 0) throw httpError(404, "Member not found");
+  return { memberId: normalizedMemberId, discordUserId: normalizedDiscordUserId ?? null };
 }
 
 function setMemberActive(memberId: string, active: boolean) {
@@ -534,11 +555,12 @@ function hardDeleteMember(memberId: string) {
 }
 
 function requireExistingMember(memberId: string) {
-  const member = db.prepare("SELECT student_id, first_name, last_name, email, active FROM students WHERE student_id = ?").get(memberId) as {
+  const member = db.prepare("SELECT student_id, first_name, last_name, email, discord_user_id, active FROM students WHERE student_id = ?").get(memberId) as {
     student_id: string;
     first_name: string;
     last_name: string;
     email?: string | null;
+    discord_user_id?: string | null;
     active: number;
   } | undefined;
   if (!member) throw httpError(404, "Member not found");
@@ -1742,6 +1764,15 @@ function normalizeOptionalEmail(value: unknown) {
   const trimmed = value.trim().toLowerCase();
   if (!trimmed) return undefined;
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) throw httpError(400, "email must be a valid email address");
+  return trimmed;
+}
+
+function normalizeOptionalDiscordUserId(value: unknown) {
+  if (value === null || value === undefined) return undefined;
+  if (typeof value !== "string") throw httpError(400, "discordUserId must be a string");
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  if (!/^\d{5,25}$/.test(trimmed)) throw httpError(400, "discordUserId must be a numeric Discord user ID");
   return trimmed;
 }
 

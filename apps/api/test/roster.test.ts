@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 import type { Env } from "../src/env";
-import { deactivateMember, hardDeleteMember, listActiveRoster, listRosterMembers, normalizeRosterMembers, reactivateMember, syncRoster, updateStudentEmail } from "../src/roster";
+import { deactivateMember, hardDeleteMember, listActiveRoster, listRosterMembers, normalizeRosterMembers, reactivateMember, syncRoster, updateStudentDiscordUserId, updateStudentEmail } from "../src/roster";
 
 describe("roster sync", () => {
   it("normalizes rows, deactivates missing members, and exports active roster", async () => {
@@ -42,6 +42,23 @@ describe("roster sync", () => {
 
     await updateStudentEmail(env, "100001", "");
     await expectStudentEmail(env, "100001", null);
+  });
+
+  it("stores, preserves, and clears member Discord user IDs", async () => {
+    const env = createRosterTestEnv();
+
+    await syncRoster(env, [
+      { memberId: "100001", firstName: "Ada", lastName: "Lovelace", discordUserId: "111111111111111111" }
+    ]);
+    await expectStudentDiscordUserId(env, "100001", "111111111111111111");
+
+    await syncRoster(env, [
+      { memberId: "100001", firstName: "Ada", lastName: "Byron" }
+    ]);
+    await expectStudentDiscordUserId(env, "100001", "111111111111111111");
+
+    await updateStudentDiscordUserId(env, "100001", "");
+    await expectStudentDiscordUserId(env, "100001", null);
   });
 
   it("deactivates and reactivates members without deleting attendance history", async () => {
@@ -114,6 +131,28 @@ describe("roster sync", () => {
     ])).toThrow("Duplicate roster email: ada@example.org");
   });
 
+  it("rejects duplicate and invalid Discord user ID associations", async () => {
+    const env = createRosterTestEnv();
+
+    await syncRoster(env, [
+      { memberId: "100001", firstName: "Ada", lastName: "Lovelace", discordUserId: "111111111111111111" },
+      { memberId: "100002", firstName: "Grace", lastName: "Hopper" }
+    ]);
+
+    await expect(updateStudentDiscordUserId(env, "100002", "111111111111111111")).rejects.toMatchObject({
+      message: "Discord user ID is already assigned to member 100001",
+      status: 409
+    });
+    expect(() => normalizeRosterMembers([
+      { memberId: "100001", firstName: "Ada", lastName: "Lovelace", discordUserId: "111111111111111111" },
+      { memberId: "100002", firstName: "Grace", lastName: "Hopper", discord_user_id: "111111111111111111" }
+    ])).toThrow("Duplicate roster Discord user ID: 111111111111111111");
+    expect(() => normalizeRosterMembers([
+      { memberId: "100001", firstName: "Ada", lastName: "Lovelace", discordUserId: "not-a-discord-id" }
+    ])).toThrow("discordUserId must be a numeric Discord user ID");
+  });
+
+
   it("rejects empty and duplicate roster inputs", () => {
     expect(() => normalizeRosterMembers([])).toThrow("Roster sync requires at least one member");
     expect(() => normalizeRosterMembers([
@@ -129,6 +168,11 @@ describe("roster sync", () => {
 async function expectStudentEmail(env: Env, memberId: string, email: string | null) {
   const row = await env.DB.prepare("SELECT email FROM students WHERE student_id = ?").bind(memberId).first<{ email: string | null }>();
   expect(row?.email ?? null).toBe(email);
+}
+
+async function expectStudentDiscordUserId(env: Env, memberId: string, discordUserId: string | null) {
+  const row = await env.DB.prepare("SELECT discord_user_id FROM students WHERE student_id = ?").bind(memberId).first<{ discord_user_id: string | null }>();
+  expect(row?.discord_user_id ?? null).toBe(discordUserId);
 }
 
 async function expectRowCount(env: Env, table: string, column: string, value: string, expected: number) {
@@ -176,6 +220,7 @@ function createRosterTestEnv(): Env {
       first_name TEXT NOT NULL,
       last_name TEXT NOT NULL,
       email TEXT,
+      discord_user_id TEXT,
       active INTEGER NOT NULL DEFAULT 1,
       roster_hash TEXT,
       roster_synced_at TEXT NOT NULL
@@ -184,6 +229,10 @@ function createRosterTestEnv(): Env {
     CREATE UNIQUE INDEX students_email_unique_idx
     ON students(email)
     WHERE email IS NOT NULL;
+
+    CREATE UNIQUE INDEX students_discord_user_id_unique_idx
+    ON students(discord_user_id)
+    WHERE discord_user_id IS NOT NULL;
 
     CREATE TABLE sync_log (
       id TEXT PRIMARY KEY,

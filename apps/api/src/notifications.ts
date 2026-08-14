@@ -4,6 +4,7 @@ import { buildMeetingAbsenceReport, buildMeetingSummaryReport, buildMemberAttend
 
 const meetingAbsenceKind = "meeting_absence";
 const memberAttendanceReportKind = "member_attendance_report";
+const discordMissingMembersKind = "discord_missing_members";
 
 export interface MeetingAbsenceNotificationInput {
   meetingDate?: unknown;
@@ -13,6 +14,12 @@ export interface MeetingAbsenceNotificationInput {
 
 export interface MemberAttendanceReportNotificationInput {
   memberId?: unknown;
+  preview?: unknown;
+  resend?: unknown;
+}
+
+export interface DiscordMissingMemberNotificationInput {
+  meetingDate?: unknown;
   preview?: unknown;
   resend?: unknown;
 }
@@ -56,6 +63,20 @@ export interface MemberAttendanceReportNotificationResult {
   warnings: string[];
 }
 
+export interface DiscordMissingMemberNotificationResult {
+  meetingDate: string;
+  title: string | null;
+  notificationKind: typeof discordMissingMembersKind;
+  providerConfigured: boolean;
+  mode: "preview" | "send";
+  sentCount: number;
+  skippedDuplicateCount: number;
+  errorCount: number;
+  recipients: DiscordNotificationRecipient[];
+  missingDiscord: MissingDiscordRecipient[];
+  warnings: string[];
+}
+
 export interface NotificationRecipient {
   memberId: string;
   firstName: string;
@@ -72,6 +93,23 @@ export interface MissingEmailRecipient {
   status: "missing_email";
 }
 
+export interface DiscordNotificationRecipient {
+  memberId: string;
+  firstName: string;
+  lastName: string;
+  discordUserId: string;
+  mention: string;
+  status: "would_send" | "sent" | "error" | "skipped_duplicate";
+  error?: string;
+}
+
+export interface MissingDiscordRecipient {
+  memberId: string;
+  firstName: string;
+  lastName: string;
+  status: "missing_discord";
+}
+
 interface EmailProvider {
   configured: boolean;
   send: (message: EmailMessage) => Promise<{ providerMessageId?: string }>;
@@ -82,6 +120,17 @@ interface EmailMessage {
   subject: string;
   text: string;
   html: string;
+  metadata: Record<string, string>;
+}
+
+interface DiscordProvider {
+  configured: boolean;
+  send: (message: DiscordWebhookMessage) => Promise<{ providerMessageId?: string }>;
+}
+
+interface DiscordWebhookMessage {
+  content: string;
+  userIds: string[];
   metadata: Record<string, string>;
 }
 
@@ -286,7 +335,95 @@ export async function sendMemberAttendanceReportNotification(
   };
 }
 
-async function getRequiredCompletedMeeting(env: Env, meetingDate: string, now: Date) {
+export async function sendDiscordMissingMemberNotifications(
+  env: Env,
+  input: DiscordMissingMemberNotificationInput,
+  now = new Date()
+): Promise<DiscordMissingMemberNotificationResult> {
+  const meetingDate = requireIsoDate(input.meetingDate, "meetingDate");
+  const preview = input.preview === undefined ? false : requireBoolean(input.preview, "preview");
+  const resend = input.resend === undefined ? false : requireBoolean(input.resend, "resend");
+  const meeting = await getRequiredCompletedMeeting(env, meetingDate, now, "Discord missing-member pings");
+  const absenceReport = await buildMeetingAbsenceReport(env, meetingDate, now);
+  const absences = await hydrateAbsenceDiscordUserIds(env, absenceReport.rows);
+  const provider = discordProvider(env);
+  const mode = preview || !provider.configured ? "preview" : "send";
+  const sentKeys = resend ? new Set<string>() : await sentNotificationKeys(env, discordMissingMembersKind, meetingDate);
+  const recipients: DiscordNotificationRecipient[] = [];
+  const missingDiscord: MissingDiscordRecipient[] = [];
+  const warnings: string[] = [];
+
+  if (!provider.configured) warnings.push("Discord webhook is not configured; showing preview only.");
+  if (resend) warnings.push("Resend enabled; previously pinged Discord members are included.");
+
+  for (const row of absences) {
+    const discordUserId = row.discordUserId;
+    if (!discordUserId) {
+      missingDiscord.push({
+        memberId: row.memberId,
+        firstName: row.firstName,
+        lastName: row.lastName,
+        status: "missing_discord"
+      });
+      continue;
+    }
+
+    const duplicate = sentKeys.has(notificationKey(row.memberId, discordUserId));
+    recipients.push({
+      memberId: row.memberId,
+      firstName: row.firstName,
+      lastName: row.lastName,
+      discordUserId,
+      mention: discordMention(discordUserId),
+      status: duplicate ? "skipped_duplicate" : mode === "preview" ? "would_send" : "sent"
+    });
+  }
+
+  const sendableRecipients = recipients.filter((recipient) => recipient.status === "sent");
+  if (mode === "send" && sendableRecipients.length > 0) {
+    try {
+      const delivery = await provider.send(buildDiscordMissingMembersMessage(meeting, sendableRecipients));
+      await Promise.all(sendableRecipients.map((recipient) => recordNotificationDelivery(env, {
+        notificationKind: discordMissingMembersKind,
+        meetingDate,
+        memberId: recipient.memberId,
+        email: recipient.discordUserId,
+        status: "sent",
+        providerMessageId: delivery.providerMessageId
+      })));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await Promise.all(sendableRecipients.map((recipient) => {
+        recipient.status = "error";
+        recipient.error = message;
+        return recordNotificationDelivery(env, {
+          notificationKind: discordMissingMembersKind,
+          meetingDate,
+          memberId: recipient.memberId,
+          email: recipient.discordUserId,
+          status: "error",
+          errorMessage: message
+        });
+      }));
+    }
+  }
+
+  return {
+    meetingDate,
+    title: meeting.title,
+    notificationKind: discordMissingMembersKind,
+    providerConfigured: provider.configured,
+    mode,
+    sentCount: recipients.filter((recipient) => recipient.status === "sent").length,
+    skippedDuplicateCount: recipients.filter((recipient) => recipient.status === "skipped_duplicate").length,
+    errorCount: recipients.filter((recipient) => recipient.status === "error").length,
+    recipients,
+    missingDiscord,
+    warnings
+  };
+}
+
+async function getRequiredCompletedMeeting(env: Env, meetingDate: string, now: Date, notificationLabel = "missed-meeting emails") {
   const meeting = await env.DB.prepare(`
     SELECT meeting_date, title, required, starts_at, ends_at
     FROM scheduled_meetings
@@ -300,9 +437,9 @@ async function getRequiredCompletedMeeting(env: Env, meetingDate: string, now: D
   }>();
 
   if (!meeting) throw Object.assign(new Error("Scheduled meeting not found"), { status: 404 });
-  if (!meeting.required) throw Object.assign(new Error("Only required meetings can send missed-meeting emails"), { status: 400 });
+  if (!meeting.required) throw Object.assign(new Error(`Only required meetings can send ${notificationLabel}`), { status: 400 });
   if (!isMeetingComplete(meeting, env, now)) {
-    throw Object.assign(new Error("Meeting must be completed before missed-meeting emails can be sent"), { status: 400 });
+    throw Object.assign(new Error(`Meeting must be completed before ${notificationLabel} can be sent`), { status: 400 });
   }
   return meeting;
 }
@@ -317,6 +454,19 @@ async function hydrateAbsenceEmails(env: Env, rows: Array<{ memberId: string; fi
   return rows.map((row) => ({
     ...row,
     email: emailByMemberId.get(row.memberId) ?? null
+  }));
+}
+
+async function hydrateAbsenceDiscordUserIds(env: Env, rows: Array<{ memberId: string; firstName: string; lastName: string }>) {
+  const activeStudents = await env.DB.prepare(`
+    SELECT student_id, discord_user_id
+    FROM students
+    WHERE active = 1
+  `).all<{ student_id: string; discord_user_id: string | null }>();
+  const discordByMemberId = new Map(activeStudents.results.map((row) => [row.student_id, normalizeOptionalDiscordUserId(row.discord_user_id)]));
+  return rows.map((row) => ({
+    ...row,
+    discordUserId: discordByMemberId.get(row.memberId) ?? null
   }));
 }
 
@@ -386,6 +536,39 @@ function genericHttpEmailProvider(env: Env, url: string, fromAddress: string): E
       });
       const text = await response.text();
       if (!response.ok) throw new Error(text || `Email provider returned ${response.status}`);
+      return { providerMessageId: providerMessageIdFromResponse(text) };
+    }
+  };
+}
+
+function discordProvider(env: Env): DiscordProvider {
+  const url = env.DISCORD_MISSING_MEMBERS_WEBHOOK_URL?.trim() || env.DISCORD_WEBHOOK_URL?.trim();
+  if (!url) {
+    return {
+      configured: false,
+      async send() {
+        throw new Error("Discord webhook is not configured");
+      }
+    };
+  }
+  return {
+    configured: true,
+    async send(message) {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          content: message.content,
+          allowed_mentions: {
+            parse: [],
+            users: message.userIds
+          }
+        })
+      });
+      const text = await response.text();
+      if (!response.ok) throw new Error(text || `Discord webhook returned ${response.status}`);
       return { providerMessageId: providerMessageIdFromResponse(text) };
     }
   };
@@ -513,6 +696,27 @@ function buildMemberAttendanceEmail(member: {
   };
 }
 
+function buildDiscordMissingMembersMessage(
+  meeting: { meeting_date: string; title: string | null },
+  recipients: Array<{ discordUserId: string; mention: string }>
+): DiscordWebhookMessage {
+  const meetingLabel = meeting.title ?? "Required meeting";
+  const mentions = recipients.map((recipient) => recipient.mention);
+  return {
+    content: [
+      `Missing from ${meetingLabel} on ${meeting.meeting_date}:`,
+      mentions.join(" "),
+      "",
+      "If you were present, reply so a mentor can correct attendance."
+    ].join("\n"),
+    userIds: recipients.map((recipient) => recipient.discordUserId),
+    metadata: {
+      notificationKind: discordMissingMembersKind,
+      meetingDate: meeting.meeting_date
+    }
+  };
+}
+
 async function sentNotificationKeys(env: Env, notificationKind: string, meetingDate: string): Promise<Set<string>> {
   const rows = await env.DB.prepare(`
     SELECT student_id, recipient_email
@@ -598,9 +802,18 @@ function notificationKey(memberId: string, email: string) {
   return `${memberId}:${email.trim().toLowerCase()}`;
 }
 
+function discordMention(discordUserId: string) {
+  return `<@${discordUserId}>`;
+}
+
 function normalizeOptionalEmail(value?: string | null) {
   const email = value?.trim().toLowerCase() ?? "";
   return email.length > 0 ? email : null;
+}
+
+function normalizeOptionalDiscordUserId(value?: string | null) {
+  const discordUserId = value?.trim() ?? "";
+  return /^\d{5,25}$/.test(discordUserId) ? discordUserId : null;
 }
 
 function requireBoolean(value: unknown, fieldName: string): boolean {
