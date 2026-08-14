@@ -525,6 +525,118 @@ describe("Discord missing-member notifications", () => {
   });
 });
 
+describe("Discord test notifications", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("requires admin auth", async () => {
+    const env = createTestEnv();
+
+    const response = await unauthenticatedRequest(env, "/admin/notifications/discord/test", {});
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: "Missing admin identity" });
+  });
+
+  it("stays preview-only when the Discord webhook is not configured", async () => {
+    const env = createTestEnv();
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await request(env, "/admin/notifications/discord/test", {});
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      notificationKind: "discord_test",
+      providerConfigured: false,
+      mode: "preview",
+      sentCount: 0,
+      errorCount: 0,
+      status: "would_send",
+      metadata: {
+        appName: "FRC Attendance",
+        service: "frc-attendance-api",
+        notificationKind: "discord_test",
+        workerVersion: null,
+        workerVersionMetadataId: null,
+        webhookKind: "missing_members"
+      },
+      warnings: ["Discord webhook is not configured; showing preview only."]
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(countRows(env, "notification_deliveries")).toBe(0);
+  });
+
+  it("sends a safe Discord webhook payload with mentions disabled", async () => {
+    const env = createTestEnv({
+      DISCORD_MISSING_MEMBERS_WEBHOOK_URL: "https://discord.test/webhook",
+      WORKER_VERSION: "test-version"
+    });
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ id: "discord-test-1" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await request(env, "/admin/notifications/discord/test", {});
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      notificationKind: "discord_test",
+      providerConfigured: true,
+      mode: "send",
+      sentCount: 1,
+      errorCount: 0,
+      status: "sent",
+      providerMessageId: "discord-test-1",
+      metadata: {
+        workerVersion: "test-version"
+      }
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith("https://discord.test/webhook", expect.objectContaining({
+      method: "POST",
+      headers: expect.objectContaining({
+        "content-type": "application/json"
+      })
+    }));
+    const webhookBody = fetchJsonBody(fetchMock);
+    expect(String(webhookBody.content)).toContain("FRC Attendance Discord webhook test");
+    expect(String(webhookBody.content)).toContain("Notification kind: discord_test");
+    expect(String(webhookBody.content)).not.toContain("<@");
+    expect(String(webhookBody.content)).not.toContain("@everyone");
+    expect(String(webhookBody.content)).not.toContain("@here");
+    expect(webhookBody).toMatchObject({
+      allowed_mentions: {
+        parse: [],
+        users: []
+      }
+    });
+    expect(countRows(env, "notification_deliveries")).toBe(0);
+  });
+
+  it("returns provider errors without writing notification deliveries", async () => {
+    const env = createTestEnv({
+      DISCORD_MISSING_MEMBERS_WEBHOOK_URL: "https://discord.test/webhook"
+    });
+    const fetchMock = vi.fn(async () => new Response("webhook failed", { status: 500 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await request(env, "/admin/notifications/discord/test", {});
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      notificationKind: "discord_test",
+      providerConfigured: true,
+      mode: "send",
+      sentCount: 0,
+      errorCount: 1,
+      status: "error",
+      error: "webhook failed"
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(countRows(env, "notification_deliveries")).toBe(0);
+  });
+});
+
 function createTestEnv(overrides: Partial<Env> = {}): Env {
   const sqlite = new Database(":memory:");
   sqlite.exec(`
@@ -600,6 +712,16 @@ function request(env: Env, path: string, body: unknown) {
     headers: {
       "content-type": "application/json",
       "x-admin-email": "mentor@example.com"
+    },
+    body: JSON.stringify(body)
+  }), env);
+}
+
+function unauthenticatedRequest(env: Env, path: string, body: unknown) {
+  return worker.fetch(new Request(`https://api.test${path}`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json"
     },
     body: JSON.stringify(body)
   }), env);

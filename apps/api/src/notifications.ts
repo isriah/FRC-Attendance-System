@@ -5,6 +5,7 @@ import { buildMeetingAbsenceReport, buildMeetingSummaryReport, buildMemberAttend
 const meetingAbsenceKind = "meeting_absence";
 const memberAttendanceReportKind = "member_attendance_report";
 const discordMissingMembersKind = "discord_missing_members";
+const discordTestKind = "discord_test";
 
 export interface MeetingAbsenceNotificationInput {
   meetingDate?: unknown;
@@ -22,6 +23,10 @@ export interface DiscordMissingMemberNotificationInput {
   meetingDate?: unknown;
   preview?: unknown;
   resend?: unknown;
+}
+
+export interface DiscordTestNotificationInput {
+  preview?: unknown;
 }
 
 export interface MeetingAbsenceNotificationResult {
@@ -74,6 +79,19 @@ export interface DiscordMissingMemberNotificationResult {
   errorCount: number;
   recipients: DiscordNotificationRecipient[];
   missingDiscord: MissingDiscordRecipient[];
+  warnings: string[];
+}
+
+export interface DiscordTestNotificationResult {
+  notificationKind: typeof discordTestKind;
+  providerConfigured: boolean;
+  mode: "preview" | "send";
+  sentCount: number;
+  errorCount: number;
+  status: "would_send" | "sent" | "error";
+  providerMessageId?: string;
+  error?: string;
+  metadata: DiscordTestMetadata;
   warnings: string[];
 }
 
@@ -132,6 +150,16 @@ interface DiscordWebhookMessage {
   content: string;
   userIds: string[];
   metadata: Record<string, string>;
+}
+
+interface DiscordTestMetadata {
+  appName: string;
+  service: string;
+  timestamp: string;
+  notificationKind: typeof discordTestKind;
+  workerVersion: string | null;
+  workerVersionMetadataId: string | null;
+  webhookKind: "missing_members";
 }
 
 export async function sendMeetingAbsenceNotifications(
@@ -419,6 +447,46 @@ export async function sendDiscordMissingMemberNotifications(
     errorCount: recipients.filter((recipient) => recipient.status === "error").length,
     recipients,
     missingDiscord,
+    warnings
+  };
+}
+
+export async function sendDiscordTestNotification(
+  env: Env,
+  input: DiscordTestNotificationInput,
+  now = new Date()
+): Promise<DiscordTestNotificationResult> {
+  const preview = input.preview === undefined ? false : requireBoolean(input.preview, "preview");
+  const provider = discordProvider(env);
+  const mode = preview || !provider.configured ? "preview" : "send";
+  const metadata = discordTestMetadata(env, now);
+  const warnings: string[] = [];
+  let status: DiscordTestNotificationResult["status"] = mode === "preview" ? "would_send" : "sent";
+  let providerMessageId: string | undefined;
+  let error: string | undefined;
+
+  if (!provider.configured) warnings.push("Discord webhook is not configured; showing preview only.");
+
+  if (mode === "send") {
+    try {
+      const delivery = await provider.send(buildDiscordTestMessage(metadata));
+      providerMessageId = delivery.providerMessageId;
+    } catch (err) {
+      status = "error";
+      error = err instanceof Error ? err.message : String(err);
+    }
+  }
+
+  return {
+    notificationKind: discordTestKind,
+    providerConfigured: provider.configured,
+    mode,
+    sentCount: status === "sent" ? 1 : 0,
+    errorCount: status === "error" ? 1 : 0,
+    status,
+    providerMessageId,
+    error,
+    metadata,
     warnings
   };
 }
@@ -717,6 +785,41 @@ function buildDiscordMissingMembersMessage(
   };
 }
 
+function buildDiscordTestMessage(metadata: DiscordTestMetadata): DiscordWebhookMessage {
+  return {
+    content: [
+      "FRC Attendance Discord webhook test",
+      `App: ${metadata.appName}`,
+      `Service: ${metadata.service}`,
+      `Status: ok`,
+      `Timestamp: ${metadata.timestamp}`,
+      `Notification kind: ${metadata.notificationKind}`,
+      `Webhook kind: ${metadata.webhookKind}`,
+      `Worker version: ${metadata.workerVersion ?? "unavailable"}`,
+      `Version metadata id: ${metadata.workerVersionMetadataId ?? "unavailable"}`,
+      "",
+      "This is a harmless delivery test. No meeting, attendance, member, user, role, everyone, or here mentions are included."
+    ].join("\n"),
+    userIds: [],
+    metadata: {
+      notificationKind: metadata.notificationKind,
+      timestamp: metadata.timestamp
+    }
+  };
+}
+
+function discordTestMetadata(env: Env, now: Date): DiscordTestMetadata {
+  return {
+    appName: "FRC Attendance",
+    service: "frc-attendance-api",
+    timestamp: now.toISOString(),
+    notificationKind: discordTestKind,
+    workerVersion: normalizeOptionalString(env.WORKER_VERSION),
+    workerVersionMetadataId: normalizeOptionalString(env.CF_VERSION_METADATA?.id),
+    webhookKind: "missing_members"
+  };
+}
+
 async function sentNotificationKeys(env: Env, notificationKind: string, meetingDate: string): Promise<Set<string>> {
   const rows = await env.DB.prepare(`
     SELECT student_id, recipient_email
@@ -814,6 +917,11 @@ function normalizeOptionalEmail(value?: string | null) {
 function normalizeOptionalDiscordUserId(value?: string | null) {
   const discordUserId = value?.trim() ?? "";
   return /^\d{5,25}$/.test(discordUserId) ? discordUserId : null;
+}
+
+function normalizeOptionalString(value?: string | null) {
+  const trimmed = value?.trim() ?? "";
+  return trimmed.length > 0 ? trimmed : null;
 }
 
 function requireBoolean(value: unknown, fieldName: string): boolean {

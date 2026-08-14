@@ -191,6 +191,27 @@ interface DiscordMissingMemberNotificationResult {
   warnings: string[];
 }
 
+interface DiscordTestNotificationResult {
+  notificationKind: "discord_test";
+  providerConfigured: boolean;
+  mode: "preview" | "send";
+  sentCount: number;
+  errorCount: number;
+  status: "would_send" | "sent" | "error";
+  providerMessageId?: string;
+  error?: string;
+  metadata: {
+    appName: string;
+    service: string;
+    timestamp: string;
+    notificationKind: "discord_test";
+    workerVersion: string | null;
+    workerVersionMetadataId: string | null;
+    webhookKind: "missing_members";
+  };
+  warnings: string[];
+}
+
 const defaultMeetingTitle = "Regular Meeting";
 const defaultMeetingStartTime = "15:00";
 const defaultMeetingEndTime = "17:30";
@@ -367,6 +388,26 @@ function Login({
 function Overview({ session }: { session: DashboardSession }) {
   const { data: kiosks } = useApi<{ kiosks: unknown[] }>("/admin/kiosks", session);
   const { data: events } = useApi<{ events: unknown[] }>("/admin/events", session);
+  const [discordTestBusy, setDiscordTestBusy] = useState(false);
+  const [discordTestResult, setDiscordTestResult] = useState<DiscordTestNotificationResult>();
+  const [discordTestMessage, setDiscordTestMessage] = useState<{ kind: "success" | "error"; text: string }>();
+
+  async function sendDiscordTest() {
+    setDiscordTestBusy(true);
+    setDiscordTestMessage(undefined);
+    try {
+      const result = await apiPost<DiscordTestNotificationResult>("/admin/notifications/discord/test", {}, session);
+      setDiscordTestResult(result);
+      setDiscordTestMessage({
+        kind: result.errorCount > 0 ? "error" : "success",
+        text: discordTestSummary(result)
+      });
+    } catch (err) {
+      setDiscordTestMessage({ kind: "error", text: friendlyDashboardError(err) });
+    } finally {
+      setDiscordTestBusy(false);
+    }
+  }
 
   return (
     <>
@@ -375,6 +416,16 @@ function Overview({ session }: { session: DashboardSession }) {
         <Metric label="Recent Events" value={events?.events.length ?? 0} />
         <Metric label="System" value="Online" />
       </div>
+      <section>
+        <h2>Notification Checks</h2>
+        <div className="toolbar wrap">
+          <button type="button" onClick={sendDiscordTest} disabled={discordTestBusy}>
+            {discordTestBusy ? "Sending..." : "Send Discord test"}
+          </button>
+        </div>
+        {discordTestMessage ? <p className={`notice ${discordTestMessage.kind}`}>{discordTestMessage.text}</p> : null}
+        {discordTestResult ? <DiscordTestResultPanel result={discordTestResult} /> : null}
+      </section>
     </>
   );
 }
@@ -2229,6 +2280,34 @@ function DiscordNotificationResultPanel({ result }: { result: DiscordMissingMemb
   );
 }
 
+function DiscordTestResultPanel({ result }: { result: DiscordTestNotificationResult }) {
+  const noticeKind = result.errorCount > 0 ? "error" : result.mode === "send" ? "success" : "info";
+  const rows = [{
+    status: notificationStatusLabel(result.status),
+    providerConfigured: result.providerConfigured ? "Yes" : "No",
+    mode: result.mode,
+    appName: result.metadata.appName,
+    service: result.metadata.service,
+    timestamp: formatDateTime(result.metadata.timestamp),
+    notificationKind: result.metadata.notificationKind,
+    webhookKind: result.metadata.webhookKind,
+    workerVersion: result.metadata.workerVersion ?? "Unavailable",
+    versionMetadataId: result.metadata.workerVersionMetadataId ?? "Unavailable",
+    providerMessageId: result.providerMessageId ?? "",
+    error: result.error ?? ""
+  }];
+
+  return (
+    <div className="notification-result">
+      <p className={`notice ${noticeKind}`}>
+        {discordTestSummary(result)}
+      </p>
+      {result.warnings.length > 0 ? <p className="report-context">{result.warnings.join(" ")}</p> : null}
+      <DataTable rows={rows} columns={["status", "providerConfigured", "mode", "appName", "service", "timestamp", "notificationKind", "webhookKind", "workerVersion", "versionMetadataId", "providerMessageId", "error"]} density="compact" />
+    </div>
+  );
+}
+
 function Kiosks({ session }: { session: DashboardSession }) {
   const { data, error, reload } = useApi<{ kiosks: KioskRow[] }>("/admin/kiosks", session);
   const { data: commands, error: commandError, reload: reloadCommands } = useApi<{ commands: KioskCommandRow[] }>("/admin/kiosk-commands?limit=75", session);
@@ -3135,6 +3214,16 @@ function discordNotificationSummary(result: DiscordMissingMemberNotificationResu
       : `${pluralize(deliverableCount, "absent member")} would be pinged; Discord webhook not configured. ${pluralize(result.missingDiscord.length, "missing Discord ID")}.`;
   }
   return `Pinged ${pluralize(result.sentCount, "member")}; skipped ${pluralize(result.skippedDuplicateCount, "duplicate")}; ${pluralize(result.errorCount, "error")}.`;
+}
+
+function discordTestSummary(result: DiscordTestNotificationResult) {
+  if (result.mode === "preview") {
+    return result.providerConfigured
+      ? "Discord webhook test is ready to send."
+      : "Discord webhook test preview only; webhook not configured.";
+  }
+  if (result.errorCount > 0) return `Discord webhook test failed: ${result.error ?? "Unknown provider error"}`;
+  return "Discord webhook test sent.";
 }
 
 function notificationStatusLabel(status: MeetingAbsenceNotificationResult["recipients"][number]["status"]) {

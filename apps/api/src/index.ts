@@ -6,7 +6,7 @@ import { buildLegacySheetExport } from "./export";
 import { errorResponse, json, noContent, optionsResponse, readJson } from "./http";
 import { claimPendingKioskCommands, completeKioskCommand, createKioskCommand, listRecentKioskCommands, requireKioskCommandAction } from "./kioskCommands";
 import { bulkDeleteScheduledMeetings, convertUnscheduledAttendanceToMeeting, createScheduledMeeting, deleteScheduledMeeting, listScheduledMeetings, updateScheduledMeeting, type BulkScheduledMeetingDeleteInput, type ScheduledMeetingInput } from "./meetings";
-import { sendDiscordMissingMemberNotifications, sendMeetingAbsenceNotifications, sendMemberAttendanceReportNotification, type DiscordMissingMemberNotificationInput, type MeetingAbsenceNotificationInput, type MemberAttendanceReportNotificationInput } from "./notifications";
+import { sendDiscordMissingMemberNotifications, sendDiscordTestNotification, sendMeetingAbsenceNotifications, sendMemberAttendanceReportNotification, type DiscordMissingMemberNotificationInput, type DiscordTestNotificationInput, type MeetingAbsenceNotificationInput, type MemberAttendanceReportNotificationInput } from "./notifications";
 import { buildAttendanceSessionReport, buildMeetingAbsenceReport, buildMeetingSummaryReport, buildMemberAttendanceReport, buildPresenceReport, buildRosterAttendanceSummary, reportDateRangeFromSearchParams } from "./reports";
 import { deactivateMember, hardDeleteMember, listActiveRoster, listRosterMembers, reactivateMember, syncRoster, updateStudentDiscordUserId, updateStudentEmail, type RosterMemberInput } from "./roster";
 
@@ -240,6 +240,12 @@ export default {
         await requireAdmin(request, env);
         const body = await readJson<DiscordMissingMemberNotificationInput>(request);
         return json(await sendDiscordMissingMemberNotifications(env, body));
+      }
+
+      if (route === "POST /admin/notifications/discord/test") {
+        await requireAdmin(request, env);
+        const body = await readJson<DiscordTestNotificationInput>(request);
+        return json(await sendDiscordTestNotification(env, body));
       }
 
       if (route === "GET /admin/events") {
