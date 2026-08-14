@@ -5,10 +5,10 @@
 Current production API:
 
 - Worker URL: `https://frc-attendance-api.frc-attendance.workers.dev`
-- Latest deployed Worker version: `33c96de6-761d-4fe5-8568-1335ecd2a2de`
+- Latest deployed Worker version: `4ba522eb-fff5-4af4-81e3-bd57df941df9`
 - D1 database: `frc-attendance`
 - D1 database ID: `c02c0ca8-033b-435f-ae21-2d8f3b203b22`
-- Applied remote migrations: `0001_initial.sql` through `0006_notification_deliveries.sql`; `0007_student_discord_user_id.sql` is pending until the Discord notification branch is merged and deployed.
+- Applied remote migrations: `0001_initial.sql` through `0007_student_discord_user_id.sql`
 - Workers account subdomain: `frc-attendance.workers.dev`
 - Registered bench kiosk: `bench-01`
 
@@ -16,7 +16,7 @@ Current production dashboard:
 
 - Cloudflare Pages project: `frc-attendance-dashboard`
 - Pages URL: `https://frc-attendance-dashboard.pages.dev`
-- Latest verified deployment: `https://2ded3f58.frc-attendance-dashboard.pages.dev`
+- Latest verified deployment: `https://85462f9f.frc-attendance-dashboard.pages.dev`
 - API base URL baked into the uploaded Vite build: `https://frc-attendance-api.frc-attendance.workers.dev`
 - Google OAuth client ID baked into the uploaded Vite build: `180849199739-v04bktp7rfmimgjpvohmq7pinrrpr337.apps.googleusercontent.com`
 
@@ -206,6 +206,8 @@ Deployment `https://4bbc28eb.frc-attendance-dashboard.pages.dev` and Worker vers
 
 Deployment `https://2ded3f58.frc-attendance-dashboard.pages.dev` fixes Meetings calendar event subtext so missing completed-report rows no longer display as permanent `Loading...`. Calendar cards now show loading only while report data is pending, then show present/absent counts, `Upcoming`, `No attendance yet`, `0 present`, or `Report unavailable` as appropriate. Dashboard smoke passed against the immutable deployment URL on 2026-08-12; canonical Pages smoke initially saw stale bundle config immediately after deploy.
 
+Deployment `https://85462f9f.frc-attendance-dashboard.pages.dev` and Worker version `4ba522eb-fff5-4af4-81e3-bd57df941df9` add initial Discord missing-member notification support. Remote D1 migration `0007_student_discord_user_id.sql` was applied. The dashboard can store member Discord user IDs and preview/confirm pings for absent members on completed required meetings. Production does not yet have `DISCORD_MISSING_MEMBERS_WEBHOOK_URL` configured, so Discord sends remain preview-only until that Worker secret is added. Production API/dashboard smoke passed on 2026-08-14 with Pi skipped because the bench Pi was unreachable by hostname and last known IP.
+
 The dashboard login UI follows the same boundary: when `VITE_GOOGLE_CLIENT_ID` is configured, it shows Google sign-in and a production notice that email-only local login is disabled. The email-only form is rendered only for local development builds with no Google client ID.
 
 For local development only, if no Google client ID is configured, the dashboard can send an `x-admin-email` header and the API will still enforce the configured allowlist.
@@ -269,7 +271,7 @@ Sending is disabled unless `DISCORD_MISSING_MEMBERS_WEBHOOK_URL` or fallback `DI
 Discord setup:
 
 1. In Discord, create a private/team-controlled channel webhook for attendance pings and copy the webhook URL.
-2. Apply migration `0007_student_discord_user_id.sql` after the branch is merged.
+2. Confirm migration `0007_student_discord_user_id.sql` is applied. Production has this migration applied as of Worker version `4ba522eb-fff5-4af4-81e3-bd57df941df9`.
 3. Configure the Worker secret without committing it:
 
    ```powershell
