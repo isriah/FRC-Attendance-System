@@ -17,6 +17,7 @@ interface MemberRow {
   firstName: string;
   lastName: string;
   email?: string | null;
+  discordUserId?: string | null;
   active: boolean;
   rosterSyncedAt?: string | null;
 }
@@ -160,6 +161,33 @@ interface MemberAttendanceReportNotificationResult {
     missedMeetingsList: Array<{ meetingDate: string; title: string | null }>;
     optionalMeetings: Array<{ meetingDate: string; title: string | null; attended: boolean }>;
   };
+  warnings: string[];
+}
+
+interface DiscordMissingMemberNotificationResult {
+  meetingDate: string;
+  title: string | null;
+  notificationKind: "discord_missing_members";
+  providerConfigured: boolean;
+  mode: "preview" | "send";
+  sentCount: number;
+  skippedDuplicateCount: number;
+  errorCount: number;
+  recipients: Array<{
+    memberId: string;
+    firstName: string;
+    lastName: string;
+    discordUserId: string;
+    mention: string;
+    status: "would_send" | "sent" | "error" | "skipped_duplicate";
+    error?: string;
+  }>;
+  missingDiscord: Array<{
+    memberId: string;
+    firstName: string;
+    lastName: string;
+    status: "missing_discord";
+  }>;
   warnings: string[];
 }
 
@@ -361,9 +389,10 @@ function Roster({ session }: { session: DashboardSession }) {
   );
   const [rosterViewTab, setRosterViewTab] = useState<RosterViewTab>("active");
   const [rosterSearch, setRosterSearch] = useState("");
-  const [importText, setImportText] = useState("memberId,firstName,lastName,email\n100001,Bench,Member,bench@example.org");
+  const [importText, setImportText] = useState("memberId,firstName,lastName,email,discordUserId\n100001,Bench,Member,bench@example.org,");
   const [importMessage, setImportMessage] = useState<string>();
   const [emailDrafts, setEmailDrafts] = useState<Record<string, string>>({});
+  const [discordDrafts, setDiscordDrafts] = useState<Record<string, string>>({});
   const [memberMessage, setMemberMessage] = useState<{ kind: "success" | "error"; text: string }>();
   const [busyMemberId, setBusyMemberId] = useState<string>();
   const [memberReportEmailBusyId, setMemberReportEmailBusyId] = useState<string>();
@@ -433,6 +462,13 @@ function Roster({ session }: { session: DashboardSession }) {
       }
       return next;
     });
+    setDiscordDrafts((drafts) => {
+      const next = { ...drafts };
+      for (const member of data.members) {
+        if (next[member.memberId] === undefined) next[member.memberId] = member.discordUserId ?? "";
+      }
+      return next;
+    });
   }, [data?.members]);
 
   async function saveMemberEmail(member: MemberRow) {
@@ -444,6 +480,21 @@ function Roster({ session }: { session: DashboardSession }) {
       setMemberMessage({ kind: "success", text: `Saved email for ${member.firstName} ${member.lastName}.` });
       reload();
       reloadMemberReport();
+    } catch (error) {
+      setMemberMessage({ kind: "error", text: friendlyDashboardError(error) });
+    } finally {
+      setBusyMemberId(undefined);
+    }
+  }
+
+  async function saveMemberDiscordUserId(member: MemberRow) {
+    const discordUserId = discordDrafts[member.memberId]?.trim() ?? "";
+    setBusyMemberId(member.memberId);
+    setMemberMessage(undefined);
+    try {
+      await apiPut(`/admin/members/${encodeURIComponent(member.memberId)}/discord`, { discordUserId: discordUserId || null }, session);
+      setMemberMessage({ kind: "success", text: `Saved Discord user ID for ${member.firstName} ${member.lastName}.` });
+      reload();
     } catch (error) {
       setMemberMessage({ kind: "error", text: friendlyDashboardError(error) });
     } finally {
@@ -674,6 +725,9 @@ function Roster({ session }: { session: DashboardSession }) {
                 emailDraft={emailDrafts[member.memberId] ?? member.email ?? ""}
                 onEmailDraftChange={(email) => setEmailDrafts((drafts) => ({ ...drafts, [member.memberId]: email }))}
                 onSaveEmail={() => saveMemberEmail(member)}
+                discordDraft={discordDrafts[member.memberId] ?? member.discordUserId ?? ""}
+                onDiscordDraftChange={(discordUserId) => setDiscordDrafts((drafts) => ({ ...drafts, [member.memberId]: discordUserId }))}
+                onSaveDiscordUserId={() => saveMemberDiscordUserId(member)}
                 onEmailAttendanceReport={() => emailMemberAttendanceReport(member)}
                 busy={busyMemberId === member.memberId}
                 reportEmailBusy={memberReportEmailBusyId === member.memberId}
@@ -722,6 +776,9 @@ function Roster({ session }: { session: DashboardSession }) {
                 emailDraft={emailDrafts[member.memberId] ?? member.email ?? ""}
                 onEmailDraftChange={(email) => setEmailDrafts((drafts) => ({ ...drafts, [member.memberId]: email }))}
                 onSaveEmail={() => saveMemberEmail(member)}
+                discordDraft={discordDrafts[member.memberId] ?? member.discordUserId ?? ""}
+                onDiscordDraftChange={(discordUserId) => setDiscordDrafts((drafts) => ({ ...drafts, [member.memberId]: discordUserId }))}
+                onSaveDiscordUserId={() => saveMemberDiscordUserId(member)}
                 onEmailAttendanceReport={() => emailMemberAttendanceReport(member)}
                 busy={busyMemberId === member.memberId}
                 reportEmailBusy={memberReportEmailBusyId === member.memberId}
@@ -876,6 +933,9 @@ function MemberDetailsPanel({
   emailDraft,
   onEmailDraftChange,
   onSaveEmail,
+  discordDraft,
+  onDiscordDraftChange,
+  onSaveDiscordUserId,
   onEmailAttendanceReport,
   busy,
   reportEmailBusy,
@@ -907,6 +967,9 @@ function MemberDetailsPanel({
   emailDraft: string;
   onEmailDraftChange: (email: string) => void;
   onSaveEmail: () => void;
+  discordDraft: string;
+  onDiscordDraftChange: (discordUserId: string) => void;
+  onSaveDiscordUserId: () => void;
   onEmailAttendanceReport: () => void;
   busy: boolean;
   reportEmailBusy: boolean;
@@ -959,6 +1022,11 @@ function MemberDetailsPanel({
           <input type="email" value={emailDraft} onChange={(event) => onEmailDraftChange(event.target.value)} placeholder="name@example.org" />
         </label>
         <button type="button" disabled={busy} onClick={onSaveEmail}>{busy ? "Saving..." : "Save email"}</button>
+        <label className="field-label member-email-field">
+          <span>Discord User ID</span>
+          <input value={discordDraft} onChange={(event) => onDiscordDraftChange(event.target.value)} inputMode="numeric" placeholder="123456789012345678" />
+        </label>
+        <button type="button" disabled={busy} onClick={onSaveDiscordUserId}>{busy ? "Saving..." : "Save Discord"}</button>
       </div>
       <div className="toolbar compact">
         <button type="button" disabled={reportEmailBusy || !canEmailAttendanceReport} onClick={onEmailAttendanceReport}>
@@ -1247,6 +1315,8 @@ function Meetings({ session }: { session: DashboardSession }) {
   const [calendarMonth, setCalendarMonth] = useState("");
   const [notificationResult, setNotificationResult] = useState<MeetingAbsenceNotificationResult>();
   const [notificationBusyDate, setNotificationBusyDate] = useState("");
+  const [discordNotificationResult, setDiscordNotificationResult] = useState<DiscordMissingMemberNotificationResult>();
+  const [discordNotificationBusyDate, setDiscordNotificationBusyDate] = useState("");
   const meetings = data?.meetings ?? [];
   const selectedMeetings = meetings.filter((meeting) => selectedMeetingIds.includes(meeting.id));
   const allMeetingsSelected = meetings.length > 0 && selectedMeetingIds.length === meetings.length;
@@ -1290,6 +1360,7 @@ function Meetings({ session }: { session: DashboardSession }) {
 
   useEffect(() => {
     setNotificationResult(undefined);
+    setDiscordNotificationResult(undefined);
   }, [selectedMeetingDate]);
 
   async function submitMeeting(event: FormEvent<HTMLFormElement>) {
@@ -1553,6 +1624,40 @@ function Meetings({ session }: { session: DashboardSession }) {
     }
   }
 
+  async function pingMissingMembersInDiscord(meetingDate: string) {
+    setDiscordNotificationBusyDate(meetingDate);
+    setMessage(undefined);
+    try {
+      const preview = await apiPost<DiscordMissingMemberNotificationResult>("/admin/notifications/discord/missing-members", {
+        meetingDate,
+        preview: true
+      }, session);
+      setDiscordNotificationResult(preview);
+      const sendableCount = preview.recipients.filter((recipient) => recipient.status === "would_send").length;
+      if (!preview.providerConfigured) {
+        setMessage({ kind: "success", text: `Preview ready for ${pluralize(sendableCount, "member")}; Discord webhook is not configured.` });
+        return;
+      }
+      if (sendableCount === 0) {
+        setMessage({ kind: "success", text: "No unsent absent members with Discord user IDs for this meeting." });
+        return;
+      }
+      if (!window.confirm(`Ping ${pluralize(sendableCount, "missing member")} in Discord?`)) return;
+      const result = await apiPost<DiscordMissingMemberNotificationResult>("/admin/notifications/discord/missing-members", {
+        meetingDate
+      }, session);
+      setDiscordNotificationResult(result);
+      setMessage({
+        kind: result.errorCount > 0 ? "error" : "success",
+        text: discordNotificationSummary(result)
+      });
+    } catch (err) {
+      setMessage({ kind: "error", text: friendlyDashboardError(err) });
+    } finally {
+      setDiscordNotificationBusyDate("");
+    }
+  }
+
   const meetingForm = (
     <form className="meeting-form" onSubmit={submitMeeting}>
       <label className="field-label">
@@ -1673,11 +1778,14 @@ function Meetings({ session }: { session: DashboardSession }) {
                 saving={saving}
                 notificationResult={notificationResult?.meetingDate === selectedMeetingDate ? notificationResult : undefined}
                 notificationBusy={notificationBusyDate === selectedMeetingDate}
+                discordNotificationResult={discordNotificationResult?.meetingDate === selectedMeetingDate ? discordNotificationResult : undefined}
+                discordNotificationBusy={discordNotificationBusyDate === selectedMeetingDate}
                 onEdit={startEditing}
                 onDelete={deleteMeeting}
                 onConvert={startConvertingUnscheduled}
                 onClear={clearUnscheduledAttendance}
                 onEmailAbsent={emailAbsentMembers}
+                onDiscordPingAbsent={pingMissingMembersInDiscord}
               />
           </>
         ) : null}
@@ -1932,7 +2040,10 @@ function MeetingDetails({
   onClear,
   notificationResult,
   notificationBusy,
-  onEmailAbsent
+  discordNotificationResult,
+  discordNotificationBusy,
+  onEmailAbsent,
+  onDiscordPingAbsent
 }: {
   meeting?: ScheduledMeeting;
   summary?: MeetingSummaryReportRow;
@@ -1944,11 +2055,14 @@ function MeetingDetails({
   saving: boolean;
   notificationResult?: MeetingAbsenceNotificationResult;
   notificationBusy: boolean;
+  discordNotificationResult?: DiscordMissingMemberNotificationResult;
+  discordNotificationBusy: boolean;
   onEdit: (meeting: ScheduledMeeting) => void;
   onDelete: (meeting: ScheduledMeeting) => void;
   onConvert: (summary: MeetingSummaryReportRow) => void;
   onClear: (summary: MeetingSummaryReportRow) => void;
   onEmailAbsent: (meetingDate: string) => void;
+  onDiscordPingAbsent: (meetingDate: string) => void;
 }) {
   if (!meeting && !summary) {
     return <p className="empty-state">Select a meeting on the calendar to see attendance details.</p>;
@@ -1996,6 +2110,7 @@ function MeetingDetails({
             <>
               <MeetingRequirementBadge required={meeting.required} />
               {required ? <button type="button" onClick={() => onEmailAbsent(meeting.meetingDate)} disabled={saving || notificationBusy}>{notificationBusy ? "Checking..." : "Email absent members"}</button> : null}
+              {required ? <button type="button" onClick={() => onDiscordPingAbsent(meeting.meetingDate)} disabled={saving || discordNotificationBusy}>{discordNotificationBusy ? "Checking..." : "Ping missing members in Discord"}</button> : null}
               <button type="button" onClick={() => onEdit(meeting)} disabled={saving}>Edit</button>
               <button type="button" onClick={() => onDelete(meeting)} disabled={saving}>Delete</button>
             </>
@@ -2018,6 +2133,7 @@ function MeetingDetails({
       {presenceError ? <p className="error">{presenceError}</p> : null}
       {absencesError ? <p className="error">{absencesError}</p> : null}
       {notificationResult ? <NotificationResultPanel result={notificationResult} /> : null}
+      {discordNotificationResult ? <DiscordNotificationResultPanel result={discordNotificationResult} /> : null}
       <div className="meeting-detail-grid">
         <div>
           <div className="meeting-detail-subheading">
@@ -2071,6 +2187,41 @@ function NotificationResultPanel({ result }: { result: MeetingAbsenceNotificatio
       {missingRows.length > 0 ? (
         <>
           <p className="report-context">{pluralize(missingRows.length, "absent member")} missing email.</p>
+          <DataTable rows={missingRows} columns={["memberId", "firstName", "lastName", "status"]} density="compact" />
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+function DiscordNotificationResultPanel({ result }: { result: DiscordMissingMemberNotificationResult }) {
+  const recipientRows = result.recipients.map((recipient) => ({
+    memberId: recipient.memberId,
+    firstName: recipient.firstName,
+    lastName: recipient.lastName,
+    discordUserId: recipient.discordUserId,
+    mention: recipient.mention,
+    status: notificationStatusLabel(recipient.status),
+    error: recipient.error ?? ""
+  }));
+  const missingRows = result.missingDiscord.map((recipient) => ({
+    memberId: recipient.memberId,
+    firstName: recipient.firstName,
+    lastName: recipient.lastName,
+    status: "Missing Discord ID"
+  }));
+  const noticeKind = result.errorCount > 0 ? "error" : result.mode === "send" ? "success" : "info";
+
+  return (
+    <div className="notification-result">
+      <p className={`notice ${noticeKind}`}>
+        {discordNotificationSummary(result)}
+      </p>
+      {result.warnings.length > 0 ? <p className="report-context">{result.warnings.join(" ")}</p> : null}
+      {recipientRows.length > 0 ? <DataTable rows={recipientRows} columns={["memberId", "firstName", "lastName", "discordUserId", "mention", "status", "error"]} density="compact" /> : null}
+      {missingRows.length > 0 ? (
+        <>
+          <p className="report-context">{pluralize(missingRows.length, "absent member")} missing Discord user ID.</p>
           <DataTable rows={missingRows} columns={["memberId", "firstName", "lastName", "status"]} density="compact" />
         </>
       ) : null}
@@ -2689,14 +2840,22 @@ function parseRosterCsv(text: string) {
   const firstIndex = hasHeader ? findHeaderIndex(header, ["firstname", "first name", "first"]) : 1;
   const lastIndex = hasHeader ? findHeaderIndex(header, ["lastname", "last name", "last"]) : 2;
   const emailIndex = hasHeader ? header.findIndex((cell) => ["email", "user email", "google email"].includes(cell)) : -1;
+  const discordIndex = hasHeader ? header.findIndex((cell) => ["discorduserid", "discord user id", "discord_user_id", "discordid", "discord id", "discord"].includes(cell)) : -1;
 
   return dataRows.map((row, index) => {
     const memberId = row[idIndex]?.trim();
     const firstName = row[firstIndex]?.trim();
     const lastName = row[lastIndex]?.trim();
     const email = emailIndex >= 0 ? row[emailIndex]?.trim() : undefined;
+    const discordUserId = discordIndex >= 0 ? row[discordIndex]?.trim() : undefined;
     if (!memberId || !firstName || !lastName) throw new Error(`Roster row ${index + 1} must include member ID, first name, and last name`);
-    return email ? { memberId, firstName, lastName, email } : { memberId, firstName, lastName };
+    return {
+      memberId,
+      firstName,
+      lastName,
+      ...(email ? { email } : {}),
+      ...(discordUserId ? { discordUserId } : {})
+    };
   });
 }
 
@@ -2968,6 +3127,16 @@ function notificationSummary(result: MeetingAbsenceNotificationResult) {
   return `Sent ${pluralize(result.sentCount, "email")}; skipped ${pluralize(result.skippedDuplicateCount, "duplicate")}; ${pluralize(result.errorCount, "error")}.`;
 }
 
+function discordNotificationSummary(result: DiscordMissingMemberNotificationResult) {
+  const deliverableCount = result.recipients.filter((recipient) => recipient.status === "would_send").length;
+  if (result.mode === "preview") {
+    return result.providerConfigured
+      ? `${pluralize(deliverableCount, "absent member")} ready to ping; ${pluralize(result.missingDiscord.length, "missing Discord ID")}.`
+      : `${pluralize(deliverableCount, "absent member")} would be pinged; Discord webhook not configured. ${pluralize(result.missingDiscord.length, "missing Discord ID")}.`;
+  }
+  return `Pinged ${pluralize(result.sentCount, "member")}; skipped ${pluralize(result.skippedDuplicateCount, "duplicate")}; ${pluralize(result.errorCount, "error")}.`;
+}
+
 function notificationStatusLabel(status: MeetingAbsenceNotificationResult["recipients"][number]["status"]) {
   if (status === "would_send") return "Would send";
   if (status === "skipped_duplicate") return "Already sent";
@@ -3180,6 +3349,8 @@ function columnLabel(column: string) {
     check_out_at: "Time Out",
     date: "Date",
     email: "Email",
+    discordUserId: "Discord User ID",
+    discord_user_id: "Discord User ID",
     firstName: "First Name",
     first_name: "First Name",
     has_attendance: "Has Attendance",

@@ -8,7 +8,7 @@ Current production API:
 - Latest deployed Worker version: `33c96de6-761d-4fe5-8568-1335ecd2a2de`
 - D1 database: `frc-attendance`
 - D1 database ID: `c02c0ca8-033b-435f-ae21-2d8f3b203b22`
-- Applied remote migrations: `0001_initial.sql` through `0006_notification_deliveries.sql`
+- Applied remote migrations: `0001_initial.sql` through `0006_notification_deliveries.sql`; `0007_student_discord_user_id.sql` is pending until the Discord notification branch is merged and deployed.
 - Workers account subdomain: `frc-attendance.workers.dev`
 - Registered bench kiosk: `bench-01`
 
@@ -61,6 +61,7 @@ This repeatable check verifies the production Worker `/health` response, verifie
    - `EMAIL_FROM_ADDRESS`: verified Resend sender address; required with `RESEND_API_KEY` to enable actual sends.
    - `EMAIL_FROM_NAME`: optional display name, defaults to `FRC Attendance`.
    - `EMAIL_PROVIDER_URL` and `EMAIL_PROVIDER_API_KEY`: optional legacy generic HTTP provider settings retained for local experiments; prefer Resend for production.
+   - `DISCORD_MISSING_MEMBERS_WEBHOOK_URL`: optional Discord channel webhook URL for missing-member pings. Store as a Worker secret. `DISCORD_WEBHOOK_URL` is accepted as a generic fallback, but the missing-members-specific name is preferred.
 
 6. Deploy the Worker:
 
@@ -257,6 +258,28 @@ Migration `0006_notification_deliveries.sql` creates `notification_deliveries` f
 
 Member notification emails are roster metadata only. They are separate from dashboard admin emails and do not grant API or dashboard access.
 
+## Discord Missing-Member Notifications
+
+The Worker source exposes authenticated admin `POST /admin/notifications/discord/missing-members` for completed required scheduled meetings. The request body accepts `meetingDate`, optional `preview`, and optional `resend`. The dashboard Meetings detail action previews first, reports absent members with saved Discord user IDs, reports absent members missing Discord IDs, and asks for confirmation before sending.
+
+Discord delivery uses one configured channel webhook message per meeting, not a gateway bot. The message mentions only saved Discord user IDs as `<@id>` and sends Discord `allowed_mentions` with `parse: []` plus the explicit `users` list, so `@everyone`, `@here`, and accidental role/user parsing are not enabled. Optional meetings and future/in-progress meetings are rejected using the same completed-required-meeting guard as missed-meeting emails.
+
+Sending is disabled unless `DISCORD_MISSING_MEMBERS_WEBHOOK_URL` or fallback `DISCORD_WEBHOOK_URL` is configured. In disabled mode, the endpoint returns preview data and warnings without writing delivery audit rows. Successful sends use `notification_kind = 'discord_missing_members'` in `notification_deliveries`; the existing `recipient_email` compatibility column stores the Discord user ID for duplicate detection. Prior successful pings for the same meeting/member are skipped by default; `resend: true` intentionally includes them again.
+
+Discord setup:
+
+1. In Discord, create a private/team-controlled channel webhook for attendance pings and copy the webhook URL.
+2. Apply migration `0007_student_discord_user_id.sql` after the branch is merged.
+3. Configure the Worker secret without committing it:
+
+   ```powershell
+   npx.cmd wrangler secret put DISCORD_MISSING_MEMBERS_WEBHOOK_URL --config apps/api/wrangler.toml
+   ```
+
+4. Deploy the Worker and dashboard.
+5. Save Discord user IDs on member details or include an optional `discordUserId` column in roster import. Use numeric Discord user IDs, not display names.
+6. Preview one completed required meeting from the dashboard before sending. Confirm the Discord message appears in the intended channel and `notification_deliveries` rows are written with `notification_kind = 'discord_missing_members'`.
+
 ## Kiosk Provisioning
 
 1. Register a kiosk from the dashboard or by calling `POST /admin/kiosks`.
@@ -376,7 +399,7 @@ Set `FINGERPRINT_SIMULATE=true` to run without hardware. Repeated matches for th
 
 ## Roster Sync
 
-The member Google Sheet remains authoritative for active members and stable Member IDs. The API currently accepts normalized roster rows at `POST /admin/roster/sync` with `memberId`, `firstName`, `lastName`, and optional `email`; `studentId` is still accepted as a backwards-compatible input alias. The next implementation step is wiring this endpoint to a Google Sheets reader or an Apps Script push.
+The member Google Sheet remains authoritative for active members and stable Member IDs. The API currently accepts normalized roster rows at `POST /admin/roster/sync` with `memberId`, `firstName`, `lastName`, optional `email`, and optional `discordUserId`; `studentId` is still accepted as a backwards-compatible input alias. The dashboard CSV import accepts Discord aliases such as `discordUserId`, `discord_user_id`, `discordId`, and `discord`. The next implementation step is wiring this endpoint to a Google Sheets reader or an Apps Script push.
 
 The API and dashboard expose member-facing roster/report fields as `memberId`. Existing D1 and kiosk SQLite tables/columns named `students` and `student_id` remain compatibility storage names and should not be migrated casually.
 

@@ -370,6 +370,161 @@ describe("member attendance report notifications", () => {
   });
 });
 
+describe("Discord missing-member notifications", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("previews absent active members with Discord IDs and missing Discord feedback", async () => {
+    const env = createTestEnv();
+    insertStudent(env, "100001", "Present", "Member", "present@example.org", 1, "111111111111111111");
+    insertStudent(env, "100002", "Absent", "Linked", "linked@example.org", 1, "222222222222222222");
+    insertStudent(env, "100003", "Absent", "Missing", null);
+    insertStudent(env, "999999", "Inactive", "Linked", "inactive@example.org", 0, "999999999999999999");
+    insertMeeting(env, "2026-01-02", 1, "Required Build");
+    insertSession(env, "100001", "2026-01-02");
+
+    const response = await request(env, "/admin/notifications/discord/missing-members", {
+      meetingDate: "2026-01-02",
+      preview: true
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      meetingDate: "2026-01-02",
+      title: "Required Build",
+      notificationKind: "discord_missing_members",
+      providerConfigured: false,
+      mode: "preview",
+      sentCount: 0,
+      skippedDuplicateCount: 0,
+      errorCount: 0,
+      recipients: [{
+        memberId: "100002",
+        firstName: "Absent",
+        lastName: "Linked",
+        discordUserId: "222222222222222222",
+        mention: "<@222222222222222222>",
+        status: "would_send"
+      }],
+      missingDiscord: [{
+        memberId: "100003",
+        firstName: "Absent",
+        lastName: "Missing",
+        status: "missing_discord"
+      }]
+    });
+    expect(countRows(env, "notification_deliveries")).toBe(0);
+  });
+
+  it("sends one Discord webhook with explicit allowed mentions and skips prior pings", async () => {
+    const env = createTestEnv({
+      DISCORD_MISSING_MEMBERS_WEBHOOK_URL: "https://discord.test/webhook"
+    });
+    insertStudent(env, "100001", "Present", "Member", "present@example.org", 1, "111111111111111111");
+    insertStudent(env, "100002", "Already", "Pinged", "already@example.org", 1, "222222222222222222");
+    insertStudent(env, "100003", "Needs", "Ping", "needs@example.org", 1, "333333333333333333");
+    insertMeeting(env, "2026-01-02", 1, "Required Build");
+    insertSession(env, "100001", "2026-01-02");
+    insertDelivery(env, "100002", "222222222222222222", "sent", "discord_missing_members");
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await request(env, "/admin/notifications/discord/missing-members", {
+      meetingDate: "2026-01-02"
+    });
+
+    expect(response.status).toBe(200);
+    const body = await response.json() as {
+      recipients: Array<{ memberId: string; discordUserId: string; status: string }>;
+    };
+    expect(body).toMatchObject({
+      providerConfigured: true,
+      mode: "send",
+      sentCount: 1,
+      skippedDuplicateCount: 1
+    });
+    expect(body.recipients).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        memberId: "100002",
+        discordUserId: "222222222222222222",
+        status: "skipped_duplicate"
+      }),
+      expect.objectContaining({
+        memberId: "100003",
+        discordUserId: "333333333333333333",
+        status: "sent"
+      })
+    ]));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith("https://discord.test/webhook", expect.objectContaining({
+      method: "POST",
+      headers: expect.objectContaining({
+        "content-type": "application/json"
+      })
+    }));
+    const webhookBody = fetchJsonBody(fetchMock);
+    expect(webhookBody).toEqual({
+      content: [
+        "Missing from Required Build on 2026-01-02:",
+        "<@333333333333333333>",
+        "",
+        "If you were present, reply so a mentor can correct attendance."
+      ].join("\n"),
+      allowed_mentions: {
+        parse: [],
+        users: ["333333333333333333"]
+      }
+    });
+    expect(sentDeliveryEmails(env)).toEqual(["222222222222222222", "333333333333333333"]);
+  });
+
+  it("stays preview-only when the Discord webhook is not configured", async () => {
+    const env = createTestEnv();
+    insertStudent(env, "100001", "Absent", "Member", "absent@example.org", 1, "111111111111111111");
+    insertMeeting(env, "2026-01-02", 1, "Required Build");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await request(env, "/admin/notifications/discord/missing-members", {
+      meetingDate: "2026-01-02"
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      providerConfigured: false,
+      mode: "preview",
+      recipients: [{
+        memberId: "100001",
+        status: "would_send"
+      }]
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(countRows(env, "notification_deliveries")).toBe(0);
+  });
+
+  it("rejects optional and future meetings for Discord pings", async () => {
+    const env = createTestEnv({
+      DISCORD_MISSING_MEMBERS_WEBHOOK_URL: "https://discord.test/webhook"
+    });
+    insertStudent(env, "100001", "Absent", "Member", "absent@example.org", 1, "111111111111111111");
+    insertMeeting(env, "2026-01-02", 0, "Optional Demo");
+    insertMeeting(env, "2099-01-02", 1, "Future Build", "2099-01-02T20:00:00.000Z", "2099-01-02T22:00:00.000Z");
+
+    const optionalResponse = await request(env, "/admin/notifications/discord/missing-members", {
+      meetingDate: "2026-01-02"
+    });
+    const futureResponse = await request(env, "/admin/notifications/discord/missing-members", {
+      meetingDate: "2099-01-02"
+    });
+
+    expect(optionalResponse.status).toBe(400);
+    expect(await optionalResponse.json()).toEqual({ error: "Only required meetings can send Discord missing-member pings" });
+    expect(futureResponse.status).toBe(400);
+    expect(await futureResponse.json()).toEqual({ error: "Meeting must be completed before Discord missing-member pings can be sent" });
+  });
+});
+
 function createTestEnv(overrides: Partial<Env> = {}): Env {
   const sqlite = new Database(":memory:");
   sqlite.exec(`
@@ -385,6 +540,7 @@ function createTestEnv(overrides: Partial<Env> = {}): Env {
       first_name TEXT NOT NULL,
       last_name TEXT NOT NULL,
       email TEXT,
+      discord_user_id TEXT,
       active INTEGER NOT NULL DEFAULT 1
     );
 
@@ -449,9 +605,9 @@ function request(env: Env, path: string, body: unknown) {
   }), env);
 }
 
-function insertStudent(env: Env, memberId: string, firstName: string, lastName: string, email: string | null, active = 1) {
-  return env.DB.prepare("INSERT INTO students (student_id, first_name, last_name, email, active) VALUES (?, ?, ?, ?, ?)")
-    .bind(memberId, firstName, lastName, email, active)
+function insertStudent(env: Env, memberId: string, firstName: string, lastName: string, email: string | null, active = 1, discordUserId: string | null = null) {
+  return env.DB.prepare("INSERT INTO students (student_id, first_name, last_name, email, discord_user_id, active) VALUES (?, ?, ?, ?, ?, ?)")
+    .bind(memberId, firstName, lastName, email, discordUserId, active)
     .run();
 }
 

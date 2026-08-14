@@ -6,9 +6,9 @@ import { buildLegacySheetExport } from "./export";
 import { errorResponse, json, noContent, optionsResponse, readJson } from "./http";
 import { claimPendingKioskCommands, completeKioskCommand, createKioskCommand, listRecentKioskCommands, requireKioskCommandAction } from "./kioskCommands";
 import { bulkDeleteScheduledMeetings, convertUnscheduledAttendanceToMeeting, createScheduledMeeting, deleteScheduledMeeting, listScheduledMeetings, updateScheduledMeeting, type BulkScheduledMeetingDeleteInput, type ScheduledMeetingInput } from "./meetings";
-import { sendMeetingAbsenceNotifications, sendMemberAttendanceReportNotification, type MeetingAbsenceNotificationInput, type MemberAttendanceReportNotificationInput } from "./notifications";
+import { sendDiscordMissingMemberNotifications, sendMeetingAbsenceNotifications, sendMemberAttendanceReportNotification, type DiscordMissingMemberNotificationInput, type MeetingAbsenceNotificationInput, type MemberAttendanceReportNotificationInput } from "./notifications";
 import { buildAttendanceSessionReport, buildMeetingAbsenceReport, buildMeetingSummaryReport, buildMemberAttendanceReport, buildPresenceReport, buildRosterAttendanceSummary, reportDateRangeFromSearchParams } from "./reports";
-import { deactivateMember, hardDeleteMember, listActiveRoster, listRosterMembers, reactivateMember, syncRoster, updateStudentEmail, type RosterMemberInput } from "./roster";
+import { deactivateMember, hardDeleteMember, listActiveRoster, listRosterMembers, reactivateMember, syncRoster, updateStudentDiscordUserId, updateStudentEmail, type RosterMemberInput } from "./roster";
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -91,6 +91,15 @@ export default {
         if (!memberId) throw Object.assign(new Error("Member id is required"), { status: 400 });
         const body = await readJson<{ email?: string | null }>(request);
         return json(await updateStudentEmail(env, decodeURIComponent(memberId), body.email ?? null));
+      }
+
+      const adminMemberDiscord = url.pathname.match(/^\/admin\/(?:members|students)\/([^/]+)\/discord$/);
+      if (request.method === "PUT" && adminMemberDiscord) {
+        await requireAdmin(request, env);
+        const memberId = adminMemberDiscord[1];
+        if (!memberId) throw Object.assign(new Error("Member id is required"), { status: 400 });
+        const body = await readJson<{ discordUserId?: string | null; discord_user_id?: string | null }>(request);
+        return json(await updateStudentDiscordUserId(env, decodeURIComponent(memberId), body.discordUserId ?? body.discord_user_id ?? null));
       }
 
       const adminMemberDeactivate = url.pathname.match(/^\/admin\/(?:members|students)\/([^/]+)\/deactivate$/);
@@ -227,6 +236,12 @@ export default {
         return json(await sendMemberAttendanceReportNotification(env, body));
       }
 
+      if (route === "POST /admin/notifications/discord/missing-members") {
+        await requireAdmin(request, env);
+        const body = await readJson<DiscordMissingMemberNotificationInput>(request);
+        return json(await sendDiscordMissingMemberNotifications(env, body));
+      }
+
       if (route === "GET /admin/events") {
         await requireAdmin(request, env);
         const rows = await env.DB.prepare(
@@ -322,6 +337,7 @@ function memberToLegacyStudent(member: {
   firstName: string;
   lastName: string;
   email?: string | null;
+  discordUserId?: string | null;
   active: boolean;
   rosterSyncedAt?: string | null;
 }) {
@@ -330,6 +346,7 @@ function memberToLegacyStudent(member: {
     first_name: member.firstName,
     last_name: member.lastName,
     email: member.email ?? null,
+    discord_user_id: member.discordUserId ?? null,
     active: member.active,
     roster_synced_at: member.rosterSyncedAt ?? null
   };
