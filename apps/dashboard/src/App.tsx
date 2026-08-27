@@ -1,6 +1,7 @@
 import { FormEvent, Fragment, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { apiBaseUrl, apiDelete, apiGet, apiPost, apiPut, type DashboardSession } from "./api";
+import { formatDateTime, formatTime, localTimeInputValue } from "./timeFormat";
 import "./styles.css";
 
 type Tab = "overview" | "roster" | "admins" | "meetings" | "kiosks" | "events" | "reports" | "export";
@@ -2959,15 +2960,6 @@ function localDateInputValue(date = new Date()) {
   return `${year}-${month}-${day}`;
 }
 
-function localTimeInputValue(value?: string) {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  const hours = String(date.getHours()).padStart(2, "0");
-  const minutes = String(date.getMinutes()).padStart(2, "0");
-  return `${hours}:${minutes}`;
-}
-
 function formatPercent(value: number | null) {
   return value === null ? "N/A" : `${Math.round(value * 100)}%`;
 }
@@ -3384,16 +3376,6 @@ function commandTimestamp(command: KioskCommandRow) {
   return `Queued ${formatDateTime(command.requestedAt)}`;
 }
 
-function formatDateTime(value?: string) {
-  if (!value) return "";
-  return new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit"
-  }).format(new Date(value));
-}
-
 function formatTableCell(column: string, value: unknown) {
   if (value === null || value === undefined || value === "") return "";
   if (typeof value !== "string") return String(value);
@@ -3402,15 +3384,6 @@ function formatTableCell(column: string, value: unknown) {
   }
   if (column === "lastSeenAt" || column === "occurredAt" || column === "occurred_at") return formatDateTime(value);
   return value;
-}
-
-function formatTime(value?: string) {
-  if (!value) return "";
-  const normalizedValue = /^\d{4}-\d{2}-\d{2}\+/.test(value) ? value.replace("+", "T") : value;
-  return new Intl.DateTimeFormat(undefined, {
-    hour: "numeric",
-    minute: "2-digit"
-  }).format(new Date(normalizedValue));
 }
 
 function kioskHealthStatus(kiosk: KioskRow): KioskHealthStatus {
