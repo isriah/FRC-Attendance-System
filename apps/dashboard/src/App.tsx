@@ -2835,7 +2835,7 @@ function DataTable({ rows, columns, density = "regular" }: { rows: Array<Record<
         <thead><tr>{columns.map((column) => <th key={column}>{columnLabel(column)}</th>)}</tr></thead>
         <tbody>
           {rows.map((row, index) => (
-            <tr key={index}>{columns.map((column) => <td key={column}>{String(row[column] ?? "")}</td>)}</tr>
+            <tr key={index}>{columns.map((column) => <td key={column}>{formatTableCell(column, row[column])}</td>)}</tr>
           ))}
         </tbody>
       </table>
@@ -3392,6 +3392,16 @@ function formatDateTime(value?: string) {
     hour: "numeric",
     minute: "2-digit"
   }).format(new Date(value));
+}
+
+function formatTableCell(column: string, value: unknown) {
+  if (value === null || value === undefined || value === "") return "";
+  if (typeof value !== "string") return String(value);
+  if (column === "checkInAt" || column === "checkOutAt" || column === "check_in_at" || column === "check_out_at") {
+    return formatTime(value);
+  }
+  if (column === "occurredAt" || column === "occurred_at") return formatDateTime(value);
+  return value;
 }
 
 function formatTime(value?: string) {
