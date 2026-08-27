@@ -16,7 +16,7 @@ Current production dashboard:
 
 - Cloudflare Pages project: `frc-attendance-dashboard`
 - Pages URL: `https://frc-attendance-dashboard.pages.dev`
-- Latest verified deployment: `https://05020763.frc-attendance-dashboard.pages.dev`
+- Latest verified deployment: `https://314abc98.frc-attendance-dashboard.pages.dev`
 - API base URL baked into the uploaded Vite build: `https://frc-attendance-api.frc-attendance.workers.dev`
 - Google OAuth client ID baked into the uploaded Vite build: `180849199739-v04bktp7rfmimgjpvohmq7pinrrpr337.apps.googleusercontent.com`
 
@@ -213,6 +213,8 @@ Worker version `e72a04d8-be30-45e2-b4b6-c71970b22fc5` configures production `DIS
 Deployment `https://206a28c9.frc-attendance-dashboard.pages.dev` and Worker version `abfe2271-ebc5-4014-a007-3d07cf6eb994` add a safe Discord webhook debug test route and dashboard Overview action. The authenticated admin route is `POST /admin/notifications/discord/test`; it sends a harmless test payload with `allowed_mentions` disabled and does not read or mutate meeting, attendance, member, or notification audit data. Production Worker health, CORS preflight, dashboard serving, and unauthenticated route rejection passed on 2026-08-14. The repeatable Node smoke script failed at Worker health with `fetch failed` from this workstation, matching the known Windows network path issue; equivalent `curl.exe -4` smoke checks passed. Pi smoke was skipped because the task did not change Pi services and the bench Pi was previously unreachable by hostname. No real Discord debug message was sent because no production admin Google ID token/session was available in the terminal smoke context.
 
 Deployment `https://05020763.frc-attendance-dashboard.pages.dev` formats dashboard table timestamp display cells without changing API payloads or export data: Daily Presence and attendance audit `Time In`/`Time Out` columns render local `HH:MM AM/PM`, and Events `Occurred At` renders local date plus time. Production Worker health, Pages serving, baked dashboard config, CORS preflight, unauthenticated route rejection, and authenticated Reports/Events UI smoke passed on 2026-08-26. Authenticated smoke confirmed Reports counts for `2026-08-26` remained 48 present, 13 absent, and 4 open check-ins.
+
+Deployment `https://314abc98.frc-attendance-dashboard.pages.dev` polishes report table display formatting without changing API or export payload semantics: Meeting Attendance uses dashboard column labels such as `Open Check-Ins`, and Roster Attendance `Last Seen` renders as local date/time text. Dashboard typecheck/build, root typecheck/build, production-env dashboard build, Pages serving, baked dashboard config, Worker health, and authenticated Reports UI smoke passed on 2026-08-27. Authenticated smoke confirmed Reports counts for `2026-08-26` remained 48 present, 13 absent, and 4 open check-ins, with 61 roster rows.
 
 The dashboard login UI follows the same boundary: when `VITE_GOOGLE_CLIENT_ID` is configured, it shows Google sign-in and a production notice that email-only local login is disabled. The email-only form is rendered only for local development builds with no Google client ID.
 
