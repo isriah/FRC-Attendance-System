@@ -16,7 +16,7 @@ Current production dashboard:
 
 - Cloudflare Pages project: `frc-attendance-dashboard`
 - Pages URL: `https://frc-attendance-dashboard.pages.dev`
-- Latest verified deployment: `https://314abc98.frc-attendance-dashboard.pages.dev`
+- Latest verified deployment: `https://242b08af.frc-attendance-dashboard.pages.dev`
 - API base URL baked into the uploaded Vite build: `https://frc-attendance-api.frc-attendance.workers.dev`
 - Google OAuth client ID baked into the uploaded Vite build: `180849199739-v04bktp7rfmimgjpvohmq7pinrrpr337.apps.googleusercontent.com`
 
@@ -215,6 +215,8 @@ Deployment `https://206a28c9.frc-attendance-dashboard.pages.dev` and Worker vers
 Deployment `https://05020763.frc-attendance-dashboard.pages.dev` formats dashboard table timestamp display cells without changing API payloads or export data: Daily Presence and attendance audit `Time In`/`Time Out` columns render local `HH:MM AM/PM`, and Events `Occurred At` renders local date plus time. Production Worker health, Pages serving, baked dashboard config, CORS preflight, unauthenticated route rejection, and authenticated Reports/Events UI smoke passed on 2026-08-26. Authenticated smoke confirmed Reports counts for `2026-08-26` remained 48 present, 13 absent, and 4 open check-ins.
 
 Deployment `https://314abc98.frc-attendance-dashboard.pages.dev` polishes report table display formatting without changing API or export payload semantics: Meeting Attendance uses dashboard column labels such as `Open Check-Ins`, and Roster Attendance `Last Seen` renders as local date/time text. Dashboard typecheck/build, root typecheck/build, production-env dashboard build, Pages serving, baked dashboard config, Worker health, and authenticated Reports UI smoke passed on 2026-08-27. Authenticated smoke confirmed Reports counts for `2026-08-26` remained 48 present, 13 absent, and 4 open check-ins, with 61 roster rows.
+
+Deployment `https://242b08af.frc-attendance-dashboard.pages.dev` hardens dashboard time formatting so legacy time-only values like `15:00` and legacy date-plus-time values like `2026-08-26+15:00:00` no longer throw during route rendering. No Worker change or D1 migration was required. Focused time-format tests, dashboard typecheck/build, root typecheck/build, root build, production-env dashboard build, immutable Pages serving, baked dashboard config, and authenticated production UI smoke passed on 2026-08-27. Authenticated smoke confirmed the Meetings page rendered the `2026-08-26` meeting with 48 present, 13 absent, and 4 open check-ins, and Reports/Events still loaded with no fresh route-fatal console errors.
 
 The dashboard login UI follows the same boundary: when `VITE_GOOGLE_CLIENT_ID` is configured, it shows Google sign-in and a production notice that email-only local login is disabled. The email-only form is rendered only for local development builds with no Google client ID.
 
