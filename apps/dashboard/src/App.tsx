@@ -2755,7 +2755,7 @@ function MeetingAttendanceTable({
       <table>
         <thead>
           <tr>
-            {["date", "title", "attendance", "time", "scheduled", "present", "absent", "openCheckIns", "note", "actions"].map((column) => <th key={column}>{column}</th>)}
+            {["date", "title", "attendance", "time", "scheduled", "present", "absent", "openCheckIns", "note", "actions"].map((column) => <th key={column}>{columnLabel(column)}</th>)}
           </tr>
         </thead>
         <tbody>
@@ -3400,7 +3400,7 @@ function formatTableCell(column: string, value: unknown) {
   if (column === "checkInAt" || column === "checkOutAt" || column === "check_in_at" || column === "check_out_at") {
     return formatTime(value);
   }
-  if (column === "occurredAt" || column === "occurred_at") return formatDateTime(value);
+  if (column === "lastSeenAt" || column === "occurredAt" || column === "occurred_at") return formatDateTime(value);
   return value;
 }
 
