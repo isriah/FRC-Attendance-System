@@ -178,7 +178,8 @@ describe("report builders", () => {
         attendanceRate: 0,
         lastSeenAt: undefined,
         openSessionDates: [],
-        openSessionWarning: false
+        openSessionWarning: false,
+        attendanceRequiredFromDate: null
       },
       {
         memberId: "100001",
@@ -190,7 +191,8 @@ describe("report builders", () => {
         attendanceRate: 1,
         lastSeenAt: "2026-01-02T20:05:00.000Z",
         openSessionDates: [],
-        openSessionWarning: false
+        openSessionWarning: false,
+        attendanceRequiredFromDate: null
       }
     ]);
   });
@@ -465,7 +467,9 @@ describe("report builders", () => {
       startsAt: undefined,
       endsAt: undefined,
       absentCount: 1,
-      rows: [{ memberId: "100002", firstName: "Drive", lastName: "Captain" }]
+      notRequiredCount: 0,
+      rows: [{ memberId: "100002", firstName: "Drive", lastName: "Captain" }],
+      notRequiredRows: []
     });
   });
 
@@ -494,11 +498,13 @@ describe("report builders", () => {
       startsAt: "2026-01-02T20:00:00.000Z",
       endsAt: "2026-01-02T23:00:00.000Z",
       absentCount: 3,
+      notRequiredCount: 0,
       rows: [
         { memberId: "100002", firstName: "Alex", lastName: "Anderson" },
         { memberId: "100003", firstName: "Maya", lastName: "Anderson" },
         { memberId: "100001", firstName: "Zoe", lastName: "Zephyr" }
-      ]
+      ],
+      notRequiredRows: []
     });
   });
 
@@ -558,9 +564,56 @@ describe("report builders", () => {
         attendanceRate: 0,
         lastSeenAt: "2026-01-04T20:00:00.000Z",
         openSessionDates: [],
-        openSessionWarning: false
+        openSessionWarning: false,
+        attendanceRequiredFromDate: null
       }
     ]);
+  });
+
+  it("treats required meetings before a member's attendance start date as not required", async () => {
+    const env = createTestEnv();
+    insertStudent(env, "100001", "Present", "Member", 1, "2026-01-01");
+    insertStudent(env, "100002", "New", "Member", 1, "2026-01-09");
+    insertMeeting(env, "2026-01-02", 1, "Before Join");
+    insertMeeting(env, "2026-01-09", 1, "Join Day");
+    insertSession(env, "100001", "2026-01-02", "2026-01-02T20:00:00.000Z", null, "open");
+    insertSession(env, "100001", "2026-01-09", "2026-01-09T20:00:00.000Z", null, "open");
+
+    const absence = await buildMeetingAbsenceReport(env, "2026-01-02");
+    const newMemberReport = await buildMemberAttendanceReport(env, "100002");
+    const rosterSummary = await buildRosterAttendanceSummary(env);
+    const meetingSummary = await buildMeetingSummaryReport(env);
+
+    expect(absence).toMatchObject({
+      absentCount: 0,
+      notRequiredCount: 1,
+      rows: [],
+      notRequiredRows: [{
+        memberId: "100002",
+        attendanceRequiredFromDate: "2026-01-09",
+        reason: "before_attendance_required_from_date"
+      }]
+    });
+    expect(newMemberReport).toMatchObject({
+      totalMeetings: 1,
+      presentMeetings: 0,
+      missedMeetings: 1,
+      absentDates: ["2026-01-09"],
+      attendanceRequiredFromDate: "2026-01-09"
+    });
+    expect(rosterSummary.find((row) => row.memberId === "100002")).toMatchObject({
+      requiredMeetings: 1,
+      missedMeetings: 1,
+      attendanceRequiredFromDate: "2026-01-09"
+    });
+    expect(meetingSummary.find((row) => row.meetingDate === "2026-01-02")).toMatchObject({
+      presentCount: 1,
+      activePresentCount: 1,
+      absentCount: 0
+    });
+    expect(meetingSummary.find((row) => row.meetingDate === "2026-01-09")).toMatchObject({
+      absentCount: 1
+    });
   });
 
   it("filters member attendance and roster summary by report date range", async () => {
@@ -600,7 +653,8 @@ describe("report builders", () => {
         attendanceRate: 0.5,
         lastSeenAt: "2026-01-16T20:00:00.000Z",
         openSessionDates: ["2026-01-16"],
-        openSessionWarning: true
+        openSessionWarning: true,
+        attendanceRequiredFromDate: null
       },
       {
         memberId: "100001",
@@ -612,7 +666,8 @@ describe("report builders", () => {
         attendanceRate: 0.5,
         lastSeenAt: "2026-01-09T20:00:00.000Z",
         openSessionDates: [],
-        openSessionWarning: false
+        openSessionWarning: false,
+        attendanceRequiredFromDate: null
       }
     ]);
   });
@@ -695,6 +750,7 @@ function createTestEnv(): Env {
       first_name TEXT NOT NULL,
       last_name TEXT NOT NULL,
       active INTEGER NOT NULL DEFAULT 1
+      , attendance_required_from_date TEXT
     );
 
     CREATE TABLE attendance_sessions (
@@ -727,9 +783,9 @@ function createTestEnv(): Env {
   } as unknown as Env;
 }
 
-function insertStudent(env: Env, memberId: string, firstName: string, lastName: string, active = 1) {
-  return env.DB.prepare("INSERT INTO students (student_id, first_name, last_name, active) VALUES (?, ?, ?, ?)")
-    .bind(memberId, firstName, lastName, active)
+function insertStudent(env: Env, memberId: string, firstName: string, lastName: string, active = 1, attendanceRequiredFromDate: string | null = null) {
+  return env.DB.prepare("INSERT INTO students (student_id, first_name, last_name, active, attendance_required_from_date) VALUES (?, ?, ?, ?, ?)")
+    .bind(memberId, firstName, lastName, active, attendanceRequiredFromDate)
     .run();
 }
 

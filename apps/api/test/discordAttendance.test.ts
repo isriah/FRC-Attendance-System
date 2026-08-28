@@ -538,7 +538,8 @@ function createTestEnv(overrides: Partial<Env> = {}): Env {
       first_name TEXT NOT NULL,
       last_name TEXT NOT NULL,
       discord_user_id TEXT,
-      active INTEGER NOT NULL DEFAULT 1
+      active INTEGER NOT NULL DEFAULT 1,
+      attendance_required_from_date TEXT
     );
     CREATE TABLE attendance_sessions (
       id TEXT PRIMARY KEY,

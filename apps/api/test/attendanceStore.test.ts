@@ -768,7 +768,8 @@ function createTestEnv(overrides: Partial<Env> = {}): Env {
       last_name TEXT NOT NULL,
       active INTEGER NOT NULL DEFAULT 1,
       roster_synced_at TEXT,
-      roster_hash TEXT
+      roster_hash TEXT,
+      attendance_required_from_date TEXT
     );
 
     CREATE TABLE scan_events (

@@ -2493,6 +2493,7 @@ function MeetingDetails({
     checkOutAt: typeof row.checkOutAt === "string" ? formatTime(row.checkOutAt) : row.checkOutAt
   }));
   const absentRows = absences?.rows ?? [];
+  const notRequiredRows = absences?.notRequiredRows ?? [];
   const presentStateText = presence
     ? meetingPresentRows.length === 0
       ? "No members have checked in for this meeting yet."
@@ -2503,7 +2504,9 @@ function MeetingDetails({
     : required
     ? absences
       ? absentRows.length === 0
-        ? "No active members are absent for this required meeting."
+        ? notRequiredRows.length > 0
+          ? `No active members are absent; ${pluralize(notRequiredRows.length, "member")} not required because their attendance start date is later.`
+          : "No active members are absent for this required meeting."
         : `${pluralize(absentRows.length, "active member")} absent from this required meeting.`
       : "Loading absent members..."
     : "Optional meetings do not create missed-attendance records.";
@@ -2538,7 +2541,7 @@ function MeetingDetails({
         {attendanceOnly
           ? "Attendance exists for this date, but no scheduled meeting label has been created yet."
           : required
-          ? "Required meetings count active members who were not present as absent."
+          ? "Required meetings count active members only on or after each member's attendance start date."
           : "Optional meetings show who attended, but do not create missed-meeting counts."}
       </p>
       <div className="grid compact-grid">
@@ -2596,6 +2599,16 @@ function MeetingDetails({
           ) : (
             <p className="notice info">Track attendance here as present-only participation; use required meetings for absence accountability.</p>
           )}
+          {!attendanceOnly && required && notRequiredRows.length > 0 ? (
+            <>
+              <div className="meeting-detail-subheading">
+                <h3>Not Required</h3>
+                <span>{notRequiredRows.length}</span>
+              </div>
+              <p className="empty-state">These members were added after this meeting date, so this meeting is excused for them.</p>
+              <DataTable rows={notRequiredRows} columns={["memberId", "firstName", "lastName", "attendanceRequiredFromDate"]} density="compact" onOpenMember={onOpenMember} />
+            </>
+          ) : null}
         </div>
       </div>
     </div>
@@ -3005,7 +3018,7 @@ function Reports({ session, onOpenMember }: { session: DashboardSession; onOpenM
             Show unscheduled attendance
           </label>
         </div>
-        <p className="report-context">Required meetings count missed active members. Optional meetings show attendance without missed counts. Scheduled rows marked zero scans had no check-ins or manual corrections.</p>
+        <p className="report-context">Required meetings count missed active members after each member's attendance start date. Optional meetings show attendance without missed counts. Scheduled rows marked zero scans had no check-ins or manual corrections.</p>
         {attendanceActionMessage ? <p className={`notice ${attendanceActionMessage.kind}`}>{attendanceActionMessage.text}</p> : null}
         <div className="grid compact-grid">
           <Metric label="Required Meetings" value={meetingRows.filter((meeting) => meeting.required).length} />
@@ -3040,13 +3053,20 @@ function Reports({ session, onOpenMember }: { session: DashboardSession; onOpenM
         <p className="report-context">
           {absences
             ? absences.required
-              ? `${absences.absentCount} active ${absences.absentCount === 1 ? "member missed" : "members missed"} ${absences.title ?? absences.meetingDate}.`
+              ? `${absences.absentCount} active ${absences.absentCount === 1 ? "member missed" : "members missed"} ${absences.title ?? absences.meetingDate}; ${absences.notRequiredCount ?? 0} not required.`
               : "Optional meetings do not create missed-meeting rows."
             : "Pick a meeting to see the active members who missed it."}
         </p>
         {absencesError ? <p className="error">{absencesError}</p> : null}
         {absenceNotificationResult?.meetingDate === absenceDate ? <NotificationResultPanel result={absenceNotificationResult} onOpenMember={onOpenMember} /> : null}
         <DataTable rows={absences?.rows ?? []} columns={["memberId", "firstName", "lastName"]} onOpenMember={onOpenMember} />
+        {(absences?.notRequiredRows?.length ?? 0) > 0 ? (
+          <>
+            <h3>Not Required</h3>
+            <p className="report-context">Members added after this meeting date are excused from this required meeting.</p>
+            <DataTable rows={absences?.notRequiredRows ?? []} columns={["memberId", "firstName", "lastName", "attendanceRequiredFromDate"]} onOpenMember={onOpenMember} />
+          </>
+        ) : null}
       </section>
 
       <section>
@@ -3095,16 +3115,17 @@ function Reports({ session, onOpenMember }: { session: DashboardSession; onOpenM
               <Metric label="Required Missed" value={memberReport.missedMeetings} />
             </div>
             <h3><button type="button" className="link-button member-name-link" onClick={() => onOpenMember(memberReport.memberId)}>{memberReport.firstName} {memberReport.lastName}</button></h3>
-            <p className="report-context">Optional meetings are excluded from this attendance rate and missed-meeting count. The range filter above applies here too.</p>
+            <p className="report-context">Optional meetings and required meetings before this member's attendance start date are excluded from this attendance rate and missed-meeting count. The range filter above applies here too.</p>
             <DataTable
               rows={[{
                 requiredMeetings: memberReport.totalMeetings,
+                attendanceRequiredFromDate: memberReport.attendanceRequiredFromDate ?? "",
                 lastSeenAt: memberReport.lastSeenAt ?? "",
                 presentDates: memberReport.presentDates.join(", "),
                 absentDates: memberReport.absentDates.join(", "),
                 openSessionDates: memberReport.openSessionDates.join(", ")
               }]}
-              columns={["requiredMeetings", "lastSeenAt", "presentDates", "absentDates", "openSessionDates"]}
+              columns={["requiredMeetings", "attendanceRequiredFromDate", "lastSeenAt", "presentDates", "absentDates", "openSessionDates"]}
             />
           </>
         ) : null}
@@ -3123,10 +3144,11 @@ function Reports({ session, onOpenMember }: { session: DashboardSession; onOpenM
             present: member.presentMeetings,
             missed: member.missedMeetings,
             attendance: formatPercent(member.attendanceRate),
+            attendanceRequiredFromDate: member.attendanceRequiredFromDate ?? "",
             lastSeenAt: member.lastSeenAt ?? "",
             openCheckIns: member.openSessionWarning ? member.openSessionDates.join(", ") : ""
           }))}
-          columns={["memberId", "firstName", "lastName", "requiredMeetings", "present", "missed", "attendance", "lastSeenAt", "openCheckIns"]}
+          columns={["memberId", "firstName", "lastName", "requiredMeetings", "present", "missed", "attendance", "attendanceRequiredFromDate", "lastSeenAt", "openCheckIns"]}
           onOpenMember={onOpenMember}
         />
       </section>
@@ -3761,7 +3783,9 @@ interface MeetingAbsenceReport {
   startsAt?: string;
   endsAt?: string;
   absentCount: number;
+  notRequiredCount: number;
   rows: Array<Record<string, unknown>>;
+  notRequiredRows: Array<Record<string, unknown>>;
 }
 
 interface MemberAttendanceReport {
@@ -3778,6 +3802,7 @@ interface MemberAttendanceReport {
   presentDates: string[];
   absentDates: string[];
   openSessionDates: string[];
+  attendanceRequiredFromDate: string | null;
 }
 
 interface RosterAttendanceSummaryRow {
@@ -3791,6 +3816,7 @@ interface RosterAttendanceSummaryRow {
   lastSeenAt?: string;
   openSessionDates: string[];
   openSessionWarning: boolean;
+  attendanceRequiredFromDate: string | null;
 }
 
 function reportRangeQuery(startDate: string, endDate: string, includeUnscheduled = false) {
@@ -3883,6 +3909,7 @@ function columnLabel(column: string) {
     absentDates: "Absent Dates",
     attendance: "Attendance",
     attendanceRate: "Attendance",
+    attendanceRequiredFromDate: "Required From",
     checkInAt: "Time In",
     checkOutAt: "Time Out",
     check_in_at: "Time In",

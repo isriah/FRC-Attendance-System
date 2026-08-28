@@ -426,6 +426,7 @@ function memberToLegacyStudent(member: {
   discordUserId?: string | null;
   active: boolean;
   rosterSyncedAt?: string | null;
+  attendanceRequiredFromDate?: string | null;
 }) {
   return {
     student_id: member.memberId,
@@ -434,6 +435,7 @@ function memberToLegacyStudent(member: {
     email: member.email ?? null,
     discord_user_id: member.discordUserId ?? null,
     active: member.active,
-    roster_synced_at: member.rosterSyncedAt ?? null
+    roster_synced_at: member.rosterSyncedAt ?? null,
+    attendance_required_from_date: member.attendanceRequiredFromDate ?? null
   };
 }

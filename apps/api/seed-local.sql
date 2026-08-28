@@ -1,5 +1,5 @@
-INSERT INTO students (student_id, first_name, last_name, active, roster_hash, roster_synced_at)
-VALUES ('100001', 'Bench', 'Member', 1, 'bench-seed', CURRENT_TIMESTAMP)
+INSERT INTO students (student_id, first_name, last_name, active, roster_hash, roster_synced_at, attendance_required_from_date)
+VALUES ('100001', 'Bench', 'Member', 1, 'bench-seed', CURRENT_TIMESTAMP, date('now', 'localtime'))
 ON CONFLICT(student_id) DO UPDATE SET
   first_name = excluded.first_name,
   last_name = excluded.last_name,

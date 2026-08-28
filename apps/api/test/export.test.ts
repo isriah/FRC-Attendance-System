@@ -66,6 +66,26 @@ describe("legacy export", () => {
       ["100001", "Bench", "Student", 1, 1, 0, 1, "1/9/2026", "open check-in"]
     ]);
   });
+
+  it("excludes pre-roster not-required members from absence and roster-required counts", async () => {
+    const env = createTestEnv();
+    insertStudent(env, "100001", "Before", "Member", 1, "2026-01-01");
+    insertStudent(env, "100002", "New", "Member", 1, "2026-01-09");
+    insertMeeting(env, "2026-01-02", "Before Join", 1);
+    insertMeeting(env, "2026-01-09", "Join Day", 1);
+    insertSession(env, "100001", "2026-01-02", "2026-01-02T20:00:00.000Z", null, "open");
+    insertSession(env, "100001", "2026-01-09", "2026-01-09T20:00:00.000Z", null, "open");
+
+    const result = await buildLegacySheetExport(env);
+
+    expect(result.ranges.MeetingAbsences).toEqual([
+      ["1/9/2026", "Join Day", "100002", "New", "Member"]
+    ]);
+    expect(result.ranges.RosterAttendance).toEqual([
+      ["100001", "Before", "Member", 2, 2, 0, 1, "1/9/2026", "open check-in"],
+      ["100002", "New", "Member", 1, 0, 1, 0, "", ""]
+    ]);
+  });
 });
 
 function createTestEnv(): Env {
@@ -75,7 +95,8 @@ function createTestEnv(): Env {
       student_id TEXT PRIMARY KEY,
       first_name TEXT NOT NULL,
       last_name TEXT NOT NULL,
-      active INTEGER NOT NULL DEFAULT 1
+      active INTEGER NOT NULL DEFAULT 1,
+      attendance_required_from_date TEXT
     );
 
     CREATE TABLE attendance_sessions (
@@ -108,9 +129,9 @@ function createTestEnv(): Env {
   } as unknown as Env;
 }
 
-function insertStudent(env: Env, memberId: string, firstName: string, lastName: string, active = 1) {
-  return env.DB.prepare("INSERT INTO students (student_id, first_name, last_name, active) VALUES (?, ?, ?, ?)")
-    .bind(memberId, firstName, lastName, active)
+function insertStudent(env: Env, memberId: string, firstName: string, lastName: string, active = 1, attendanceRequiredFromDate: string | null = null) {
+  return env.DB.prepare("INSERT INTO students (student_id, first_name, last_name, active, attendance_required_from_date) VALUES (?, ?, ?, ?, ?)")
+    .bind(memberId, firstName, lastName, active, attendanceRequiredFromDate)
     .run();
 }
 
