@@ -121,11 +121,12 @@ ensureColumn("kiosks", "last_sync_at", "TEXT");
 ensureColumn("kiosks", "last_sync_error", "TEXT");
 ensureColumn("students", "email", "TEXT");
 ensureColumn("students", "discord_user_id", "TEXT");
+ensureColumn("students", "attendance_required_from_date", "TEXT");
 
 async function seedBenchData() {
   db.prepare(`
-    INSERT INTO students (student_id, first_name, last_name, active)
-    VALUES ('100001', 'Bench', 'Member', 1)
+    INSERT INTO students (student_id, first_name, last_name, active, attendance_required_from_date)
+    VALUES ('100001', 'Bench', 'Member', 1, date('now', 'localtime'))
     ON CONFLICT(student_id) DO UPDATE SET active = 1
   `).run();
 
@@ -521,8 +522,8 @@ function syncRoster(members: RosterMemberInput[]) {
   const normalizedMembers = normalizeRosterMembers(members);
   const seen = new Set<string>();
   const upsert = db.prepare(`
-    INSERT INTO students (student_id, first_name, last_name, email, discord_user_id, active)
-    VALUES (?, ?, ?, ?, ?, 1)
+    INSERT INTO students (student_id, first_name, last_name, email, discord_user_id, active, attendance_required_from_date)
+    VALUES (?, ?, ?, ?, ?, 1, date('now', 'localtime'))
     ON CONFLICT(student_id) DO UPDATE SET
       first_name = excluded.first_name,
       last_name = excluded.last_name,

@@ -1,3 +1,4 @@
+import { meetingDateForTimestamp } from "@frc-attendance/shared";
 import type { Env } from "./env";
 
 export interface RosterMemberInput {
@@ -27,6 +28,7 @@ export async function syncRoster(env: Env, members: RosterMemberInput[]) {
   const seen = new Set<string>();
   const statements: D1PreparedStatement[] = [];
   const syncedAt = new Date().toISOString();
+  const attendanceRequiredFromDate = meetingDateForTimestamp(syncedAt, env.TIME_ZONE);
 
   for (const member of normalizedMembers) {
     seen.add(member.memberId);
@@ -35,8 +37,8 @@ export async function syncRoster(env: Env, members: RosterMemberInput[]) {
     const rosterHash = await hashRosterRow(member);
     statements.push(
       env.DB.prepare(
-        "INSERT INTO students (student_id, first_name, last_name, email, discord_user_id, active, roster_hash, roster_synced_at) VALUES (?, ?, ?, ?, ?, 1, ?, ?) ON CONFLICT(student_id) DO UPDATE SET first_name = excluded.first_name, last_name = excluded.last_name, email = COALESCE(excluded.email, students.email), discord_user_id = COALESCE(excluded.discord_user_id, students.discord_user_id), active = 1, roster_hash = excluded.roster_hash, roster_synced_at = excluded.roster_synced_at"
-      ).bind(member.memberId, member.firstName, member.lastName, member.email ?? null, member.discordUserId ?? null, rosterHash, syncedAt)
+        "INSERT INTO students (student_id, first_name, last_name, email, discord_user_id, active, roster_hash, roster_synced_at, attendance_required_from_date) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?) ON CONFLICT(student_id) DO UPDATE SET first_name = excluded.first_name, last_name = excluded.last_name, email = COALESCE(excluded.email, students.email), discord_user_id = COALESCE(excluded.discord_user_id, students.discord_user_id), active = 1, roster_hash = excluded.roster_hash, roster_synced_at = excluded.roster_synced_at"
+      ).bind(member.memberId, member.firstName, member.lastName, member.email ?? null, member.discordUserId ?? null, rosterHash, syncedAt, attendanceRequiredFromDate)
     );
   }
 
@@ -75,7 +77,7 @@ export async function listActiveRoster(env: Env) {
 export async function listRosterMembers(env: Env, active?: boolean) {
   const where = active === undefined ? "" : "WHERE active = ?";
   const statement = env.DB.prepare(`
-    SELECT student_id, first_name, last_name, email, discord_user_id, active, roster_synced_at
+    SELECT student_id, first_name, last_name, email, discord_user_id, active, roster_synced_at, attendance_required_from_date
     FROM students
     ${where}
     ORDER BY last_name, first_name
@@ -183,7 +185,7 @@ async function setMemberActive(env: Env, memberId: string, active: boolean) {
 
 async function requireExistingMember(env: Env, memberId: string) {
   const member = await env.DB.prepare(
-    "SELECT student_id, first_name, last_name, email, discord_user_id, active, roster_synced_at FROM students WHERE student_id = ?"
+    "SELECT student_id, first_name, last_name, email, discord_user_id, active, roster_synced_at, attendance_required_from_date FROM students WHERE student_id = ?"
   ).bind(memberId).first<StudentRow>();
   if (!member) throw Object.assign(new Error("Member not found"), { status: 404 });
   return member;
@@ -197,7 +199,8 @@ function rowToMember(row: StudentRow) {
     email: row.email ?? null,
     discordUserId: row.discord_user_id ?? null,
     active: Boolean(row.active),
-    rosterSyncedAt: row.roster_synced_at ?? null
+    rosterSyncedAt: row.roster_synced_at ?? null,
+    attendanceRequiredFromDate: row.attendance_required_from_date ?? null
   };
 }
 
@@ -253,4 +256,5 @@ interface StudentRow {
   discord_user_id?: string | null;
   active: number;
   roster_synced_at?: string | null;
+  attendance_required_from_date?: string | null;
 }

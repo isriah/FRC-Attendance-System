@@ -41,6 +41,7 @@ export interface MemberAttendanceReport {
   presentDates: string[];
   absentDates: string[];
   openSessionDates: string[];
+  attendanceRequiredFromDate: string | null;
 }
 
 export interface MeetingSummaryReportRow {
@@ -65,10 +66,18 @@ export interface MeetingAbsenceReport {
   startsAt?: string;
   endsAt?: string;
   absentCount: number;
+  notRequiredCount: number;
   rows: Array<{
     memberId: string;
     firstName: string;
     lastName: string;
+  }>;
+  notRequiredRows: Array<{
+    memberId: string;
+    firstName: string;
+    lastName: string;
+    attendanceRequiredFromDate: string;
+    reason: "before_attendance_required_from_date";
   }>;
 }
 
@@ -83,6 +92,7 @@ export interface RosterAttendanceSummaryRow {
   lastSeenAt?: string;
   openSessionDates: string[];
   openSessionWarning: boolean;
+  attendanceRequiredFromDate: string | null;
 }
 
 export function reportDateRangeFromSearchParams(searchParams: URLSearchParams): ReportDateRange {
@@ -187,6 +197,7 @@ export async function buildMeetingSummaryReport(env: Env, range: ReportDateRange
         attendance_sessions.meeting_date,
         COUNT(DISTINCT attendance_sessions.student_id) AS present_count,
         COUNT(DISTINCT CASE WHEN students.active = 1 THEN attendance_sessions.student_id END) AS active_present_count,
+        COUNT(DISTINCT CASE WHEN students.active = 1 AND (students.attendance_required_from_date IS NULL OR students.attendance_required_from_date <= attendance_sessions.meeting_date) THEN attendance_sessions.student_id END) AS required_present_count,
         SUM(CASE WHEN attendance_sessions.status = 'open' THEN 1 ELSE 0 END) AS open_check_ins
       FROM attendance_sessions
       LEFT JOIN students ON students.student_id = attendance_sessions.student_id
@@ -198,12 +209,29 @@ export async function buildMeetingSummaryReport(env: Env, range: ReportDateRange
       present_count: number;
       active_present_count: number;
       open_check_ins: number;
+      required_present_count: number;
     }>(),
-    env.DB.prepare("SELECT COUNT(*) AS count FROM students WHERE active = 1").first<{ count: number }>(),
+    env.DB.prepare(`
+      WITH report_dates AS (
+        SELECT meeting_date FROM scheduled_meetings
+        ${whereDateRange("meeting_date", range)}
+        UNION
+        SELECT meeting_date FROM attendance_sessions
+        ${whereDateRange("meeting_date", range)}
+      )
+      SELECT
+        report_dates.meeting_date,
+        COUNT(students.student_id) AS count
+      FROM report_dates
+      CROSS JOIN students
+      WHERE students.active = 1
+        AND (students.attendance_required_from_date IS NULL OR students.attendance_required_from_date <= report_dates.meeting_date)
+      GROUP BY report_dates.meeting_date
+    `).bind(...dateRangeParams(range), ...dateRangeParams(range)).all<{ meeting_date: string; count: number }>(),
     hasAnyScheduledMeetings(env)
   ]);
 
-  const activeCount = Number(activeStudentCount?.count ?? 0);
+  const requiredActiveCountByDate = new Map(activeStudentCount.results.map((row) => [row.meeting_date, Number(row.count)]));
   const reportDate = currentReportDate(env, now);
   const incompleteScheduledDates = new Set(scheduledMeetings.results
     .filter((meeting) => !isMeetingComplete(meeting, env, now))
@@ -237,7 +265,7 @@ export async function buildMeetingSummaryReport(env: Env, range: ReportDateRange
       zeroScan: scheduled && !session,
       presentCount,
       activePresentCount,
-      absentCount: required ? Math.max(activeCount - activePresentCount, 0) : 0,
+      absentCount: required ? Math.max((requiredActiveCountByDate.get(meetingDate) ?? 0) - Number(session?.required_present_count ?? 0), 0) : 0,
       openCheckIns: Number(session?.open_check_ins ?? 0)
     };
   }).slice(0, limit);
@@ -291,18 +319,29 @@ export async function buildMeetingAbsenceReport(env: Env, meetingDate: string, n
   const required = meeting ? Boolean(meeting.required) : !(await hasAnyScheduledMeetings(env)) && presentIds.size > 0;
   const countAbsences = required && (!meeting || isMeetingComplete(meeting, env, now));
   const activeStudents = await env.DB.prepare(`
-    SELECT student_id, first_name, last_name
+    SELECT student_id, first_name, last_name, attendance_required_from_date
     FROM students
     WHERE active = 1
     ORDER BY last_name, first_name
-  `).all<{ student_id: string; first_name: string; last_name: string }>();
+  `).all<{ student_id: string; first_name: string; last_name: string; attendance_required_from_date?: string | null }>();
   const rows = countAbsences
     ? activeStudents.results
-      .filter((student) => !presentIds.has(student.student_id))
+      .filter((student) => isAttendanceRequiredForMember(student, date) && !presentIds.has(student.student_id))
       .map((student) => ({
         memberId: student.student_id,
         firstName: student.first_name,
         lastName: student.last_name
+      }))
+    : [];
+  const notRequiredRows = countAbsences
+    ? activeStudents.results
+      .filter((student) => !isAttendanceRequiredForMember(student, date))
+      .map((student) => ({
+        memberId: student.student_id,
+        firstName: student.first_name,
+        lastName: student.last_name,
+        attendanceRequiredFromDate: student.attendance_required_from_date as string,
+        reason: "before_attendance_required_from_date" as const
       }))
     : [];
 
@@ -313,17 +352,19 @@ export async function buildMeetingAbsenceReport(env: Env, meetingDate: string, n
     startsAt: meeting?.starts_at ?? undefined,
     endsAt: meeting?.ends_at ?? undefined,
     absentCount: rows.length,
-    rows
+    notRequiredCount: notRequiredRows.length,
+    rows,
+    notRequiredRows
   };
 }
 
 export async function buildRosterAttendanceSummary(env: Env, range: ReportDateRange = {}, now = new Date()): Promise<RosterAttendanceSummaryRow[]> {
   const activeStudents = await env.DB.prepare(`
-    SELECT student_id, first_name, last_name
+    SELECT student_id, first_name, last_name, attendance_required_from_date
     FROM students
     WHERE active = 1
     ORDER BY last_name, first_name
-  `).all<{ student_id: string; first_name: string; last_name: string }>();
+  `).all<{ student_id: string; first_name: string; last_name: string; attendance_required_from_date: string | null }>();
 
   return Promise.all(activeStudents.results.map(async (student) => {
     const report = await buildMemberAttendanceReport(env, student.student_id, range, now);
@@ -337,18 +378,19 @@ export async function buildRosterAttendanceSummary(env: Env, range: ReportDateRa
       attendanceRate: report.attendanceRate,
       lastSeenAt: report.lastSeenAt,
       openSessionDates: report.openSessionDates,
-      openSessionWarning: report.openSessionDates.length > 0
+      openSessionWarning: report.openSessionDates.length > 0,
+      attendanceRequiredFromDate: report.attendanceRequiredFromDate
     };
   }));
 }
 
 export async function buildMemberAttendanceReport(env: Env, memberId: string, range: ReportDateRange = {}, now = new Date()): Promise<MemberAttendanceReport> {
   const student = await env.DB.prepare(
-    "SELECT student_id, first_name, last_name FROM students WHERE student_id = ?"
-  ).bind(memberId).first<{ student_id: string; first_name: string; last_name: string }>();
+    "SELECT student_id, first_name, last_name, attendance_required_from_date FROM students WHERE student_id = ?"
+  ).bind(memberId).first<{ student_id: string; first_name: string; last_name: string; attendance_required_from_date: string | null }>();
   if (!student) throw Object.assign(new Error("Member not found"), { status: 404 });
 
-  const meetingDates = await requiredMeetingDates(env, range, now);
+  const meetingDates = await requiredMeetingDates(env, range, now, student.attendance_required_from_date);
   const scheduledDates = await reportScheduledDates(env, range);
   const sessions = await env.DB.prepare(
     `
@@ -385,7 +427,8 @@ export async function buildMemberAttendanceReport(env: Env, memberId: string, ra
     lastSeenAt,
     presentDates,
     absentDates,
-    openSessionDates: visibleSessions.filter((session) => session.status === "open" && allDateSet.has(session.meeting_date)).map((session) => session.meeting_date)
+    openSessionDates: visibleSessions.filter((session) => session.status === "open" && allDateSet.has(session.meeting_date)).map((session) => session.meeting_date),
+    attendanceRequiredFromDate: student.attendance_required_from_date ?? null
   };
 }
 
@@ -398,7 +441,7 @@ async function reportScheduledDates(env: Env, range: ReportDateRange): Promise<S
   return new Set(rows.results.map((row) => row.meeting_date));
 }
 
-async function requiredMeetingDates(env: Env, range: ReportDateRange, now: Date) {
+async function requiredMeetingDates(env: Env, range: ReportDateRange, now: Date, attendanceRequiredFromDate?: string | null) {
   if (await hasAnyScheduledMeetings(env)) {
     const scheduledDates = await env.DB.prepare(`
       SELECT meeting_date, ends_at
@@ -407,7 +450,7 @@ async function requiredMeetingDates(env: Env, range: ReportDateRange, now: Date)
       ${whereDateRange("meeting_date", range, "AND")}
       ORDER BY meeting_date
     `).bind(...dateRangeParams(range)).all<{ meeting_date: string; ends_at: string | null }>();
-    return scheduledDates.results.filter((meeting) => isMeetingComplete(meeting, env, now));
+    return scheduledDates.results.filter((meeting) => isMeetingComplete(meeting, env, now) && isDateOnOrAfterAttendanceRequiredFrom(meeting.meeting_date, attendanceRequiredFromDate));
   }
 
   if (!range.includeUnscheduled) return [];
@@ -419,7 +462,7 @@ async function requiredMeetingDates(env: Env, range: ReportDateRange, now: Date)
     ORDER BY meeting_date
   `).bind(...dateRangeParams(range)).all<{ meeting_date: string }>();
   const reportDate = currentReportDate(env, now);
-  return sessionDates.results.filter((row) => isReportDateComplete(row.meeting_date, reportDate));
+  return sessionDates.results.filter((row) => isReportDateComplete(row.meeting_date, reportDate) && isDateOnOrAfterAttendanceRequiredFrom(row.meeting_date, attendanceRequiredFromDate));
 }
 
 async function hasAnyScheduledMeetings(env: Env): Promise<boolean> {
@@ -459,4 +502,12 @@ function isReportDateComplete(meetingDate: string, reportDate: string): boolean 
 
 function currentReportDate(env: Env, now: Date): string {
   return meetingDateForTimestamp(now.toISOString(), env.TIME_ZONE);
+}
+
+function isAttendanceRequiredForMember(member: { attendance_required_from_date?: string | null }, meetingDate: string): boolean {
+  return isDateOnOrAfterAttendanceRequiredFrom(meetingDate, member.attendance_required_from_date);
+}
+
+function isDateOnOrAfterAttendanceRequiredFrom(meetingDate: string, attendanceRequiredFromDate?: string | null): boolean {
+  return !attendanceRequiredFromDate || meetingDate >= attendanceRequiredFromDate;
 }

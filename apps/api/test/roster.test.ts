@@ -1,9 +1,15 @@
 import Database from "better-sqlite3";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { Env } from "../src/env";
 import { deactivateMember, hardDeleteMember, listActiveRoster, listRosterMembers, normalizeRosterMembers, reactivateMember, syncRoster, updateStudentDiscordUserId, updateStudentEmail } from "../src/roster";
 
 describe("roster sync", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("normalizes rows, deactivates missing members, and exports active roster", async () => {
     const env = createRosterTestEnv();
 
@@ -59,6 +65,71 @@ describe("roster sync", () => {
 
     await updateStudentDiscordUserId(env, "100001", "");
     await expectStudentDiscordUserId(env, "100001", null);
+  });
+
+  it("sets a durable attendance requirement start date for newly imported members using the project timezone", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-02T04:30:00.000Z"));
+    const env = createRosterTestEnv();
+    env.TIME_ZONE = "America/New_York";
+
+    await syncRoster(env, [
+      { memberId: "100001", firstName: "Ada", lastName: "Lovelace" }
+    ]);
+
+    const row = await env.DB.prepare("SELECT attendance_required_from_date FROM students WHERE student_id = ?").bind("100001").first<{ attendance_required_from_date: string }>();
+    expect(row?.attendance_required_from_date).toBe("2026-01-01");
+  });
+
+  it("preserves the original attendance requirement start date across roster updates and reactivation", async () => {
+    const env = createRosterTestEnv();
+
+    await syncRoster(env, [
+      { memberId: "100001", firstName: "Ada", lastName: "Lovelace" },
+      { memberId: "100002", firstName: "Grace", lastName: "Hopper" }
+    ]);
+    await env.DB.prepare("UPDATE students SET attendance_required_from_date = ? WHERE student_id = ?").bind("2026-01-09", "100001").run();
+    await syncRoster(env, [
+      { memberId: "100002", firstName: "Grace", lastName: "Hopper" }
+    ]);
+    await reactivateMember(env, "100001");
+    await syncRoster(env, [
+      { memberId: "100001", firstName: "Ada", lastName: "Byron" },
+      { memberId: "100002", firstName: "Grace", lastName: "Hopper" }
+    ]);
+
+    const row = await env.DB.prepare("SELECT attendance_required_from_date FROM students WHERE student_id = ?").bind("100001").first<{ attendance_required_from_date: string }>();
+    expect(row?.attendance_required_from_date).toBe("2026-01-09");
+  });
+
+  it("backfills existing members from durable roster sync data without changing attendance rows", async () => {
+    const sqlite = new Database(":memory:");
+    sqlite.exec(`
+      CREATE TABLE students (
+        student_id TEXT PRIMARY KEY,
+        first_name TEXT NOT NULL,
+        last_name TEXT NOT NULL,
+        active INTEGER NOT NULL DEFAULT 1,
+        roster_hash TEXT,
+        roster_synced_at TEXT NOT NULL
+      );
+      CREATE TABLE attendance_sessions (
+        id TEXT PRIMARY KEY,
+        student_id TEXT NOT NULL,
+        meeting_date TEXT NOT NULL
+      );
+      INSERT INTO students (student_id, first_name, last_name, active, roster_synced_at)
+      VALUES ('100001', 'Ada', 'Lovelace', 1, '2026-01-09T04:30:00.000Z');
+      INSERT INTO attendance_sessions (id, student_id, meeting_date)
+      VALUES ('session-1', '100001', '2026-01-02');
+    `);
+
+    sqlite.exec(readFileSync(join(process.cwd(), "migrations", "0015_student_attendance_required_from.sql"), "utf8"));
+
+    expect(sqlite.prepare("SELECT attendance_required_from_date FROM students WHERE student_id = '100001'").get()).toEqual({
+      attendance_required_from_date: "2026-01-09"
+    });
+    expect(sqlite.prepare("SELECT COUNT(*) AS count FROM attendance_sessions").get()).toEqual({ count: 1 });
   });
 
   it("deactivates and reactivates members without deleting attendance history", async () => {
@@ -241,7 +312,8 @@ function createRosterTestEnv(): Env {
       discord_user_id TEXT,
       active INTEGER NOT NULL DEFAULT 1,
       roster_hash TEXT,
-      roster_synced_at TEXT NOT NULL
+      roster_synced_at TEXT NOT NULL,
+      attendance_required_from_date TEXT
     );
 
     CREATE UNIQUE INDEX students_email_unique_idx

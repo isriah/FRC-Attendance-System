@@ -48,6 +48,27 @@ describe("meeting absence notifications", () => {
     expect(countRows(env, "notification_deliveries")).toBe(0);
   });
 
+  it("does not include members whose attendance requirement starts after the meeting", async () => {
+    const env = createTestEnv();
+    insertStudent(env, "100001", "Before", "Member", "before@example.org", 1, null, "2026-01-01");
+    insertStudent(env, "100002", "New", "Member", "new@example.org", 1, null, "2026-01-09");
+    insertMeeting(env, "2026-01-02", 1, "Required Build");
+
+    const response = await request(env, "/admin/notifications/meeting-absence", {
+      meetingDate: "2026-01-02"
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      recipients: [{
+        memberId: "100001",
+        email: "before@example.org",
+        status: "would_send"
+      }],
+      missingEmail: []
+    });
+  });
+
   it("rejects optional meetings", async () => {
     const env = createTestEnv();
     insertStudent(env, "100001", "Absent", "Member", "absent@example.org");
@@ -653,7 +674,8 @@ function createTestEnv(overrides: Partial<Env> = {}): Env {
       last_name TEXT NOT NULL,
       email TEXT,
       discord_user_id TEXT,
-      active INTEGER NOT NULL DEFAULT 1
+      active INTEGER NOT NULL DEFAULT 1,
+      attendance_required_from_date TEXT
     );
 
     CREATE TABLE attendance_sessions (
@@ -727,9 +749,9 @@ function unauthenticatedRequest(env: Env, path: string, body: unknown) {
   }), env);
 }
 
-function insertStudent(env: Env, memberId: string, firstName: string, lastName: string, email: string | null, active = 1, discordUserId: string | null = null) {
-  return env.DB.prepare("INSERT INTO students (student_id, first_name, last_name, email, discord_user_id, active) VALUES (?, ?, ?, ?, ?, ?)")
-    .bind(memberId, firstName, lastName, email, discordUserId, active)
+function insertStudent(env: Env, memberId: string, firstName: string, lastName: string, email: string | null, active = 1, discordUserId: string | null = null, attendanceRequiredFromDate: string | null = null) {
+  return env.DB.prepare("INSERT INTO students (student_id, first_name, last_name, email, discord_user_id, active, attendance_required_from_date) VALUES (?, ?, ?, ?, ?, ?, ?)")
+    .bind(memberId, firstName, lastName, email, discordUserId, active, attendanceRequiredFromDate)
     .run();
 }
 
