@@ -61,6 +61,16 @@ export async function buildLegacySheetExport(env: Env, range: ReportDateRange = 
     report.lastSeenAt ? formatLegacyDate(report.lastSeenAt.slice(0, 10)) : "",
     report.openSessionWarning ? "open check-in" : ""
   ]);
+  const classExcusedAttendanceRows = rosterAttendance
+    .filter((report) => Boolean(report.excusedMeetings))
+    .map((report) => [
+      report.memberId,
+      report.firstName,
+      report.lastName,
+      report.excusedMeetings ?? 0,
+      report.classRequiredMeetings ?? report.requiredMeetings,
+      formatRate(report.classAttendanceRate ?? report.attendanceRate)
+    ]);
   const meetingSummaryRows = meetingSummary.map((meeting) => [
     formatLegacyDate(meeting.meetingDate),
     meeting.title ?? "Unscheduled attendance",
@@ -87,6 +97,7 @@ export async function buildLegacySheetExport(env: Env, range: ReportDateRange = 
       MeetingSummary: meetingSummaryRows,
       MeetingAbsences: meetingAbsenceRows,
       RosterAttendance: rosterAttendanceRows,
+      ...(classExcusedAttendanceRows.length > 0 ? { ClassExcusedAttendance: classExcusedAttendanceRows } : {}),
       AttendanceLogIn: logInRows,
       AttendanceLogOut: logOutRows,
       ScheduledMeetings: meetingRows,

@@ -133,6 +133,37 @@ export async function removeMemberFromMeeting(env: Env, input: { memberId: strin
   };
 }
 
+export async function excuseMemberFromMeeting(env: Env, input: { memberId: string; meetingDate?: unknown; reason?: unknown; adminEmail: string }) {
+  const meetingDate = requireIsoDate(input.meetingDate, "meetingDate");
+  const reason = typeof input.reason === "string" ? input.reason.trim() : "";
+  const [member, meeting, present, existing] = await Promise.all([
+    env.DB.prepare("SELECT first_name, last_name FROM students WHERE student_id = ?").bind(input.memberId).first<{ first_name: string; last_name: string }>(),
+    env.DB.prepare("SELECT title FROM scheduled_meetings WHERE meeting_date = ?").bind(meetingDate).first<{ title: string }>(),
+    env.DB.prepare("SELECT id FROM attendance_sessions WHERE student_id = ? AND meeting_date = ?").bind(input.memberId, meetingDate).first<{ id: string }>(),
+    env.DB.prepare("SELECT id FROM attendance_excuses WHERE student_id = ? AND meeting_date = ? AND removed_at IS NULL").bind(input.memberId, meetingDate).first<{ id: string }>()
+  ]);
+  if (!member) throw Object.assign(new Error("Member not found"), { status: 404 });
+  if (!meeting) throw Object.assign(new Error("Excuses can only be added to scheduled meetings"), { status: 400 });
+  if (present) throw Object.assign(new Error("A present member cannot be excused for this meeting"), { status: 409 });
+  if (existing) throw Object.assign(new Error("Member is already excused for this meeting"), { status: 409 });
+  const id = crypto.randomUUID();
+  const createdAt = new Date().toISOString();
+  await env.DB.prepare("INSERT INTO attendance_excuses (id, student_id, meeting_date, reason, created_by_email, created_at) VALUES (?, ?, ?, ?, ?, ?)")
+    .bind(id, input.memberId, meetingDate, reason || null, input.adminEmail, createdAt).run();
+  return { id, memberId: input.memberId, firstName: member.first_name, lastName: member.last_name, meetingDate, meetingTitle: meeting.title, reason: reason || null, createdByEmail: input.adminEmail, createdAt };
+}
+
+export async function removeMemberMeetingExcuse(env: Env, input: { memberId: string; meetingDate?: unknown; adminEmail: string }) {
+  const meetingDate = requireIsoDate(input.meetingDate, "meetingDate");
+  const excuse = await env.DB.prepare("SELECT id FROM attendance_excuses WHERE student_id = ? AND meeting_date = ? AND removed_at IS NULL")
+    .bind(input.memberId, meetingDate).first<{ id: string }>();
+  if (!excuse) throw Object.assign(new Error("No active excuse exists for this member and meeting"), { status: 404 });
+  const removedAt = new Date().toISOString();
+  await env.DB.prepare("UPDATE attendance_excuses SET removed_by_email = ?, removed_at = ? WHERE id = ?")
+    .bind(input.adminEmail, removedAt, excuse.id).run();
+  return { id: excuse.id, memberId: input.memberId, meetingDate, removedByEmail: input.adminEmail, removedAt };
+}
+
 export async function clearMemberAttendanceSourceData(env: Env, input: { memberId: string; meetingDate?: unknown; confirmation?: unknown; reason: string; adminEmail: string }) {
   const meetingDate = requireIsoDate(input.meetingDate, "meetingDate");
   const expectedConfirmation = clearMemberAttendanceConfirmation(input.memberId, meetingDate);

@@ -394,6 +394,17 @@ function createRosterTestEnv(): Env {
       UNIQUE(student_id, meeting_date)
     );
 
+    CREATE TABLE attendance_excuses (
+      id TEXT PRIMARY KEY,
+      student_id TEXT NOT NULL,
+      meeting_date TEXT NOT NULL,
+      reason TEXT,
+      created_by_email TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      removed_by_email TEXT,
+      removed_at TEXT
+    );
+
     CREATE TABLE notification_deliveries (
       id TEXT PRIMARY KEY,
       notification_kind TEXT NOT NULL,

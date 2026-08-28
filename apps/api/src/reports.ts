@@ -37,11 +37,29 @@ export interface MemberAttendanceReport {
   presentMeetings: number;
   missedMeetings: number;
   attendanceRate: number | null;
+  excusedMeetings?: number;
+  classRequiredMeetings?: number;
+  classAttendanceRate?: number | null;
   lastSeenAt?: string;
   presentDates: string[];
   absentDates: string[];
   openSessionDates: string[];
   attendanceRequiredFromDate: string | null;
+  scheduledMeetings: MemberScheduledMeeting[];
+}
+
+export interface MemberScheduledMeeting {
+  meetingDate: string;
+  title: string;
+  required: boolean;
+  startsAt?: string;
+  endsAt?: string;
+  complete: boolean;
+  present: boolean;
+  excused: boolean;
+  excuseReason?: string;
+  excusedBy?: string;
+  excusedAt?: string;
 }
 
 export interface MeetingSummaryReportRow {
@@ -67,10 +85,15 @@ export interface MeetingAbsenceReport {
   endsAt?: string;
   absentCount: number;
   notRequiredCount: number;
+  excusedCount?: number;
   rows: Array<{
     memberId: string;
     firstName: string;
     lastName: string;
+    excused?: boolean;
+    excuseReason?: string;
+    excusedBy?: string;
+    excusedAt?: string;
   }>;
   notRequiredRows: Array<{
     memberId: string;
@@ -89,6 +112,9 @@ export interface RosterAttendanceSummaryRow {
   presentMeetings: number;
   missedMeetings: number;
   attendanceRate: number | null;
+  excusedMeetings?: number;
+  classRequiredMeetings?: number;
+  classAttendanceRate?: number | null;
   lastSeenAt?: string;
   openSessionDates: string[];
   openSessionWarning: boolean;
@@ -316,6 +342,7 @@ export async function buildMeetingAbsenceReport(env: Env, meetingDate: string, n
     WHERE meeting_date = ?
   `).bind(date).all<{ student_id: string }>();
   const presentIds = new Set(presentStudents.results.map((row) => row.student_id));
+  const excuses = await listActiveExcusesForMeeting(env, date);
   const required = meeting ? Boolean(meeting.required) : !(await hasAnyScheduledMeetings(env)) && presentIds.size > 0;
   const countAbsences = required && (!meeting || isMeetingComplete(meeting, env, now));
   const activeStudents = await env.DB.prepare(`
@@ -327,11 +354,15 @@ export async function buildMeetingAbsenceReport(env: Env, meetingDate: string, n
   const rows = countAbsences
     ? activeStudents.results
       .filter((student) => isAttendanceRequiredForMember(student, date) && !presentIds.has(student.student_id))
-      .map((student) => ({
-        memberId: student.student_id,
-        firstName: student.first_name,
-        lastName: student.last_name
-      }))
+      .map((student) => {
+        const excuse = excuses.get(student.student_id);
+        return {
+          memberId: student.student_id,
+          firstName: student.first_name,
+          lastName: student.last_name,
+          ...(excuse ? { excused: true, excuseReason: excuse.reason ?? undefined, excusedBy: excuse.created_by_email, excusedAt: excuse.created_at } : {})
+        };
+      })
     : [];
   const notRequiredRows = countAbsences
     ? activeStudents.results
@@ -352,6 +383,7 @@ export async function buildMeetingAbsenceReport(env: Env, meetingDate: string, n
     startsAt: meeting?.starts_at ?? undefined,
     endsAt: meeting?.ends_at ?? undefined,
     absentCount: rows.length,
+    ...(rows.some((row) => row.excused) ? { excusedCount: rows.filter((row) => row.excused).length } : {}),
     notRequiredCount: notRequiredRows.length,
     rows,
     notRequiredRows
@@ -376,6 +408,7 @@ export async function buildRosterAttendanceSummary(env: Env, range: ReportDateRa
       presentMeetings: report.presentMeetings,
       missedMeetings: report.missedMeetings,
       attendanceRate: report.attendanceRate,
+      ...(report.excusedMeetings ? { excusedMeetings: report.excusedMeetings, classRequiredMeetings: report.classRequiredMeetings, classAttendanceRate: report.classAttendanceRate } : {}),
       lastSeenAt: report.lastSeenAt,
       openSessionDates: report.openSessionDates,
       openSessionWarning: report.openSessionDates.length > 0,
@@ -408,7 +441,11 @@ export async function buildMemberAttendanceReport(env: Env, memberId: string, ra
   const presentDates = [...new Set(visibleSessions.map((session) => session.meeting_date))].filter((date) => allDateSet.has(date));
   const presentDateSet = new Set(presentDates);
   const absentDates = allDates.filter((date) => !presentDateSet.has(date));
+  const activeExcuses = await listActiveExcusesForMember(env, memberId, range);
+  const excusedMeetings = [...activeExcuses.keys()].filter((date) => absentDates.includes(date)).length;
+  const classRequiredMeetings = allDates.length - excusedMeetings;
   const attendanceRate = allDates.length === 0 ? null : presentDates.length / allDates.length;
+  const classAttendanceRate = classRequiredMeetings === 0 ? null : presentDates.length / classRequiredMeetings;
   const lastSeenAt = visibleSessions.reduce<string | undefined>((latest, session) => {
     if (!latest || session.check_in_at > latest) return session.check_in_at;
     return latest;
@@ -424,12 +461,44 @@ export async function buildMemberAttendanceReport(env: Env, memberId: string, ra
     presentMeetings: presentDates.length,
     missedMeetings: absentDates.length,
     attendanceRate,
+    ...(excusedMeetings ? { excusedMeetings, classRequiredMeetings, classAttendanceRate } : {}),
     lastSeenAt,
     presentDates,
     absentDates,
     openSessionDates: visibleSessions.filter((session) => session.status === "open" && allDateSet.has(session.meeting_date)).map((session) => session.meeting_date),
-    attendanceRequiredFromDate: student.attendance_required_from_date ?? null
+    attendanceRequiredFromDate: student.attendance_required_from_date ?? null,
+    scheduledMeetings: await buildMemberScheduledMeetings(env, memberId, now, activeExcuses)
   };
+}
+
+interface ActiveExcuse { reason: string | null; created_by_email: string; created_at: string; }
+
+async function buildMemberScheduledMeetings(env: Env, memberId: string, now: Date, excuses: Map<string, ActiveExcuse>): Promise<MemberScheduledMeeting[]> {
+  try {
+    const [meetings, sessions] = await Promise.all([
+      env.DB.prepare("SELECT meeting_date, title, required, starts_at, ends_at FROM scheduled_meetings ORDER BY meeting_date DESC").all<{ meeting_date: string; title: string; required: number; starts_at: string | null; ends_at: string | null }>(),
+      env.DB.prepare("SELECT meeting_date FROM attendance_sessions WHERE student_id = ?").bind(memberId).all<{ meeting_date: string }>()
+    ]);
+    const presentDates = new Set(sessions.results.map((row) => row.meeting_date));
+    return meetings.results.map((meeting) => {
+      const excuse = excuses.get(meeting.meeting_date);
+      return { meetingDate: meeting.meeting_date, title: meeting.title, required: Boolean(meeting.required), startsAt: meeting.starts_at ?? undefined, endsAt: meeting.ends_at ?? undefined, complete: isMeetingComplete(meeting, env, now), present: presentDates.has(meeting.meeting_date), excused: Boolean(excuse), excuseReason: excuse?.reason ?? undefined, excusedBy: excuse?.created_by_email, excusedAt: excuse?.created_at };
+    });
+  } catch { return []; }
+}
+
+async function listActiveExcusesForMember(env: Env, memberId: string, range: ReportDateRange): Promise<Map<string, ActiveExcuse>> {
+  try {
+    const rows = await env.DB.prepare(`SELECT meeting_date, reason, created_by_email, created_at FROM attendance_excuses WHERE student_id = ? AND removed_at IS NULL ${whereDateRange("meeting_date", range, "AND")}`).bind(memberId, ...dateRangeParams(range)).all<ActiveExcuse & { meeting_date: string }>();
+    return new Map(rows.results.map((row) => [row.meeting_date, row]));
+  } catch { return new Map(); }
+}
+
+async function listActiveExcusesForMeeting(env: Env, meetingDate: string): Promise<Map<string, ActiveExcuse>> {
+  try {
+    const rows = await env.DB.prepare("SELECT student_id, reason, created_by_email, created_at FROM attendance_excuses WHERE meeting_date = ? AND removed_at IS NULL").bind(meetingDate).all<ActiveExcuse & { student_id: string }>();
+    return new Map(rows.results.map((row) => [row.student_id, row]));
+  } catch { return new Map(); }
 }
 
 async function reportScheduledDates(env: Env, range: ReportDateRange): Promise<Set<string>> {

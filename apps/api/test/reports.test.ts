@@ -616,6 +616,28 @@ describe("report builders", () => {
     });
   });
 
+  it("keeps team attendance and absence reports unchanged while calculating class attendance around an excuse", async () => {
+    const env = createTestEnv();
+    insertStudent(env, "100001", "Excused", "Member");
+    insertStudent(env, "100002", "Present", "Member");
+    insertMeeting(env, "2026-01-02", 1, "Required Build");
+    insertMeeting(env, "2026-01-09", 1, "Required Strategy");
+    insertSession(env, "100001", "2026-01-02", "2026-01-02T20:00:00.000Z", null, "open");
+    insertSession(env, "100002", "2026-01-02", "2026-01-02T20:00:00.000Z", null, "open");
+    await env.DB.prepare("INSERT INTO attendance_excuses (id, student_id, meeting_date, reason, created_by_email, created_at) VALUES (?, ?, ?, ?, ?, ?)")
+      .bind("excuse-1", "100001", "2026-01-09", "Family commitment", "mentor@example.org", "2026-01-01T00:00:00.000Z").run();
+
+    const member = await buildMemberAttendanceReport(env, "100001");
+    const absence = await buildMeetingAbsenceReport(env, "2026-01-09");
+    const roster = await buildRosterAttendanceSummary(env);
+
+    expect(member).toMatchObject({ totalMeetings: 2, presentMeetings: 1, missedMeetings: 1, attendanceRate: 0.5, excusedMeetings: 1, classRequiredMeetings: 1, classAttendanceRate: 1 });
+    expect(member.scheduledMeetings.find((meeting) => meeting.meetingDate === "2026-01-09")).toMatchObject({ excused: true, excuseReason: "Family commitment", excusedBy: "mentor@example.org" });
+    expect(absence).toMatchObject({ absentCount: 2, excusedCount: 1 });
+    expect(absence.rows.find((row) => row.memberId === "100001")).toMatchObject({ excused: true, excuseReason: "Family commitment" });
+    expect(roster.find((row) => row.memberId === "100001")).toMatchObject({ attendanceRate: 0.5, classAttendanceRate: 1 });
+  });
+
   it("filters member attendance and roster summary by report date range", async () => {
     const env = createTestEnv();
     insertStudent(env, "100001", "Bench", "Student");
@@ -774,6 +796,17 @@ function createTestEnv(): Env {
       notes TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE attendance_excuses (
+      id TEXT PRIMARY KEY,
+      student_id TEXT NOT NULL,
+      meeting_date TEXT NOT NULL,
+      reason TEXT,
+      created_by_email TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      removed_by_email TEXT,
+      removed_at TEXT
     );
   `);
 

@@ -775,6 +775,33 @@ function Roster({ session, navigation }: { session: DashboardSession; navigation
     }
   }
 
+  async function setMemberMeetingExcuse(member: MemberRow, meeting: MemberScheduledMeeting) {
+    if (meeting.present) {
+      setMemberMessage({ kind: "error", text: `${member.firstName} ${member.lastName} is present for ${meeting.meetingDate} and cannot be excused.` });
+      return;
+    }
+    setBusyMemberId(member.memberId);
+    setMemberMessage(undefined);
+    try {
+      if (meeting.excused) {
+        if (!window.confirm(`Remove ${member.firstName} ${member.lastName}'s excuse for ${meeting.meetingDate}? The audit record will be retained.`)) return;
+        await apiDelete(`/admin/members/${encodeURIComponent(member.memberId)}/excuses`, session, { meetingDate: meeting.meetingDate });
+        setMemberMessage({ kind: "success", text: `Removed excuse for ${member.firstName} ${member.lastName} on ${meeting.meetingDate}.` });
+      } else {
+        const reason = window.prompt(`Optional mentor-visible reason for excusing ${member.firstName} ${member.lastName} on ${meeting.meetingDate}:`);
+        if (reason === null) return;
+        await apiPost(`/admin/members/${encodeURIComponent(member.memberId)}/excuses`, { meetingDate: meeting.meetingDate, reason }, session);
+        setMemberMessage({ kind: "success", text: `Excused ${member.firstName} ${member.lastName} for ${meeting.meetingDate}. Team attendance remains unchanged.` });
+      }
+      reloadMemberReport();
+      reloadRosterSummary();
+    } catch (error) {
+      setMemberMessage({ kind: "error", text: friendlyDashboardError(error) });
+    } finally {
+      setBusyMemberId(undefined);
+    }
+  }
+
   async function setMemberActive(member: MemberRow, active: boolean) {
     const verb = active ? "reactivate" : "deactivate";
     if (!active && !window.confirm(`Deactivate ${member.firstName} ${member.lastName}? Attendance history will be preserved and the member can be reactivated later.`)) return;
@@ -974,6 +1001,7 @@ function Roster({ session, navigation }: { session: DashboardSession; navigation
                 onDiscordDraftChange={(discordUserId) => setDiscordDrafts((drafts) => ({ ...drafts, [member.memberId]: discordUserId }))}
                 onSaveDiscordUserId={() => saveMemberDiscordUserId(member)}
                 onEmailAttendanceReport={() => emailMemberAttendanceReport(member)}
+                onSetMeetingExcuse={(meeting) => setMemberMeetingExcuse(member, meeting)}
                 onDeactivate={() => setMemberActive(member, false)}
                 onHardDelete={() => hardDeleteMember(member)}
                 busy={busyMemberId === member.memberId}
@@ -1025,6 +1053,7 @@ function Roster({ session, navigation }: { session: DashboardSession; navigation
                 onDiscordDraftChange={(discordUserId) => setDiscordDrafts((drafts) => ({ ...drafts, [member.memberId]: discordUserId }))}
                 onSaveDiscordUserId={() => saveMemberDiscordUserId(member)}
                 onEmailAttendanceReport={() => emailMemberAttendanceReport(member)}
+                onSetMeetingExcuse={(meeting) => setMemberMeetingExcuse(member, meeting)}
                 onDeactivate={() => setMemberActive(member, false)}
                 onHardDelete={() => hardDeleteMember(member)}
                 busy={busyMemberId === member.memberId}
@@ -1185,6 +1214,7 @@ function MemberDetailsPanel({
   onDiscordDraftChange,
   onSaveDiscordUserId,
   onEmailAttendanceReport,
+  onSetMeetingExcuse,
   onDeactivate,
   onHardDelete,
   busy,
@@ -1221,6 +1251,7 @@ function MemberDetailsPanel({
   onDiscordDraftChange: (discordUserId: string) => void;
   onSaveDiscordUserId: () => void;
   onEmailAttendanceReport: () => void;
+  onSetMeetingExcuse: (meeting: MemberScheduledMeeting) => void;
   onDeactivate: () => void;
   onHardDelete: () => void;
   busy: boolean;
@@ -1305,6 +1336,17 @@ function MemberDetailsPanel({
             <Metric label="Required Attendance" value={formatPercent(memberReport.attendanceRate)} />
             <Metric label="Required Present" value={memberReport.presentMeetings} />
             <Metric label="Required Missed" value={memberReport.missedMeetings} />
+            <Metric label="Class/Excused Attendance" value={formatPercent(memberReport.classAttendanceRate ?? null)} />
+          </div>
+          <div>
+            <h4>Scheduled Meeting Excuses</h4>
+            <p className="report-context">Excuses affect the separate class/excused percentage only. Team attendance and missed-meeting notifications still count an excused absence.</p>
+            {memberReport.scheduledMeetings.length > 0 ? <ul className="plain-list">
+              {memberReport.scheduledMeetings.map((meeting) => <li key={meeting.meetingDate}>
+                {meetingSummaryLabel(meeting)} — {meeting.present ? "Present" : meeting.excused ? `Excused${meeting.excuseReason ? `: ${meeting.excuseReason}` : ""}` : meeting.required ? "Absent / not yet attended" : "Optional"}
+                {!meeting.present ? <button type="button" disabled={busy} onClick={() => onSetMeetingExcuse(meeting)}>{meeting.excused ? "Remove excuse" : "Excuse"}</button> : null}
+              </li>)}
+            </ul> : <p className="empty-state">No scheduled meetings are available.</p>}
           </div>
           <div className="member-detail-lists">
             <div>
@@ -2549,6 +2591,7 @@ function MeetingDetails({
         <Metric label="Signed In" value={presence?.counts.signedIn ?? 0} />
         <Metric label="Open Check-Ins" value={summary?.openCheckIns ?? 0} />
         <Metric label="Absent" value={!attendanceOnly && required ? summary?.absentCount ?? absences?.absentCount ?? "..." : "N/A"} />
+        {!attendanceOnly && required && (absences?.excusedCount ?? 0) > 0 ? <Metric label="Excused (still absent)" value={absences?.excusedCount ?? 0} /> : null}
       </div>
       {presenceError ? <p className="error">{presenceError}</p> : null}
       {absencesError ? <p className="error">{absencesError}</p> : null}
@@ -2595,7 +2638,7 @@ function MeetingDetails({
           </div>
           <p className="empty-state">{absentStateText}</p>
           {!attendanceOnly && required ? (
-            <DataTable rows={absentRows} columns={["memberId", "firstName", "lastName"]} density="compact" onOpenMember={onOpenMember} />
+            <DataTable rows={absentRows} columns={["memberId", "firstName", "lastName", "excused", "excuseReason"]} density="compact" onOpenMember={onOpenMember} />
           ) : (
             <p className="notice info">Track attendance here as present-only participation; use required meetings for absence accountability.</p>
           )}
@@ -3111,6 +3154,7 @@ function Reports({ session, onOpenMember }: { session: DashboardSession; onOpenM
           <>
             <div className="grid compact-grid">
               <Metric label="Required Attendance" value={formatPercent(memberReport.attendanceRate)} />
+              <Metric label="Class/Excused Attendance" value={formatPercent(memberReport.classAttendanceRate ?? null)} />
               <Metric label="Required Present" value={memberReport.presentMeetings} />
               <Metric label="Required Missed" value={memberReport.missedMeetings} />
             </div>
@@ -3784,6 +3828,7 @@ interface MeetingAbsenceReport {
   endsAt?: string;
   absentCount: number;
   notRequiredCount: number;
+  excusedCount?: number;
   rows: Array<Record<string, unknown>>;
   notRequiredRows: Array<Record<string, unknown>>;
 }
@@ -3798,11 +3843,29 @@ interface MemberAttendanceReport {
   presentMeetings: number;
   missedMeetings: number;
   attendanceRate: number | null;
+  excusedMeetings?: number;
+  classRequiredMeetings?: number;
+  classAttendanceRate?: number | null;
   lastSeenAt?: string;
   presentDates: string[];
   absentDates: string[];
   openSessionDates: string[];
   attendanceRequiredFromDate: string | null;
+  scheduledMeetings: MemberScheduledMeeting[];
+}
+
+interface MemberScheduledMeeting {
+  meetingDate: string;
+  title: string;
+  required: boolean;
+  startsAt?: string;
+  endsAt?: string;
+  complete: boolean;
+  present: boolean;
+  excused: boolean;
+  excuseReason?: string;
+  excusedBy?: string;
+  excusedAt?: string;
 }
 
 interface RosterAttendanceSummaryRow {
@@ -3813,6 +3876,9 @@ interface RosterAttendanceSummaryRow {
   presentMeetings: number;
   missedMeetings: number;
   attendanceRate: number | null;
+  excusedMeetings?: number;
+  classRequiredMeetings?: number;
+  classAttendanceRate?: number | null;
   lastSeenAt?: string;
   openSessionDates: string[];
   openSessionWarning: boolean;

@@ -41,10 +41,11 @@ export async function apiPut<T>(path: string, body: unknown, session: DashboardS
   return response.json() as Promise<T>;
 }
 
-export async function apiDelete(path: string, session: DashboardSession): Promise<void> {
+export async function apiDelete(path: string, session: DashboardSession, body?: unknown): Promise<void> {
   const response = await fetch(`${apiBaseUrl}${path}`, {
     method: "DELETE",
-    headers: adminHeaders(session)
+    headers: body === undefined ? adminHeaders(session) : { "content-type": "application/json", ...adminHeaders(session) },
+    body: body === undefined ? undefined : JSON.stringify(body)
   });
   if (!response.ok) throw new Error(await response.text());
 }

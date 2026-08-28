@@ -1,6 +1,6 @@
 import { requireIsoTimestamp, requireNonEmptyString, type KioskHealthReport, type KioskSyncRequest } from "@frc-attendance/shared";
 import { listAdminUsers, requireAdmin, requireKiosk, sha256Hex, upsertAdminUser } from "./auth";
-import { addManualEvent, clearAttendanceForDate, clearMemberAttendanceSourceData, removeMemberFromMeeting, syncKioskEvents } from "./attendanceStore";
+import { addManualEvent, clearAttendanceForDate, clearMemberAttendanceSourceData, excuseMemberFromMeeting, removeMemberFromMeeting, removeMemberMeetingExcuse, syncKioskEvents } from "./attendanceStore";
 import type { Env } from "./env";
 import { buildLegacySheetExport } from "./export";
 import { handleDiscordInteraction } from "./discordInteractions";
@@ -256,6 +256,22 @@ export default {
           reason: requireNonEmptyString(body.reason, "reason"),
           adminEmail: admin.email
         }));
+      }
+
+      const memberExcuse = url.pathname.match(/^\/admin\/members\/([^/]+)\/excuses$/);
+      if (memberExcuse && request.method === "POST") {
+        const admin = await requireAdmin(request, env);
+        const memberId = memberExcuse[1];
+        if (!memberId) throw Object.assign(new Error("Member id is required"), { status: 400 });
+        const body = await readJson<{ meetingDate?: unknown; reason?: unknown }>(request);
+        return json(await excuseMemberFromMeeting(env, { memberId: decodeURIComponent(memberId), meetingDate: body.meetingDate, reason: body.reason, adminEmail: admin.email }));
+      }
+      if (memberExcuse && request.method === "DELETE") {
+        const admin = await requireAdmin(request, env);
+        const memberId = memberExcuse[1];
+        if (!memberId) throw Object.assign(new Error("Member id is required"), { status: 400 });
+        const body = await readJson<{ meetingDate?: unknown }>(request);
+        return json(await removeMemberMeetingExcuse(env, { memberId: decodeURIComponent(memberId), meetingDate: body.meetingDate, adminEmail: admin.email }));
       }
 
       if (route === "POST /admin/attendance/clear-member-source-data") {

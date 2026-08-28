@@ -1,10 +1,30 @@
 import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
-import { rebuildAttendanceSessions, removeMemberFromMeeting, syncKioskEvents } from "../src/attendanceStore";
+import { excuseMemberFromMeeting, rebuildAttendanceSessions, removeMemberFromMeeting, removeMemberMeetingExcuse, syncKioskEvents } from "../src/attendanceStore";
 import type { Env } from "../src/env";
 import { buildMeetingAbsenceReport, buildMemberAttendanceReport, buildPresenceReport } from "../src/reports";
 
 describe("kiosk sync acknowledgements", () => {
+  it("audits an excuse and removal without changing source attendance", async () => {
+    const env = createTestEnv();
+    await env.DB.prepare("INSERT INTO scheduled_meetings (id, meeting_date, title, required, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)")
+      .bind("meeting-1", "2026-01-09", "Build", 1, "2026-01-01", "2026-01-01").run();
+    const excuse = await excuseMemberFromMeeting(env, { memberId: "100001", meetingDate: "2026-01-09", reason: "Family", adminEmail: "mentor@example.org" });
+    expect(excuse).toMatchObject({ reason: "Family", createdByEmail: "mentor@example.org" });
+    await expect(excuseMemberFromMeeting(env, { memberId: "100001", meetingDate: "2026-01-09", adminEmail: "mentor@example.org" })).rejects.toMatchObject({ status: 409 });
+    const removal = await removeMemberMeetingExcuse(env, { memberId: "100001", meetingDate: "2026-01-09", adminEmail: "other@example.org" });
+    expect(removal.removedByEmail).toBe("other@example.org");
+    expect(await env.DB.prepare("SELECT created_by_email, removed_by_email, removed_at FROM attendance_excuses WHERE id = ?").bind(excuse.id).first()).toMatchObject({ created_by_email: "mentor@example.org", removed_by_email: "other@example.org" });
+  });
+
+  it("rejects an excuse for a present member", async () => {
+    const env = createTestEnv();
+    await env.DB.prepare("INSERT INTO scheduled_meetings (id, meeting_date, title, required, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)")
+      .bind("meeting-1", "2026-01-09", "Build", 1, "2026-01-01", "2026-01-01").run();
+    await env.DB.prepare("INSERT INTO attendance_sessions (id, student_id, meeting_date, check_in_at, status, source_event_ids, rebuilt_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .bind("session-1", "100001", "2026-01-09", "2026-01-09T20:00:00.000Z", "open", "[]", "2026-01-09T20:00:00.000Z").run();
+    await expect(excuseMemberFromMeeting(env, { memberId: "100001", meetingDate: "2026-01-09", adminEmail: "mentor@example.org" })).rejects.toMatchObject({ status: 409 });
+  });
   it("returns welcome and goodbye acknowledgements for remote kiosk scans", async () => {
     const env = createTestEnv();
 
@@ -830,6 +850,17 @@ function createTestEnv(overrides: Partial<Env> = {}): Env {
       notes TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE attendance_excuses (
+      id TEXT PRIMARY KEY,
+      student_id TEXT NOT NULL,
+      meeting_date TEXT NOT NULL,
+      reason TEXT,
+      created_by_email TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      removed_by_email TEXT,
+      removed_at TEXT
     );
   `);
   sqlite.prepare("INSERT INTO students (student_id, first_name, last_name, active) VALUES (?, ?, ?, 1)").run("100001", "Bench", "Student");
