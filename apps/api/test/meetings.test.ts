@@ -156,6 +156,7 @@ describe("scheduled meeting admin API", () => {
     insertScanEvent(env, "scan-keep", "100001", "2026-01-04T20:00:00.000Z");
     insertScanEvent(env, "scan-clear", "100001", "2026-01-05T20:00:00.000Z");
     insertManualEvent(env, "manual-clear", "100001", "2026-01-05T21:00:00.000Z");
+    await env.DB.prepare("INSERT INTO attendance_exclusions (id, student_id, meeting_date, reason, admin_email) VALUES ('exclude-clear', '100001', '2026-01-05', 'test correction', 'mentor@example.com')").run();
     insertSession(env, "100001", "2026-01-04");
     insertSession(env, "100001", "2026-01-05");
 
@@ -174,13 +175,46 @@ describe("scheduled meeting admin API", () => {
     expect(await cleared.json()).toMatchObject({
       meetingDate: "2026-01-05",
       deletedScanEvents: 1,
-      deletedManualEvents: 1
+      deletedManualEvents: 1,
+      deletedAttendanceExclusions: 1
     });
 
     expect(countRows(env, "scheduled_meetings")).toBe(1);
     expect(countRows(env, "scan_events")).toBe(1);
     expect(countRows(env, "manual_events")).toBe(0);
+    expect(countRows(env, "attendance_exclusions")).toBe(0);
     expect(sessionDates(env)).toEqual(["2026-01-04"]);
+  });
+
+  it("requires admin auth to remove one present member and writes an audited exclusion", async () => {
+    const env = createTestEnv();
+    insertScanEvent(env, "scan-remove", "100001", "2026-01-05T20:00:00.000Z");
+    insertSession(env, "100001", "2026-01-05");
+    const body = {
+      memberId: "100001",
+      meetingDate: "2026-01-05",
+      reason: "Confirmed wrong-member scan"
+    };
+
+    const unauthorized = await worker.fetch(new Request("https://api.test/admin/attendance/remove-member", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body)
+    }), env);
+    expect(unauthorized.status).toBe(401);
+    expect(countRows(env, "attendance_exclusions")).toBe(0);
+
+    const removed = await request(env, "POST", "/admin/attendance/remove-member", body);
+    expect(removed.status).toBe(200);
+    expect(await removed.json()).toMatchObject({
+      memberId: "100001",
+      meetingDate: "2026-01-05",
+      reason: "Confirmed wrong-member scan",
+      adminEmail: "mentor@example.com"
+    });
+    expect(countRows(env, "scan_events")).toBe(1);
+    expect(countRows(env, "attendance_sessions")).toBe(0);
+    expect(countRows(env, "attendance_exclusions")).toBe(1);
   });
 });
 
@@ -243,7 +277,25 @@ function createTestEnv(): Env {
       source_event_ids TEXT NOT NULL,
       rebuilt_at TEXT NOT NULL
     );
+
+    CREATE TABLE students (
+      student_id TEXT PRIMARY KEY,
+      first_name TEXT NOT NULL,
+      last_name TEXT NOT NULL,
+      active INTEGER NOT NULL DEFAULT 1
+    );
+
+    CREATE TABLE attendance_exclusions (
+      id TEXT PRIMARY KEY,
+      student_id TEXT NOT NULL,
+      meeting_date TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      admin_email TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(student_id, meeting_date)
+    );
   `);
+  sqlite.prepare("INSERT INTO students (student_id, first_name, last_name, active) VALUES ('100001', 'Test', 'Member', 1)").run();
 
   return {
     DB: d1(sqlite),

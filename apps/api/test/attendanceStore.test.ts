@@ -1,7 +1,8 @@
 import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
-import { syncKioskEvents } from "../src/attendanceStore";
+import { rebuildAttendanceSessions, removeMemberFromMeeting, syncKioskEvents } from "../src/attendanceStore";
 import type { Env } from "../src/env";
+import { buildMeetingAbsenceReport, buildMemberAttendanceReport, buildPresenceReport } from "../src/reports";
 
 describe("kiosk sync acknowledgements", () => {
   it("returns welcome and goodbye acknowledgements for remote kiosk scans", async () => {
@@ -679,6 +680,83 @@ describe("kiosk sync acknowledgements", () => {
       message: "Goodbye, Bench Student"
     });
   });
+
+  it("audits a per-meeting removal while preserving original scan events", async () => {
+    const env = createTestEnv();
+    await env.DB.prepare(`
+      INSERT INTO scheduled_meetings (id, meeting_date, title, required, created_at, updated_at)
+      VALUES ('meeting-jan-2', '2026-01-02', 'Build meeting', 1, '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')
+    `).run();
+    await syncKioskEvents(env, "bench-01", [{
+      localEventId: "remove-me-in",
+      memberId: "100001",
+      occurredAt: "2026-01-02T20:00:00.000Z",
+      source: "fingerprint"
+    }, {
+      localEventId: "remove-me-out",
+      memberId: "100001",
+      occurredAt: "2026-01-02T22:00:00.000Z",
+      source: "fingerprint"
+    }]);
+
+    const correction = await removeMemberFromMeeting(env, {
+      memberId: "100001",
+      meetingDate: "2026-01-02",
+      reason: "Fingerprint was scanned by the wrong member",
+      adminEmail: "mentor@example.org"
+    });
+
+    expect(correction).toMatchObject({
+      memberId: "100001",
+      firstName: "Bench",
+      lastName: "Student",
+      meetingDate: "2026-01-02",
+      reason: "Fingerprint was scanned by the wrong member",
+      adminEmail: "mentor@example.org",
+      preservedSourceEventIds: ["bench-01:remove-me-in", "bench-01:remove-me-out"]
+    });
+    expect(await env.DB.prepare("SELECT COUNT(*) AS count FROM scan_events WHERE student_id = ?").bind("100001").first<{ count: number }>()).toEqual({ count: 2 });
+    expect(await env.DB.prepare("SELECT COUNT(*) AS count FROM attendance_sessions WHERE student_id = ? AND meeting_date = ?").bind("100001", "2026-01-02").first<{ count: number }>()).toEqual({ count: 0 });
+    expect(await env.DB.prepare("SELECT student_id, meeting_date, reason, admin_email FROM attendance_exclusions").first()).toEqual({
+      student_id: "100001",
+      meeting_date: "2026-01-02",
+      reason: "Fingerprint was scanned by the wrong member",
+      admin_email: "mentor@example.org"
+    });
+    const presence = await buildPresenceReport(env, "2026-01-02");
+    expect(presence.rows.find((row) => row.memberId === "100001")?.status).toBe("not_seen");
+    const absences = await buildMeetingAbsenceReport(env, "2026-01-02", new Date("2026-01-03T12:00:00.000Z"));
+    expect(absences.rows).toContainEqual(expect.objectContaining({ memberId: "100001" }));
+    const memberReport = await buildMemberAttendanceReport(env, "100001", {}, new Date("2026-01-03T12:00:00.000Z"));
+    expect(memberReport).toMatchObject({ presentMeetings: 0, missedMeetings: 1, attendanceRate: 0 });
+  });
+
+  it("keeps an audited removal effective across later session rebuilds", async () => {
+    const env = createTestEnv();
+    await syncKioskEvents(env, "bench-01", [{
+      localEventId: "original-scan",
+      memberId: "100001",
+      occurredAt: "2026-01-02T20:00:00.000Z",
+      source: "fingerprint"
+    }]);
+    await removeMemberFromMeeting(env, {
+      memberId: "100001",
+      meetingDate: "2026-01-02",
+      reason: "Confirmed absence",
+      adminEmail: "mentor@example.org"
+    });
+
+    await rebuildAttendanceSessions(env);
+
+    expect(await env.DB.prepare("SELECT COUNT(*) AS count FROM scan_events").first<{ count: number }>()).toEqual({ count: 1 });
+    expect(await env.DB.prepare("SELECT COUNT(*) AS count FROM attendance_sessions").first<{ count: number }>()).toEqual({ count: 0 });
+    await expect(removeMemberFromMeeting(env, {
+      memberId: "100001",
+      meetingDate: "2026-01-02",
+      reason: "Duplicate correction",
+      adminEmail: "mentor@example.org"
+    })).rejects.toMatchObject({ status: 409 });
+  });
 });
 
 function createTestEnv(overrides: Partial<Env> = {}): Env {
@@ -724,6 +802,16 @@ function createTestEnv(overrides: Partial<Env> = {}): Env {
       status TEXT NOT NULL,
       source_event_ids TEXT NOT NULL,
       rebuilt_at TEXT NOT NULL
+    );
+
+    CREATE TABLE attendance_exclusions (
+      id TEXT PRIMARY KEY,
+      student_id TEXT NOT NULL,
+      meeting_date TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      admin_email TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(student_id, meeting_date)
     );
 
     CREATE TABLE scheduled_meetings (
