@@ -3,6 +3,7 @@ import { listAdminUsers, requireAdmin, requireKiosk, sha256Hex, upsertAdminUser 
 import { addManualEvent, clearAttendanceForDate, syncKioskEvents } from "./attendanceStore";
 import type { Env } from "./env";
 import { buildLegacySheetExport } from "./export";
+import { handleDiscordInteraction } from "./discordInteractions";
 import { errorResponse, json, noContent, optionsResponse, readJson } from "./http";
 import { claimPendingKioskCommands, completeKioskCommand, createKioskCommand, listRecentKioskCommands, requireKioskCommandAction } from "./kioskCommands";
 import { bulkDeleteScheduledMeetings, convertUnscheduledAttendanceToMeeting, createScheduledMeeting, deleteScheduledMeeting, listScheduledMeetings, updateScheduledMeeting, type BulkScheduledMeetingDeleteInput, type ScheduledMeetingInput } from "./meetings";
@@ -19,6 +20,10 @@ export default {
       const route = `${request.method} ${url.pathname}`;
 
       if (route === "GET /health") return json({ ok: true, service: "frc-attendance-api" });
+
+      if (route === "POST /discord/interactions") {
+        return handleDiscordInteraction(request, env);
+      }
 
       if (route === "POST /kiosk/sync") {
         const kioskId = await requireKiosk(request, env);
