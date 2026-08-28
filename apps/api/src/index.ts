@@ -6,6 +6,7 @@ import { buildLegacySheetExport } from "./export";
 import { handleDiscordInteraction } from "./discordInteractions";
 import { approveAttendanceContest, listAttendanceContests, reviewAttendanceContest, sendDiscordBotMissingMemberNotifications, sendScheduledDiscordBotMissingMemberNotifications, type DiscordBotMissingMemberNotificationInput } from "./discordAttendance";
 import { refreshDiscordKioskStatusMessage } from "./discordKioskStatus";
+import { syncDiscordScheduledEvents, type DiscordScheduledEventSyncInput } from "./discordScheduledEvents";
 import { errorResponse, json, noContent, optionsResponse, readJson } from "./http";
 import { claimPendingKioskCommands, completeKioskCommand, createKioskCommand, listRecentKioskCommands, requireKioskCommandAction } from "./kioskCommands";
 import { bulkDeleteScheduledMeetings, convertUnscheduledAttendanceToMeeting, createScheduledMeeting, deleteScheduledMeeting, listScheduledMeetings, updateScheduledMeeting, type BulkScheduledMeetingDeleteInput, type ScheduledMeetingInput } from "./meetings";
@@ -175,6 +176,12 @@ export default {
         return json(await bulkDeleteScheduledMeetings(env, body));
       }
 
+      if (route === "POST /admin/meetings/discord/sync") {
+        await requireAdmin(request, env);
+        const body = await readJson<DiscordScheduledEventSyncInput>(request);
+        return json(await syncDiscordScheduledEvents(env, body));
+      }
+
       if (route === "POST /admin/meetings/convert-unscheduled") {
         await requireAdmin(request, env);
         const body = await readJson<ScheduledMeetingInput>(request);
@@ -196,6 +203,15 @@ export default {
         if (!meetingId) throw Object.assign(new Error("Scheduled meeting id is required"), { status: 400 });
         await deleteScheduledMeeting(env, decodeURIComponent(meetingId));
         return noContent();
+      }
+
+      const adminMeetingDiscordSync = url.pathname.match(/^\/admin\/meetings\/([^/]+)\/discord\/sync$/);
+      if (request.method === "POST" && adminMeetingDiscordSync) {
+        await requireAdmin(request, env);
+        const meetingId = adminMeetingDiscordSync[1];
+        if (!meetingId) throw Object.assign(new Error("Scheduled meeting id is required"), { status: 400 });
+        const body = await readJson<Omit<DiscordScheduledEventSyncInput, "meetingIds">>(request);
+        return json(await syncDiscordScheduledEvents(env, { ...body, meetingIds: [decodeURIComponent(meetingId)] }));
       }
 
       const adminKioskCommand = url.pathname.match(/^\/admin\/kiosks\/([^/]+)\/commands$/);

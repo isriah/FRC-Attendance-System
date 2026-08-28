@@ -87,6 +87,14 @@ export interface ScheduledMeeting {
   startsAt?: string;
   endsAt?: string;
   notes?: string;
+  discordScheduledEvent?: {
+    guildId: string;
+    eventId: string;
+    location: string;
+    status: string;
+    lastSyncedAt?: string;
+    lastError?: string;
+  } | null;
   createdAt: string;
   updatedAt: string;
 }

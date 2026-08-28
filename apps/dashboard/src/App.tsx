@@ -73,6 +73,14 @@ interface ScheduledMeeting {
   startsAt?: string;
   endsAt?: string;
   notes?: string;
+  discordScheduledEvent?: {
+    guildId: string;
+    eventId: string;
+    location: string;
+    status: string;
+    lastSyncedAt?: string;
+    lastError?: string;
+  } | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -233,6 +241,26 @@ interface DiscordTestNotificationResult {
     workerVersionMetadataId: string | null;
     webhookKind: "missing_members";
   };
+  warnings: string[];
+}
+
+interface DiscordScheduledEventSyncResult {
+  notificationKind: "discord_scheduled_event_sync";
+  providerConfigured: boolean;
+  guildId: string | null;
+  location: string;
+  syncedCount: number;
+  createdCount: number;
+  updatedCount: number;
+  errorCount: number;
+  meetings: Array<{
+    meetingId: string;
+    meetingDate?: string;
+    title?: string;
+    discordEventId?: string;
+    status: "created" | "updated" | "error";
+    error?: string;
+  }>;
   warnings: string[];
 }
 
@@ -1564,6 +1592,8 @@ function Meetings({ session, onOpenMember }: { session: DashboardSession; onOpen
   const [notificationBusyDate, setNotificationBusyDate] = useState("");
   const [discordNotificationResult, setDiscordNotificationResult] = useState<DiscordMissingMemberNotificationResult>();
   const [discordNotificationBusyDate, setDiscordNotificationBusyDate] = useState("");
+  const [discordEventSyncResult, setDiscordEventSyncResult] = useState<DiscordScheduledEventSyncResult>();
+  const [discordEventSyncBusy, setDiscordEventSyncBusy] = useState(false);
   const meetings = data?.meetings ?? [];
   const selectedMeetings = meetings.filter((meeting) => selectedMeetingIds.includes(meeting.id));
   const allMeetingsSelected = meetings.length > 0 && selectedMeetingIds.length === meetings.length;
@@ -1617,6 +1647,7 @@ function Meetings({ session, onOpenMember }: { session: DashboardSession; onOpen
   useEffect(() => {
     setNotificationResult(undefined);
     setDiscordNotificationResult(undefined);
+    setDiscordEventSyncResult(undefined);
   }, [selectedMeetingDate]);
 
   async function submitMeeting(event: FormEvent<HTMLFormElement>) {
@@ -1943,6 +1974,30 @@ function Meetings({ session, onOpenMember }: { session: DashboardSession; onOpen
     }
   }
 
+  async function syncMeetingsToDiscord(meetingIds: string[]) {
+    if (meetingIds.length === 0) return;
+    const uniqueMeetingIds = [...new Set(meetingIds)];
+    const label = uniqueMeetingIds.length === 1 ? "this meeting" : `${uniqueMeetingIds.length} selected meetings`;
+    if (!window.confirm(`Push ${label} to the Discord server calendar? Existing mapped Discord events will be updated.`)) return;
+    setDiscordEventSyncBusy(true);
+    setMessage(undefined);
+    try {
+      const result = await apiPost<DiscordScheduledEventSyncResult>("/admin/meetings/discord/sync", {
+        meetingIds: uniqueMeetingIds
+      }, session);
+      setDiscordEventSyncResult(result);
+      setMessage({
+        kind: result.errorCount > 0 ? "error" : "success",
+        text: discordScheduledEventSyncSummary(result)
+      });
+      reload();
+    } catch (err) {
+      setMessage({ kind: "error", text: friendlyDashboardError(err) });
+    } finally {
+      setDiscordEventSyncBusy(false);
+    }
+  }
+
   const meetingForm = (
     <form className="meeting-form" onSubmit={submitMeeting}>
       <label className="field-label">
@@ -2036,6 +2091,7 @@ function Meetings({ session, onOpenMember }: { session: DashboardSession; onOpen
         {message ? <p className={`notice ${message.kind}`}>{message.text}</p> : null}
         {error ? <p className="error">{error}</p> : null}
         {meetingSummaryError ? <p className="error">{meetingSummaryError}</p> : null}
+        {discordEventSyncResult ? <DiscordScheduledEventSyncResultPanel result={discordEventSyncResult} /> : null}
 
         {meetingViewTab === "calendar" ? (
           <>
@@ -2066,6 +2122,7 @@ function Meetings({ session, onOpenMember }: { session: DashboardSession; onOpen
                 notificationBusy={notificationBusyDate === selectedMeetingDate}
                 discordNotificationResult={discordNotificationResult?.meetingDate === selectedMeetingDate ? discordNotificationResult : undefined}
                 discordNotificationBusy={discordNotificationBusyDate === selectedMeetingDate}
+                discordEventSyncBusy={discordEventSyncBusy}
                 contests={selectedContestData?.contests ?? []}
                 contestsError={selectedContestsError}
                 contestsLoading={selectedContestsLoading}
@@ -2075,6 +2132,7 @@ function Meetings({ session, onOpenMember }: { session: DashboardSession; onOpen
                 onClear={clearUnscheduledAttendance}
                 onEmailAbsent={emailAbsentMembers}
                 onDiscordPingAbsent={pingMissingMembersInDiscord}
+                onDiscordEventSync={(meeting) => syncMeetingsToDiscord([meeting.id])}
                 onOpenMember={onOpenMember}
                 onRemoveMember={removePresentMember}
                 onContestChanged={() => {
@@ -2096,6 +2154,9 @@ function Meetings({ session, onOpenMember }: { session: DashboardSession; onOpen
                   {bulkEditing ? "Hide bulk edit" : "Bulk edit"}
                 </button>
                 <button type="button" disabled={saving || selectedMeetingIds.length === 0} onClick={bulkDeleteMeetings}>Bulk delete</button>
+                <button type="button" disabled={saving || discordEventSyncBusy || selectedMeetingIds.length === 0} onClick={() => syncMeetingsToDiscord(selectedMeetingIds)}>
+                  {discordEventSyncBusy ? "Syncing..." : "Sync Discord events"}
+                </button>
                 <button type="button" disabled={saving || selectedMeetingIds.length === 0} onClick={() => setSelectedMeetingIds([])}>Clear selection</button>
               </div>
               {bulkEditing ? (
@@ -2149,7 +2210,7 @@ function Meetings({ session, onOpenMember }: { session: DashboardSession; onOpen
                           onChange={(event) => toggleAllMeetingSelection(event.target.checked)}
                         />
                       </th>
-                      {["date", "title", "attendance", "present", "absent", "time", "notes", "actions"].map((column) => <th key={column}>{column}</th>)}
+                      {["date", "title", "attendance", "present", "absent", "time", "Discord", "notes", "actions"].map((column) => <th key={column}>{column}</th>)}
                     </tr>
                   </thead>
                   <tbody>
@@ -2171,6 +2232,7 @@ function Meetings({ session, onOpenMember }: { session: DashboardSession; onOpen
                             <td>attendance-only</td>
                             <td>{summary.presentCount}</td>
                             <td>N/A</td>
+                            <td></td>
                             <td></td>
                             <td></td>
                             <td>
@@ -2211,6 +2273,7 @@ function Meetings({ session, onOpenMember }: { session: DashboardSession; onOpen
                         <td>{summary ? summary.presentCount : "..."}</td>
                         <td>{meeting.required ? summary?.absentCount ?? "..." : "N/A"}</td>
                         <td>{meetingTimeRange(meeting)}</td>
+                        <td><DiscordScheduledEventBadge meeting={meeting} /></td>
                         <td>{meeting.notes ?? ""}</td>
                         <td>
                           <div className="kiosk-actions">
@@ -2340,11 +2403,13 @@ function MeetingDetails({
   notificationBusy,
   discordNotificationResult,
   discordNotificationBusy,
+  discordEventSyncBusy,
   contests,
   contestsError,
   contestsLoading,
   onEmailAbsent,
   onDiscordPingAbsent,
+  onDiscordEventSync,
   onOpenMember,
   onRemoveMember,
   onContestChanged
@@ -2362,6 +2427,7 @@ function MeetingDetails({
   notificationBusy: boolean;
   discordNotificationResult?: DiscordMissingMemberNotificationResult;
   discordNotificationBusy: boolean;
+  discordEventSyncBusy: boolean;
   contests: AttendanceContestRow[];
   contestsError?: string;
   contestsLoading: boolean;
@@ -2371,6 +2437,7 @@ function MeetingDetails({
   onClear: (summary: MeetingSummaryReportRow) => void;
   onEmailAbsent: (meetingDate: string) => void;
   onDiscordPingAbsent: (meetingDate: string) => void;
+  onDiscordEventSync: (meeting: ScheduledMeeting) => void;
   onOpenMember: (memberId: string) => void;
   onRemoveMember: (row: Record<string, unknown>) => void;
   onContestChanged: () => void;
@@ -2422,6 +2489,7 @@ function MeetingDetails({
               <MeetingRequirementBadge required={meeting.required} />
               {required ? <button type="button" onClick={() => onEmailAbsent(meeting.meetingDate)} disabled={saving || notificationBusy}>{notificationBusy ? "Checking..." : "Email absent members"}</button> : null}
               {required ? <button type="button" onClick={() => onDiscordPingAbsent(meeting.meetingDate)} disabled={saving || discordNotificationBusy}>{discordNotificationBusy ? "Checking..." : "Ping missing members with contest button"}</button> : null}
+              <button type="button" onClick={() => onDiscordEventSync(meeting)} disabled={saving || discordEventSyncBusy}>{discordEventSyncBusy ? "Syncing..." : "Sync Discord event"}</button>
               <button type="button" onClick={() => onEdit(meeting)} disabled={saving}>Edit</button>
               <button type="button" onClick={() => onDelete(meeting)} disabled={saving}>Delete</button>
             </>
@@ -2561,6 +2629,35 @@ function DiscordNotificationResultPanel({ result, onOpenMember }: { result: Disc
           <DataTable rows={missingRows} columns={["memberId", "firstName", "lastName", "status"]} density="compact" onOpenMember={onOpenMember} />
         </>
       ) : null}
+    </div>
+  );
+}
+
+function DiscordScheduledEventBadge({ meeting }: { meeting: ScheduledMeeting }) {
+  const mapping = meeting.discordScheduledEvent;
+  if (!mapping) return <span className="status-badge pending">not synced</span>;
+  if (mapping.status === "error") return <span className="status-badge failed">sync failed</span>;
+  return <span className="status-badge completed">synced</span>;
+}
+
+function DiscordScheduledEventSyncResultPanel({ result }: { result: DiscordScheduledEventSyncResult }) {
+  const noticeKind = result.errorCount > 0 ? "error" : "success";
+  const rows = result.meetings.map((meeting) => ({
+    meetingDate: meeting.meetingDate ?? "",
+    title: meeting.title ?? meeting.meetingId,
+    status: meeting.status === "created" ? "Created" : meeting.status === "updated" ? "Updated" : "Failed",
+    discordEventId: meeting.discordEventId ?? "",
+    error: meeting.error ?? ""
+  }));
+
+  return (
+    <div className="notification-result">
+      <p className={`notice ${noticeKind}`}>{discordScheduledEventSyncSummary(result)}</p>
+      <p className="report-context">
+        Location: {result.location}. Guild: {result.guildId ?? "not configured"}.
+      </p>
+      {result.warnings.length > 0 ? <p className="report-context">{result.warnings.join(" ")}</p> : null}
+      <DataTable rows={rows} columns={["meetingDate", "title", "status", "discordEventId", "error"]} density="compact" />
     </div>
   );
 }
@@ -3540,6 +3637,13 @@ function discordNotificationSummary(result: DiscordMissingMemberNotificationResu
       : `${pluralize(deliverableCount, "absent member")} would be pinged; ${providerLabel} not configured. ${pluralize(result.missingDiscord.length, "missing Discord ID")}.`;
   }
   return `Pinged ${pluralize(result.sentCount, "member")}; skipped ${pluralize(result.skippedDuplicateCount, "duplicate")}; ${pluralize(result.errorCount, "error")}.`;
+}
+
+function discordScheduledEventSyncSummary(result: DiscordScheduledEventSyncResult) {
+  if (!result.providerConfigured) {
+    return `Discord server calendar sync is not configured; ${pluralize(result.errorCount, "meeting")} could not sync.`;
+  }
+  return `Synced ${pluralize(result.syncedCount, "meeting")} to Discord; created ${result.createdCount}, updated ${result.updatedCount}, ${pluralize(result.errorCount, "error")}.`;
 }
 
 function discordTestSummary(result: DiscordTestNotificationResult) {

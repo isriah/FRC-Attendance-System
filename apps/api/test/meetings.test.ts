@@ -246,6 +246,19 @@ function createTestEnv(): Env {
       updated_at TEXT NOT NULL
     );
 
+    CREATE TABLE discord_scheduled_event_mappings (
+      scheduled_meeting_id TEXT PRIMARY KEY,
+      guild_id TEXT NOT NULL,
+      discord_event_id TEXT NOT NULL,
+      location TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'synced',
+      attempts INTEGER NOT NULL DEFAULT 1,
+      last_synced_at TEXT,
+      last_error TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
     CREATE TABLE scan_events (
       id TEXT PRIMARY KEY,
       kiosk_id TEXT NOT NULL,

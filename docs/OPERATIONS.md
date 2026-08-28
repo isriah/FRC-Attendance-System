@@ -5,10 +5,10 @@
 Current production API:
 
 - Worker URL: `https://frc-attendance-api.frc-attendance.workers.dev`
-- Latest deployed Worker version: `0d907192-bff0-465d-af14-075f0b642609`
+- Latest deployed Worker version: `d9a9c5dd-e0d1-443f-b81c-7b7d7b035819`
 - D1 database: `frc-attendance`
 - D1 database ID: `c02c0ca8-033b-435f-ae21-2d8f3b203b22`
-- Applied remote migrations: `0001_initial.sql` through `0013_discord_kiosk_status_messages.sql`
+- Applied remote migrations: `0001_initial.sql` through `0014_discord_scheduled_event_mappings.sql`
 - Workers account subdomain: `frc-attendance.workers.dev`
 - Registered bench kiosk: `bench-01`
 
@@ -16,7 +16,7 @@ Current production dashboard:
 
 - Cloudflare Pages project: `frc-attendance-dashboard`
 - Pages URL: `https://frc-attendance-dashboard.pages.dev`
-- Latest verified deployment: `https://734664b5.frc-attendance-dashboard.pages.dev`
+- Latest verified deployment: `https://5a30d83c.frc-attendance-dashboard.pages.dev`
 - API base URL baked into the uploaded Vite build: `https://frc-attendance-api.frc-attendance.workers.dev`
 - Google OAuth client ID baked into the uploaded Vite build: `180849199739-v04bktp7rfmimgjpvohmq7pinrrpr337.apps.googleusercontent.com`
 
@@ -65,6 +65,7 @@ This repeatable check verifies the production Worker `/health` response, verifie
    - `DISCORD_PUBLIC_KEY`: Discord application's Ed25519 Public Key (hex) used to verify `POST /discord/interactions`. Configure it as a Worker secret or environment variable; do not hard-code an application-specific value.
    - `DISCORD_BOT_TOKEN`: Discord application's bot token for contestable missing-member messages. Store it as a Worker secret.
    - `DISCORD_ATTENDANCE_CHANNEL_ID`: numeric ID of the bot-accessible channel that receives contestable attendance messages. Store it as a Worker secret or deployment variable.
+   - `DISCORD_GUILD_ID`: optional numeric ID of the Discord server used for Scheduled Event sync. If unset, dashboard sync derives the guild from `DISCORD_ATTENDANCE_CHANNEL_ID` through the Discord channel API before creating or updating server calendar events.
    - `DISCORD_MISSING_MEMBER_DELAY_MINUTES`: non-negative delay after the scheduled meeting end before a bot ping is allowed. Defaults to `30` and is committed as a non-secret Worker variable.
    - `KIOSK_DISCORD_OFFLINE_THRESHOLD_MINUTES`: integer minutes before a kiosk health heartbeat is considered offline in the persistent Discord kiosk status message. Defaults to `1`, matching the dashboard's 60-second offline rule. The kiosk service reports health every 15 seconds, so this permits several missed reports before Discord changes to offline.
    - The Worker has one Cron Trigger (`*/10 * * * *`) that runs both automatic Discord jobs: completed required meeting missing-member pings and persistent kiosk status refresh. The jobs use separate durable idempotency tables and can safely coexist in the same scheduled invocation.
@@ -352,7 +353,17 @@ The default threshold is `KIOSK_DISCORD_OFFLINE_THRESHOLD_MINUTES=1`. This inten
 
 Create/edit operations are claimed in D1 before calling Discord, so overlapping Cron executions do not both create or edit the persistent message. Discord failures leave the row in `error` with the message text and are retried by a later Cron run. If `DISCORD_ATTENDANCE_CHANNEL_ID` is changed, the Worker creates and tracks a separate persistent message for the newly configured channel instead of editing the old channel's message.
 
-Production D1 migrations through `0013_discord_kiosk_status_messages.sql` are applied. `DISCORD_BOT_TOKEN`, `DISCORD_ATTENDANCE_CHANNEL_ID`, and `KIOSK_DISCORD_OFFLINE_THRESHOLD_MINUTES=1` are configured on the production Worker. Persistent Discord kiosk status delivery is deployed in Worker version `0d907192-bff0-465d-af14-075f0b642609`.
+Production D1 migrations through `0014_discord_scheduled_event_mappings.sql` are applied. `DISCORD_BOT_TOKEN`, `DISCORD_ATTENDANCE_CHANNEL_ID`, and `KIOSK_DISCORD_OFFLINE_THRESHOLD_MINUTES=1` are configured on the production Worker. Persistent Discord kiosk status delivery was added in Worker version `0d907192-bff0-465d-af14-075f0b642609`.
+
+## Discord Scheduled Event Sync
+
+The dashboard Meetings views can push scheduled meetings to the Discord server calendar as external Guild Scheduled Events. Single-meeting sync is available from selected meeting details, and bulk sync is available from selected rows in All Meetings. The Worker uses each scheduled meeting's title, start/end times, notes, and required/optional state to build the Discord event payload. External Discord events use `Central High School` as the default location.
+
+Migration `0014_discord_scheduled_event_mappings.sql` stores one durable mapping from each local scheduled meeting ID to the Discord guild/event ID. Later syncs update the mapped Discord event instead of creating duplicates. Failed updates leave the mapping in `error` with the last provider message, so the same dashboard action can be retried safely. The sync workflow only creates or updates events; it does not delete Discord events automatically when meetings are edited or removed.
+
+Scheduled Event sync uses `DISCORD_BOT_TOKEN`. It targets `DISCORD_GUILD_ID` when configured, otherwise it safely derives the guild by reading `DISCORD_ATTENDANCE_CHANNEL_ID` from the Discord API. If neither path is available, the dashboard returns per-meeting configuration failures without creating mappings or touching meeting, attendance, roster, fingerprint, or notification data.
+
+Deployment `https://5a30d83c.frc-attendance-dashboard.pages.dev` and Worker version `d9a9c5dd-e0d1-443f-b81c-7b7d7b035819` add dashboard-driven Discord Scheduled Event sync. Remote D1 migration `0014_discord_scheduled_event_mappings.sql` was applied before the Worker deploy. Full repository tests/typecheck/build, local migrations, production Worker health, dashboard serving, Pi-local roster pull smoke, and unauthenticated sync-route rejection passed on 2026-08-28. No production attendance, roster, fingerprint, notification, or Discord event data was mutated by the smoke checks; the standard Pi-local roster smoke refreshed the bench Pi's local roster cache from production.
 
 Application setup and guild-scoped development registration:
 

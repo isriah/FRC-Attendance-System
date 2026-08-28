@@ -16,9 +16,26 @@ export interface BulkScheduledMeetingDeleteInput {
 
 export async function listScheduledMeetings(env: Env): Promise<ScheduledMeeting[]> {
   const rows = await env.DB.prepare(`
-    SELECT id, meeting_date, title, required, starts_at, ends_at, notes, created_at, updated_at
+    SELECT
+      scheduled_meetings.id,
+      scheduled_meetings.meeting_date,
+      scheduled_meetings.title,
+      scheduled_meetings.required,
+      scheduled_meetings.starts_at,
+      scheduled_meetings.ends_at,
+      scheduled_meetings.notes,
+      scheduled_meetings.created_at,
+      scheduled_meetings.updated_at,
+      discord_scheduled_event_mappings.guild_id AS discord_guild_id,
+      discord_scheduled_event_mappings.discord_event_id,
+      discord_scheduled_event_mappings.location AS discord_event_location,
+      discord_scheduled_event_mappings.status AS discord_event_status,
+      discord_scheduled_event_mappings.last_synced_at AS discord_event_last_synced_at,
+      discord_scheduled_event_mappings.last_error AS discord_event_last_error
     FROM scheduled_meetings
-    ORDER BY meeting_date, starts_at
+    LEFT JOIN discord_scheduled_event_mappings
+      ON discord_scheduled_event_mappings.scheduled_meeting_id = scheduled_meetings.id
+    ORDER BY scheduled_meetings.meeting_date, scheduled_meetings.starts_at
   `).all<ScheduledMeetingRow>();
   return rows.results.map(fromRow);
 }
@@ -203,6 +220,14 @@ function fromRow(row: ScheduledMeetingRow): ScheduledMeeting {
     startsAt: row.starts_at ?? undefined,
     endsAt: row.ends_at ?? undefined,
     notes: row.notes ?? undefined,
+    discordScheduledEvent: row.discord_event_id ? {
+      guildId: row.discord_guild_id ?? "",
+      eventId: row.discord_event_id,
+      location: row.discord_event_location ?? "",
+      status: row.discord_event_status ?? "synced",
+      lastSyncedAt: row.discord_event_last_synced_at ?? undefined,
+      lastError: row.discord_event_last_error ?? undefined
+    } : null,
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
@@ -216,6 +241,12 @@ interface ScheduledMeetingRow {
   starts_at: string | null;
   ends_at: string | null;
   notes: string | null;
+  discord_guild_id?: string | null;
+  discord_event_id?: string | null;
+  discord_event_location?: string | null;
+  discord_event_status?: string | null;
+  discord_event_last_synced_at?: string | null;
+  discord_event_last_error?: string | null;
   created_at: string;
   updated_at: string;
 }

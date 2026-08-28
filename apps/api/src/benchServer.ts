@@ -89,6 +89,19 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS scheduled_meetings_required_date_idx ON scheduled_meetings(required, meeting_date);
 
+  CREATE TABLE IF NOT EXISTS discord_scheduled_event_mappings (
+    scheduled_meeting_id TEXT PRIMARY KEY,
+    guild_id TEXT NOT NULL,
+    discord_event_id TEXT NOT NULL,
+    location TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'synced',
+    attempts INTEGER NOT NULL DEFAULT 1,
+    last_synced_at TEXT,
+    last_error TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
   CREATE TABLE IF NOT EXISTS attendance_exclusions (
     id TEXT PRIMARY KEY,
     student_id TEXT NOT NULL,
