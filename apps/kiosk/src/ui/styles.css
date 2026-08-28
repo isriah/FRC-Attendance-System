@@ -2,10 +2,11 @@ html,
 body,
 #root {
   --page-bg: #f4f6f8;
-  --surface-bg: var(--primary-color);
+  --surface-bg: #424a53;
   --text-color: #17202a;
+  --on-surface-color: #ffffff;
   --on-primary-color: #ffffff;
-  --muted-color: color-mix(in srgb, var(--on-primary-color), var(--primary-color) 18%);
+  --muted-color: color-mix(in srgb, var(--on-surface-color), var(--surface-bg) 22%);
   --border-color: #d8dee6;
   --primary-color: #B80100;
   --accent-color: #f2c14e;
@@ -14,7 +15,8 @@ body,
   --network-online-color: #33d17a;
   --network-queued-color: #f2c14e;
   --network-offline-color: #ff5b57;
-  --network-unknown-color: color-mix(in srgb, var(--on-primary-color), var(--primary-color) 42%);
+  --network-unknown-color: color-mix(in srgb, var(--on-surface-color), var(--surface-bg) 42%);
+  --idle-mark-color: color-mix(in srgb, var(--surface-bg), #000000 34%);
   --primary-dark: color-mix(in srgb, var(--primary-color), #000000 26%);
   --primary-soft: color-mix(in srgb, var(--primary-color), #ffffff 76%);
   --primary-bg: var(--primary-color);
@@ -28,8 +30,8 @@ body,
   height: 100%;
   margin: 0;
   font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  background: var(--primary-color);
-  color: var(--on-primary-color);
+  background: var(--surface-bg);
+  color: var(--on-surface-color);
 }
 
 .kiosk-shell {
@@ -40,7 +42,7 @@ body,
   justify-items: center;
   padding: 32px;
   box-sizing: border-box;
-  background: var(--primary-color);
+  background: var(--surface-bg);
 }
 
 .kiosk-shell-welcome,
@@ -82,7 +84,7 @@ body,
   height: 13px;
   border-radius: 50%;
   background: currentColor;
-  box-shadow: 0 0 0 3px var(--primary-color);
+  box-shadow: 0 0 0 3px var(--surface-bg);
 }
 
 .network-status-online {
@@ -108,7 +110,7 @@ body,
 }
 
 .kiosk-brand strong {
-  color: var(--on-primary-color);
+  color: var(--on-surface-color);
   font-size: 22px;
 }
 
@@ -128,7 +130,7 @@ body,
   width: 132px;
   height: 132px;
   border-radius: 50%;
-  border: 14px solid var(--primary-dark);
+  border: 14px solid var(--idle-mark-color);
   box-shadow: inset 0 0 0 18px var(--accent-color);
 }
 
@@ -187,7 +189,7 @@ p {
 @keyframes success-pulse {
   0%,
   100% {
-    background: var(--primary-color);
+    background: var(--surface-bg);
   }
 
   45% {
@@ -198,7 +200,7 @@ p {
 @keyframes failure-flash {
   0%,
   100% {
-    background: var(--primary-color);
+    background: var(--surface-bg);
   }
 
   50% {
