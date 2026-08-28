@@ -54,6 +54,39 @@ describe("Discord interactions", () => {
     expect(discordIdFor(env, "100001")).toBe("111111111111111111");
   });
 
+  it("treats a repeated link from the same Discord user as idempotent", async () => {
+    const env = createTestEnv();
+    insertStudent(env, "100001", "Ada", "Lovelace", 1, "111111111111111111");
+
+    const response = await signedRequest(env, linkCommand("100001", "111111111111111111"));
+
+    expect(await response.json()).toMatchObject({
+      type: 4,
+      data: { flags: 64, content: expect.stringContaining("already linked to member ID 100001") }
+    });
+    expect(discordIdFor(env, "100001")).toBe("111111111111111111");
+  });
+
+  it("does not report success when a concurrent edit claims the member first", async () => {
+    let raced = false;
+    const env = createTestEnv((sql, sqlite) => {
+      if (!raced && sql.includes("UPDATE students SET discord_user_id")) {
+        raced = true;
+        sqlite.prepare("UPDATE students SET discord_user_id = ? WHERE student_id = ?")
+          .run("222222222222222222", "100001");
+      }
+    });
+    insertStudent(env, "100001", "Ada", "Lovelace");
+
+    const response = await signedRequest(env, linkCommand("100001", "111111111111111111"));
+
+    expect(await response.json()).toMatchObject({
+      type: 4,
+      data: { flags: 64, content: expect.stringContaining("already linked to a different Discord account") }
+    });
+    expect(discordIdFor(env, "100001")).toBe("222222222222222222");
+  });
+
   it("keeps not-found and inactive member responses private without changing the roster", async () => {
     const env = createTestEnv();
     insertStudent(env, "100002", "Inactive", "Member", 0);
@@ -121,7 +154,7 @@ async function signedRequest(env: Env, body: unknown) {
   }), env);
 }
 
-function createTestEnv(): Env {
+function createTestEnv(beforeRun?: (sql: string, sqlite: Database.Database) => void): Env {
   const sqlite = new Database(":memory:");
   sqlite.exec(`
     CREATE TABLE students (
@@ -137,7 +170,7 @@ function createTestEnv(): Env {
     WHERE discord_user_id IS NOT NULL;
   `);
   return {
-    DB: d1(sqlite),
+    DB: d1(sqlite, beforeRun),
     DISCORD_PUBLIC_KEY: publicKeyHex
   } as unknown as Env;
 }
@@ -165,11 +198,11 @@ function bytesToHex(bytes: Uint8Array): string {
   return [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-function d1(sqlite: Database.Database) {
+function d1(sqlite: Database.Database, beforeRun?: (sql: string, sqlite: Database.Database) => void) {
   return {
     sqlite,
     prepare(sql: string) {
-      return new TestStatement(sqlite, sql);
+      return new TestStatement(sqlite, sql, beforeRun);
     }
   };
 }
@@ -177,10 +210,14 @@ function d1(sqlite: Database.Database) {
 class TestStatement {
   private params: unknown[] = [];
 
-  constructor(private readonly sqlite: Database.Database, private readonly sql: string) {}
+  constructor(
+    private readonly sqlite: Database.Database,
+    private readonly sql: string,
+    private readonly beforeRun?: (sql: string, sqlite: Database.Database) => void
+  ) {}
 
   bind(...params: unknown[]) {
-    const next = new TestStatement(this.sqlite, this.sql);
+    const next = new TestStatement(this.sqlite, this.sql, this.beforeRun);
     next.params = params;
     return next;
   }
@@ -194,6 +231,7 @@ class TestStatement {
   }
 
   async run() {
+    this.beforeRun?.(this.sql, this.sqlite);
     return this.sqlite.prepare(this.sql).run(...this.params);
   }
 }

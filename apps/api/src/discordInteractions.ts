@@ -106,10 +106,34 @@ async function linkDiscordUser(env: Env, memberIdInput: string, discordUserId: s
   ).bind(discordUserId, memberId).first<{ student_id: string }>();
   if (existing) return { status: "discord_conflict", memberId: existing.student_id };
 
-  await env.DB.prepare(
-    "UPDATE students SET discord_user_id = ? WHERE student_id = ? AND discord_user_id IS NULL"
+  const update = await env.DB.prepare(
+    "UPDATE students SET discord_user_id = ? WHERE student_id = ? AND discord_user_id IS NULL AND active = 1"
   ).bind(discordUserId, memberId).run();
+  const changes = update.meta?.changes ?? (update as D1Result & { changes?: number }).changes;
+  if (changes === 0) {
+    return await currentLinkResult(env, memberId, discordUserId);
+  }
   return { status: "linked", member: { ...member, discord_user_id: discordUserId } };
+}
+
+async function currentLinkResult(env: Env, memberId: string, discordUserId: string): Promise<LinkResult> {
+  const member = await env.DB.prepare(`
+    SELECT student_id, first_name, last_name, discord_user_id, active
+    FROM students
+    WHERE student_id = ?
+  `).bind(memberId).first<LinkedMemberRow>();
+
+  if (!member) return { status: "not_found" };
+  if (!member.active) return { status: "inactive", member };
+  if (member.discord_user_id === discordUserId) return { status: "already_linked", member };
+  if (member.discord_user_id) return { status: "member_conflict", member };
+
+  const existing = await env.DB.prepare(
+    "SELECT student_id FROM students WHERE discord_user_id = ? AND student_id <> ?"
+  ).bind(discordUserId, memberId).first<{ student_id: string }>();
+  if (existing) return { status: "discord_conflict", memberId: existing.student_id };
+
+  throw new Error("Discord attendance link update did not change the expected member");
 }
 
 function linkResultMessage(result: LinkResult, requestedMemberId: string): string {
