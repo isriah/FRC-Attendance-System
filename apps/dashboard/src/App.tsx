@@ -1,7 +1,7 @@
 import { FormEvent, Fragment, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { apiBaseUrl, apiDelete, apiGet, apiPost, apiPut, type DashboardSession } from "./api";
-import { fingerLabelOptions, fingerprintEnrollmentName, nextAvailableFingerprintSlot, normalizeFingerLabel, type FingerprintEnrollment } from "./fingerprintEnrollment";
+import { fingerLabelOptions, fingerprintEnrollmentName, fingerprintOwnerNavigation, nextAvailableFingerprintSlot, normalizeFingerLabel, type FingerprintEnrollment } from "./fingerprintEnrollment";
 import { formatDateTime, formatTime, localTimeInputValue } from "./timeFormat";
 import "./styles.css";
 
@@ -891,6 +891,11 @@ function Roster({ session, navigation }: { session: DashboardSession; navigation
 
   function startRemapEnrollment(enrollment: FingerprintEnrollment, targetMemberId?: string) {
     const memberId = targetMemberId ?? enrollment.memberId;
+    if (!targetMemberId) {
+      const navigation = fingerprintOwnerNavigation(enrollment);
+      setRosterViewTab(navigation.rosterViewTab);
+      setRosterSearch(navigation.rosterSearch);
+    }
     setSelectedDetailMemberId(memberId);
     setEnrollMemberId(memberId);
     setEnrollSlot(String(enrollment.slot));

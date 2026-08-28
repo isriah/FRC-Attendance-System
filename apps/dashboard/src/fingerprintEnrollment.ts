@@ -38,3 +38,10 @@ export function fingerprintEnrollmentName(enrollment: Pick<FingerprintEnrollment
   const name = [enrollment.firstName, enrollment.lastName].filter(Boolean).join(" ");
   return name ? `${enrollment.memberId} - ${name}` : enrollment.memberId;
 }
+
+export function fingerprintOwnerNavigation(enrollment: Pick<FingerprintEnrollment, "memberId" | "active">) {
+  return {
+    rosterViewTab: enrollment.active ? "active" : "deactivated",
+    rosterSearch: enrollment.memberId
+  } as const;
+}

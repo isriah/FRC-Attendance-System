@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fingerprintEnrollmentName, nextAvailableFingerprintSlot, normalizeFingerLabel, type FingerprintEnrollment } from "./fingerprintEnrollment";
+import { fingerprintEnrollmentName, fingerprintOwnerNavigation, nextAvailableFingerprintSlot, normalizeFingerLabel, type FingerprintEnrollment } from "./fingerprintEnrollment";
 
 function enrollment(slot: number, memberId = `10000${slot}`): FingerprintEnrollment {
   return {
@@ -33,5 +33,16 @@ describe("fingerprint enrollment helpers", () => {
   it("shows roster names when local mappings can be joined to members", () => {
     expect(fingerprintEnrollmentName({ ...enrollment(7, "100007"), firstName: "Bench", lastName: "Member" })).toBe("100007 - Bench Member");
     expect(fingerprintEnrollmentName(enrollment(8, "100008"))).toBe("100008");
+  });
+
+  it("opens mapping owners in the matching roster view", () => {
+    expect(fingerprintOwnerNavigation(enrollment(7, "100007"))).toEqual({
+      rosterViewTab: "active",
+      rosterSearch: "100007"
+    });
+    expect(fingerprintOwnerNavigation({ ...enrollment(8, "100008"), active: 0 })).toEqual({
+      rosterViewTab: "deactivated",
+      rosterSearch: "100008"
+    });
   });
 });
