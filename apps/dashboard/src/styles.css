@@ -447,6 +447,16 @@ textarea {
   min-width: 0;
 }
 
+.roster-section {
+  display: grid;
+  gap: 16px;
+}
+
+.roster-section .section-heading,
+.roster-section .roster-controls {
+  margin-bottom: 0;
+}
+
 .roster-controls .meeting-tabs {
   margin-bottom: 0;
 }
@@ -709,7 +719,7 @@ textarea {
 
 .roster-email-table,
 .roster-member-table {
-  min-width: 860px;
+  min-width: min(100%, 760px);
   table-layout: auto;
 }
 
@@ -743,20 +753,22 @@ textarea {
 
 .member-detail-row > td {
   background: var(--page-bg);
+  padding: 14px 16px 16px;
 }
 
 .member-detail-panel {
   display: grid;
-  gap: 14px;
-  padding: 4px 0;
+  gap: 16px;
+  padding: 0;
 }
 
 .member-admin-actions {
-  align-items: center;
+  align-items: flex-start;
   background: var(--surface-bg);
   border: 1px solid var(--border-color);
   border-radius: 8px;
   display: flex;
+  flex-wrap: wrap;
   gap: 16px;
   justify-content: space-between;
   padding: 12px;
@@ -812,7 +824,27 @@ textarea {
 
 .fingerprint-detail {
   display: grid;
-  gap: 10px;
+  gap: 12px;
+  border-top: 1px solid var(--border-color);
+  padding-top: 14px;
+}
+
+.roster-import-form {
+  gap: 14px;
+}
+
+@media (max-width: 1100px) {
+  .roster-section .member-detail-grid,
+  .roster-section .fingerprint-enroll-form,
+  .roster-section .member-detail-lists,
+  .roster-section .member-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .roster-row-actions {
+    flex-wrap: wrap;
+    white-space: normal;
+  }
 }
 
 .admin-user-form {
