@@ -102,7 +102,7 @@ describe("roster sync", () => {
     expect(row?.attendance_required_from_date).toBe("2026-01-09");
   });
 
-  it("backfills existing members from durable roster sync data without changing attendance rows", async () => {
+  it("backfills existing members to the project-local roster date without changing attendance rows", async () => {
     const sqlite = new Database(":memory:");
     sqlite.exec(`
       CREATE TABLE students (
@@ -125,9 +125,10 @@ describe("roster sync", () => {
     `);
 
     sqlite.exec(readFileSync(join(process.cwd(), "migrations", "0015_student_attendance_required_from.sql"), "utf8"));
+    sqlite.exec(readFileSync(join(process.cwd(), "migrations", "0016_correct_attendance_required_from_timezone.sql"), "utf8"));
 
     expect(sqlite.prepare("SELECT attendance_required_from_date FROM students WHERE student_id = '100001'").get()).toEqual({
-      attendance_required_from_date: "2026-01-09"
+      attendance_required_from_date: "2026-01-08"
     });
     expect(sqlite.prepare("SELECT COUNT(*) AS count FROM attendance_sessions").get()).toEqual({ count: 1 });
   });

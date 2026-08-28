@@ -122,6 +122,11 @@ ensureColumn("kiosks", "last_sync_error", "TEXT");
 ensureColumn("students", "email", "TEXT");
 ensureColumn("students", "discord_user_id", "TEXT");
 ensureColumn("students", "attendance_required_from_date", "TEXT");
+db.prepare(`
+  UPDATE students
+  SET attendance_required_from_date = date('now', 'localtime')
+  WHERE attendance_required_from_date IS NULL
+`).run();
 
 async function seedBenchData() {
   db.prepare(`
@@ -529,7 +534,8 @@ function syncRoster(members: RosterMemberInput[]) {
       last_name = excluded.last_name,
       email = COALESCE(excluded.email, students.email),
       discord_user_id = COALESCE(excluded.discord_user_id, students.discord_user_id),
-      active = 1
+      active = 1,
+      attendance_required_from_date = COALESCE(students.attendance_required_from_date, excluded.attendance_required_from_date)
   `);
 
   const transaction = db.transaction(() => {
