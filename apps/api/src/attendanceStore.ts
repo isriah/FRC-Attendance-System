@@ -109,7 +109,7 @@ export async function removeMemberFromMeeting(env: Env, input: { memberId: strin
   if (sessions.results.length === 0) throw Object.assign(new Error("Member is not present for this meeting"), { status: 409 });
 
   const existing = await env.DB.prepare(
-    "SELECT id FROM attendance_exclusions WHERE student_id = ? AND meeting_date = ?"
+    "SELECT id FROM attendance_exclusions WHERE student_id = ? AND meeting_date = ? AND superseded_at IS NULL"
   ).bind(input.memberId, meetingDate).first<{ id: string }>();
   if (existing) throw Object.assign(new Error("Member has already been removed from this meeting"), { status: 409 });
 
@@ -183,9 +183,9 @@ export async function rebuildAttendanceSessions(env: Env): Promise<void> {
   ).all<{ id: string; student_id: string; occurred_at: string; status: "accepted" }>();
   const manual = await env.DB.prepare(
     "SELECT id, student_id, occurred_at, action, reason, admin_email FROM manual_events ORDER BY occurred_at ASC"
-  ).all<{ id: string; student_id: string; occurred_at: string; action: "check_in" | "check_out"; reason: string; admin_email: string }>();
+  ).all<{ id: string; student_id: string; occurred_at: string; action: "check_in" | "check_out" | "confirm_present"; reason: string; admin_email: string }>();
   const exclusions = await env.DB.prepare(
-    "SELECT student_id, meeting_date FROM attendance_exclusions"
+    "SELECT student_id, meeting_date FROM attendance_exclusions WHERE superseded_at IS NULL"
   ).all<{ student_id: string; meeting_date: string }>();
   const excludedMemberDates = new Set(exclusions.results.map((row) => `${row.student_id}:${row.meeting_date}`));
 

@@ -64,7 +64,7 @@ export interface ManualEvent {
   id: string;
   memberId: string;
   occurredAt: string;
-  action: "check_in" | "check_out";
+  action: "check_in" | "check_out" | "confirm_present";
   reason: string;
   adminEmail: string;
 }

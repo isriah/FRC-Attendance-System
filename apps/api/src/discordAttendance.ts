@@ -1,5 +1,6 @@
 import { requireIsoDate } from "@frc-attendance/shared";
 import type { AdminPrincipal } from "./auth";
+import { rebuildAttendanceSessions } from "./attendanceStore";
 import type { Env } from "./env";
 import { buildMeetingAbsenceReport } from "./reports";
 
@@ -83,6 +84,7 @@ interface MeetingRow {
   meeting_date: string;
   title: string | null;
   required: number;
+  starts_at: string | null;
   ends_at: string | null;
 }
 
@@ -305,14 +307,121 @@ export async function contestAttendanceAbsence(
     : { status: "already_reviewed", contest };
 }
 
-export async function listAttendanceContests(env: Env, statusInput?: unknown): Promise<AttendanceContest[]> {
+export async function listAttendanceContests(env: Env, statusInput?: unknown, meetingDateInput?: unknown): Promise<AttendanceContest[]> {
   const status = normalizeContestListStatus(statusInput);
-  const where = status === "all" ? "" : "WHERE attendance_contests.status = ?";
+  const meetingDate = meetingDateInput === undefined || meetingDateInput === null || meetingDateInput === ""
+    ? undefined
+    : requireIsoDate(meetingDateInput, "meetingDate");
+  const conditions: string[] = [];
+  const values: string[] = [];
+  if (status !== "all") {
+    conditions.push("attendance_contests.status = ?");
+    values.push(status);
+  }
+  if (meetingDate) {
+    conditions.push("attendance_contests.meeting_date = ?");
+    values.push(meetingDate);
+  }
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
   const statement = env.DB.prepare(`${contestSelectSql()} ${where} ORDER BY attendance_contests.created_at DESC`);
-  const rows = status === "all"
-    ? await statement.all<ContestRow>()
-    : await statement.bind(status).all<ContestRow>();
+  const rows = values.length > 0 ? await statement.bind(...values).all<ContestRow>() : await statement.all<ContestRow>();
   return rows.results.map(contestFromRow);
+}
+
+export async function approveAttendanceContest(
+  env: Env,
+  contestIdInput: string,
+  input: { reviewNote?: unknown },
+  admin: AdminPrincipal
+) {
+  const contestId = requireNonEmptyString(contestIdInput, "contestId");
+  const reviewNoteInput = normalizeReviewNote(input.reviewNote);
+  const existing = await getAttendanceContest(env, contestId);
+  if (!existing) throw Object.assign(new Error("Attendance contest not found"), { status: 404 });
+  if (existing.status !== "pending") {
+    throw Object.assign(new Error(`Only pending attendance contests can be approved; this contest is ${existing.status}`), { status: 409 });
+  }
+
+  const currentSession = await env.DB.prepare(
+    "SELECT id FROM attendance_sessions WHERE student_id = ? AND meeting_date = ? LIMIT 1"
+  ).bind(existing.memberId, existing.meetingDate).first<{ id: string }>();
+  if (currentSession) {
+    throw Object.assign(new Error("Attendance already shows this member present; mark the contest reviewed without an attendance change"), { status: 409 });
+  }
+
+  const meeting = await env.DB.prepare(`
+    SELECT id, meeting_date, title, required, starts_at, ends_at
+    FROM scheduled_meetings
+    WHERE id = ?
+  `).bind(existing.scheduledMeetingId).first<MeetingRow>();
+  if (!meeting || meeting.meeting_date !== existing.meetingDate) {
+    throw Object.assign(new Error("The contest's scheduled meeting could not be found"), { status: 409 });
+  }
+
+  const reviewedAt = new Date().toISOString();
+  const effectiveReviewNote = reviewNoteInput ?? `Discord contest approved by ${admin.email}.`;
+  const correctionReason = reviewNoteInput
+    ? `Discord contest approved by ${admin.email}: ${reviewNoteInput}`
+    : effectiveReviewNote;
+  const occurredAt = meeting.starts_at ?? localDateTimeForDate(meeting.meeting_date, env.TIME_ZONE, 12).toISOString();
+  const manualEventId = crypto.randomUUID();
+  const activeExclusion = await env.DB.prepare(`
+    SELECT id
+    FROM attendance_exclusions
+    WHERE student_id = ? AND meeting_date = ? AND superseded_at IS NULL
+  `).bind(existing.memberId, existing.meetingDate).first<{ id: string }>();
+
+  const statements = [
+    env.DB.prepare(`
+      INSERT INTO manual_events (id, student_id, occurred_at, action, reason, admin_email)
+      SELECT ?, student_id, ?, 'confirm_present', ?, ?
+      FROM attendance_contests
+      WHERE id = ? AND status = 'pending'
+    `).bind(manualEventId, occurredAt, correctionReason, admin.email, contestId),
+    ...(activeExclusion ? [env.DB.prepare(`
+      UPDATE attendance_exclusions
+      SET superseded_at = ?, superseded_by_admin_email = ?, superseded_reason = ?
+      WHERE id = ? AND superseded_at IS NULL
+    `).bind(reviewedAt, admin.email, correctionReason, activeExclusion.id)] : []),
+    env.DB.prepare(`
+      UPDATE attendance_contests
+      SET status = 'resolved', reviewed_at = ?, reviewed_by_admin_email = ?, review_note = ?
+      WHERE id = ? AND status = 'pending'
+    `).bind(reviewedAt, admin.email, effectiveReviewNote, contestId)
+  ];
+  await env.DB.batch(statements);
+
+  const manualEvent = await env.DB.prepare(`
+    SELECT id, student_id, occurred_at, action, reason, admin_email
+    FROM manual_events
+    WHERE id = ?
+  `).bind(manualEventId).first<{
+    id: string;
+    student_id: string;
+    occurred_at: string;
+    action: "confirm_present";
+    reason: string;
+    admin_email: string;
+  }>();
+  if (!manualEvent) {
+    throw Object.assign(new Error("Attendance contest was reviewed by another admin before approval completed"), { status: 409 });
+  }
+
+  await rebuildAttendanceSessions(env);
+  const updated = await getAttendanceContest(env, contestId);
+  if (!updated) throw new Error("Attendance contest disappeared after approval");
+  return {
+    contest: updated,
+    manualEvent: {
+      id: manualEvent.id,
+      memberId: manualEvent.student_id,
+      occurredAt: manualEvent.occurred_at,
+      action: manualEvent.action,
+      reason: manualEvent.reason,
+      adminEmail: manualEvent.admin_email
+    },
+    supersededAttendanceExclusionId: activeExclusion?.id ?? null
+  };
 }
 
 export async function reviewAttendanceContest(
@@ -399,7 +508,7 @@ function buildDiscordBotMessage(
 
 async function requiredMeeting(env: Env, meetingDate: string): Promise<MeetingRow> {
   const meeting = await env.DB.prepare(`
-    SELECT id, meeting_date, title, required, ends_at
+    SELECT id, meeting_date, title, required, starts_at, ends_at
     FROM scheduled_meetings
     WHERE meeting_date = ?
   `).bind(meetingDate).first<MeetingRow>();
@@ -421,15 +530,20 @@ function startOfNextLocalDay(meetingDate: string, timeZone: string): Date {
   const month = Number(dateParts[1]);
   const day = Number(dateParts[2]);
   const nextDay = new Date(Date.UTC(year, month - 1, day + 1));
-  const target = {
-    year: nextDay.getUTCFullYear(),
-    month: nextDay.getUTCMonth() + 1,
-    day: nextDay.getUTCDate(),
-    hour: 0,
-    minute: 0,
-    second: 0
-  };
-  let guess = Date.UTC(target.year, target.month - 1, target.day, 0, 0, 0);
+  return localDateTimeForDate([
+    nextDay.getUTCFullYear(),
+    String(nextDay.getUTCMonth() + 1).padStart(2, "0"),
+    String(nextDay.getUTCDate()).padStart(2, "0")
+  ].join("-"), timeZone, 0);
+}
+
+function localDateTimeForDate(meetingDate: string, timeZone: string, hour: number): Date {
+  const dateParts = meetingDate.split("-");
+  const year = Number(dateParts[0]);
+  const month = Number(dateParts[1]);
+  const day = Number(dateParts[2]);
+  const target = { year, month, day, hour, minute: 0, second: 0 };
+  let guess = Date.UTC(target.year, target.month - 1, target.day, target.hour, 0, 0);
   const formatter = new Intl.DateTimeFormat("en-US", {
     timeZone,
     year: "numeric",
@@ -450,7 +564,7 @@ function startOfNextLocalDay(meetingDate: string, timeZone: string): Date {
       Number(parts.minute),
       Number(parts.second)
     );
-    const targetAsUtc = Date.UTC(target.year, target.month - 1, target.day, 0, 0, 0);
+    const targetAsUtc = Date.UTC(target.year, target.month - 1, target.day, target.hour, 0, 0);
     guess -= renderedAsUtc - targetAsUtc;
   }
   return new Date(guess);

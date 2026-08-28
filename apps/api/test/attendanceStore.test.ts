@@ -811,8 +811,13 @@ function createTestEnv(overrides: Partial<Env> = {}): Env {
       reason TEXT NOT NULL,
       admin_email TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      UNIQUE(student_id, meeting_date)
+      superseded_at TEXT,
+      superseded_by_admin_email TEXT,
+      superseded_reason TEXT
     );
+    CREATE UNIQUE INDEX attendance_exclusions_active_member_date_unique_idx
+    ON attendance_exclusions(student_id, meeting_date)
+    WHERE superseded_at IS NULL;
 
     CREATE TABLE scheduled_meetings (
       id TEXT PRIMARY KEY,

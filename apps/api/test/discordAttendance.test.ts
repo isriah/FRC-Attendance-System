@@ -138,6 +138,12 @@ describe("attendance contest lifecycle", () => {
       }]
     });
 
+    const meetingListResponse = await adminRequest(env, "GET", "/admin/attendance-contests?meetingDate=2026-01-02");
+    expect(meetingListResponse.status).toBe(200);
+    expect(await meetingListResponse.json()).toMatchObject({
+      contests: [{ id: created.contest.id, meetingDate: "2026-01-02" }]
+    });
+
     const reviewResponse = await adminRequest(env, "PUT", `/admin/attendance-contests/${created.contest.id}`, {
       status: "resolved",
       reviewNote: "Added a manual check-in after confirming with the drive coach."
@@ -150,6 +156,78 @@ describe("attendance contest lifecycle", () => {
       reviewNote: "Added a manual check-in after confirming with the drive coach."
     });
     expect(countRows(env, "attendance_sessions")).toBe(0);
+  });
+
+  it("approves a pending contest through an audited manual correction and normal attendance rebuild", async () => {
+    const env = createTestEnv();
+    insertStudent(env, "100001", "Ada", "Lovelace", "111111111111111111");
+    insertMeeting(env, "2026-01-02", "2026-01-02T22:00:00.000Z");
+    insertDelivery(env, "100001", "111111111111111111", "444444444444444444");
+    const created = await contestAttendanceAbsence(env, contestInput("555555555555555551", "111111111111111111"));
+    if (created.status !== "created") throw new Error("Expected a created contest");
+
+    const approveResponse = await adminRequest(env, "POST", `/admin/attendance-contests/${created.contest.id}/approve`, {
+      reviewNote: "Drive coach confirmed the member attended."
+    });
+
+    expect(approveResponse.status).toBe(200);
+    expect(await approveResponse.json()).toMatchObject({
+      contest: {
+        id: created.contest.id,
+        status: "resolved",
+        reviewedByAdminEmail: "mentor@example.com",
+        reviewNote: "Drive coach confirmed the member attended."
+      },
+      manualEvent: {
+        memberId: "100001",
+        action: "confirm_present",
+        adminEmail: "mentor@example.com"
+      },
+      supersededAttendanceExclusionId: null
+    });
+    expect(await env.DB.prepare("SELECT action, reason, admin_email FROM manual_events").first()).toEqual({
+      action: "confirm_present",
+      reason: "Discord contest approved by mentor@example.com: Drive coach confirmed the member attended.",
+      admin_email: "mentor@example.com"
+    });
+    expect(countRows(env, "attendance_sessions")).toBe(1);
+
+    const absenceResponse = await adminRequest(env, "GET", "/admin/reports/meeting-absences?date=2026-01-02");
+    expect(absenceResponse.status).toBe(200);
+    expect(await absenceResponse.json()).toMatchObject({ absentCount: 0, rows: [] });
+  });
+
+  it("supersedes an existing absent correction while preserving its audit record", async () => {
+    const env = createTestEnv();
+    insertStudent(env, "100001", "Ada", "Lovelace", "111111111111111111");
+    insertMeeting(env, "2026-01-02", "2026-01-02T22:00:00.000Z");
+    insertDelivery(env, "100001", "111111111111111111", "444444444444444444");
+    const created = await contestAttendanceAbsence(env, contestInput("555555555555555551", "111111111111111111"));
+    if (created.status !== "created") throw new Error("Expected a created contest");
+    await env.DB.prepare(`
+      INSERT INTO scan_events (id, kiosk_id, local_event_id, student_id, occurred_at, synced_at, source, status)
+      VALUES ('scan-1', 'kiosk-1', 'local-1', '100001', '2026-01-02T20:15:00.000Z', '2026-01-02T20:15:01.000Z', 'fingerprint', 'accepted')
+    `).run();
+    await env.DB.prepare(`
+      INSERT INTO attendance_exclusions (id, student_id, meeting_date, reason, admin_email)
+      VALUES ('exclusion-1', '100001', '2026-01-02', 'Incorrect prior removal', 'other-mentor@example.com')
+    `).run();
+
+    const approveResponse = await adminRequest(env, "POST", `/admin/attendance-contests/${created.contest.id}/approve`, {});
+    expect(approveResponse.status).toBe(200);
+    expect(await approveResponse.json()).toMatchObject({ supersededAttendanceExclusionId: "exclusion-1" });
+    expect(await env.DB.prepare(`
+      SELECT reason, admin_email, superseded_by_admin_email, superseded_reason
+      FROM attendance_exclusions
+      WHERE id = 'exclusion-1'
+    `).first()).toEqual({
+      reason: "Incorrect prior removal",
+      admin_email: "other-mentor@example.com",
+      superseded_by_admin_email: "mentor@example.com",
+      superseded_reason: "Discord contest approved by mentor@example.com."
+    });
+    expect(countRows(env, "attendance_exclusions")).toBe(1);
+    expect(countRows(env, "attendance_sessions")).toBe(1);
   });
 });
 
@@ -189,6 +267,40 @@ function createTestEnv(overrides: Partial<Env> = {}): Env {
       source_event_ids TEXT NOT NULL,
       rebuilt_at TEXT NOT NULL
     );
+    CREATE TABLE scan_events (
+      id TEXT PRIMARY KEY,
+      kiosk_id TEXT NOT NULL,
+      local_event_id TEXT NOT NULL,
+      student_id TEXT NOT NULL,
+      occurred_at TEXT NOT NULL,
+      synced_at TEXT NOT NULL,
+      source TEXT NOT NULL,
+      status TEXT NOT NULL,
+      rejection_reason TEXT
+    );
+    CREATE TABLE manual_events (
+      id TEXT PRIMARY KEY,
+      student_id TEXT NOT NULL,
+      occurred_at TEXT NOT NULL,
+      action TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      admin_email TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE attendance_exclusions (
+      id TEXT PRIMARY KEY,
+      student_id TEXT NOT NULL,
+      meeting_date TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      admin_email TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      superseded_at TEXT,
+      superseded_by_admin_email TEXT,
+      superseded_reason TEXT
+    );
+    CREATE UNIQUE INDEX attendance_exclusions_active_member_date_unique_idx
+    ON attendance_exclusions(student_id, meeting_date)
+    WHERE superseded_at IS NULL;
     CREATE TABLE scheduled_meetings (
       id TEXT PRIMARY KEY,
       meeting_date TEXT NOT NULL UNIQUE,
@@ -312,6 +424,10 @@ function d1(sqlite: Database.Database) {
     sqlite,
     prepare(sql: string) {
       return new TestStatement(sqlite, sql);
+    },
+    async batch(statements: TestStatement[]) {
+      const transaction = sqlite.transaction(() => statements.map((statement) => statement.run()));
+      return transaction();
     }
   };
 }
