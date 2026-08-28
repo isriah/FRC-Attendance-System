@@ -131,7 +131,8 @@ npm --workspace <package> run <script>
 ## Verification Expectations
 
 - For documentation-only changes, runtime tests are not required.
-- For code changes, run targeted tests and typechecks for the changed workspace first.
+- For code changes, use a two-level test policy: run targeted tests and typechecks for the changed workspace while implementing, then run the complete root test suite once before the final merge or deploy of each completed discrete unit.
+- The complete root suite is not required after every edit; use targeted verification during iteration and reserve the full-suite pass for the final readiness check.
 - Run root `npm.cmd run typecheck` when TypeScript contracts or shared code change.
 - Run root `npm.cmd run build` when frontend, package, deployment, or build behavior changes.
 - When Raspberry Pi validation is needed, SSH directly into the Pi as `attkiosk@AttKiosk` and run the checks there instead of asking the user to run commands manually.
