@@ -1,4 +1,4 @@
-import { requireIsoDate } from "@frc-attendance/shared";
+import { meetingDateForTimestamp, requireIsoDate } from "@frc-attendance/shared";
 import type { AdminPrincipal } from "./auth";
 import { rebuildAttendanceSessions } from "./attendanceStore";
 import type { Env } from "./env";
@@ -363,31 +363,38 @@ export async function approveAttendanceContest(
   const correctionReason = reviewNoteInput
     ? `Discord contest approved by ${admin.email}: ${reviewNoteInput}`
     : effectiveReviewNote;
-  const occurredAt = meeting.starts_at ?? localDateTimeForDate(meeting.meeting_date, env.TIME_ZONE, 12).toISOString();
+  const occurredAt = contestApprovalOccurredAt(meeting, env.TIME_ZONE);
   const manualEventId = crypto.randomUUID();
-  const activeExclusion = await env.DB.prepare(`
-    SELECT id
-    FROM attendance_exclusions
-    WHERE student_id = ? AND meeting_date = ? AND superseded_at IS NULL
-  `).bind(existing.memberId, existing.meetingDate).first<{ id: string }>();
 
   const statements = [
     env.DB.prepare(`
       INSERT INTO manual_events (id, student_id, occurred_at, action, reason, admin_email)
       SELECT ?, student_id, ?, 'confirm_present', ?, ?
       FROM attendance_contests
-      WHERE id = ? AND status = 'pending'
+      WHERE id = ?
+        AND status = 'pending'
+        AND NOT EXISTS (
+          SELECT 1
+          FROM attendance_sessions
+          WHERE student_id = attendance_contests.student_id
+            AND meeting_date = attendance_contests.meeting_date
+        )
     `).bind(manualEventId, occurredAt, correctionReason, admin.email, contestId),
-    ...(activeExclusion ? [env.DB.prepare(`
+    env.DB.prepare(`
       UPDATE attendance_exclusions
       SET superseded_at = ?, superseded_by_admin_email = ?, superseded_reason = ?
-      WHERE id = ? AND superseded_at IS NULL
-    `).bind(reviewedAt, admin.email, correctionReason, activeExclusion.id)] : []),
+      WHERE student_id = ?
+        AND meeting_date = ?
+        AND superseded_at IS NULL
+        AND EXISTS (SELECT 1 FROM manual_events WHERE id = ?)
+    `).bind(reviewedAt, admin.email, correctionReason, existing.memberId, existing.meetingDate, manualEventId),
     env.DB.prepare(`
       UPDATE attendance_contests
       SET status = 'resolved', reviewed_at = ?, reviewed_by_admin_email = ?, review_note = ?
-      WHERE id = ? AND status = 'pending'
-    `).bind(reviewedAt, admin.email, effectiveReviewNote, contestId)
+      WHERE id = ?
+        AND status = 'pending'
+        AND EXISTS (SELECT 1 FROM manual_events WHERE id = ?)
+    `).bind(reviewedAt, admin.email, effectiveReviewNote, contestId, manualEventId)
   ];
   await env.DB.batch(statements);
 
@@ -404,10 +411,28 @@ export async function approveAttendanceContest(
     admin_email: string;
   }>();
   if (!manualEvent) {
-    throw Object.assign(new Error("Attendance contest was reviewed by another admin before approval completed"), { status: 409 });
+    const latestContest = await getAttendanceContest(env, contestId);
+    const latestSession = await env.DB.prepare(
+      "SELECT id FROM attendance_sessions WHERE student_id = ? AND meeting_date = ? LIMIT 1"
+    ).bind(existing.memberId, existing.meetingDate).first<{ id: string }>();
+    const message = latestContest?.status !== "pending"
+      ? "Attendance contest was reviewed by another admin before approval completed"
+      : latestSession
+        ? "Attendance already shows this member present; mark the contest reviewed without an attendance change"
+        : "Attendance contest approval could not be recorded";
+    throw Object.assign(new Error(message), { status: 409 });
   }
 
   await rebuildAttendanceSessions(env);
+  const supersededExclusion = await env.DB.prepare(`
+    SELECT id
+    FROM attendance_exclusions
+    WHERE student_id = ?
+      AND meeting_date = ?
+      AND superseded_at = ?
+      AND superseded_by_admin_email = ?
+    LIMIT 1
+  `).bind(existing.memberId, existing.meetingDate, reviewedAt, admin.email).first<{ id: string }>();
   const updated = await getAttendanceContest(env, contestId);
   if (!updated) throw new Error("Attendance contest disappeared after approval");
   return {
@@ -420,7 +445,7 @@ export async function approveAttendanceContest(
       reason: manualEvent.reason,
       adminEmail: manualEvent.admin_email
     },
-    supersededAttendanceExclusionId: activeExclusion?.id ?? null
+    supersededAttendanceExclusionId: supersededExclusion?.id ?? null
   };
 }
 
@@ -535,6 +560,19 @@ function startOfNextLocalDay(meetingDate: string, timeZone: string): Date {
     String(nextDay.getUTCMonth() + 1).padStart(2, "0"),
     String(nextDay.getUTCDate()).padStart(2, "0")
   ].join("-"), timeZone, 0);
+}
+
+function contestApprovalOccurredAt(meeting: MeetingRow, timeZone: string): string {
+  if (meeting.starts_at) {
+    try {
+      if (meetingDateForTimestamp(meeting.starts_at, timeZone) === meeting.meeting_date) {
+        return new Date(meeting.starts_at).toISOString();
+      }
+    } catch {
+      // Legacy meetings can contain time-only values; use a stable local-noon correction instead.
+    }
+  }
+  return localDateTimeForDate(meeting.meeting_date, timeZone, 12).toISOString();
 }
 
 function localDateTimeForDate(meetingDate: string, timeZone: string, hour: number): Date {

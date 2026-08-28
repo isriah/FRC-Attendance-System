@@ -197,6 +197,24 @@ describe("attendance contest lifecycle", () => {
     expect(await absenceResponse.json()).toMatchObject({ absentCount: 0, rows: [] });
   });
 
+  it("uses a valid local-noon correction timestamp for legacy meeting start values", async () => {
+    const env = createTestEnv();
+    insertStudent(env, "100001", "Ada", "Lovelace", "111111111111111111");
+    insertMeeting(env, "2026-01-02", "2026-01-02T22:00:00.000Z");
+    await env.DB.prepare("UPDATE scheduled_meetings SET starts_at = '15:00' WHERE meeting_date = '2026-01-02'").run();
+    insertDelivery(env, "100001", "111111111111111111", "444444444444444444");
+    const created = await contestAttendanceAbsence(env, contestInput("555555555555555551", "111111111111111111"));
+    if (created.status !== "created") throw new Error("Expected a created contest");
+
+    const approveResponse = await adminRequest(env, "POST", `/admin/attendance-contests/${created.contest.id}/approve`, {});
+
+    expect(approveResponse.status).toBe(200);
+    expect(await env.DB.prepare("SELECT occurred_at FROM manual_events").first()).toEqual({
+      occurred_at: "2026-01-02T17:00:00.000Z"
+    });
+    expect(countRows(env, "attendance_sessions")).toBe(1);
+  });
+
   it("supersedes an existing absent correction while preserving its audit record", async () => {
     const env = createTestEnv();
     insertStudent(env, "100001", "Ada", "Lovelace", "111111111111111111");
