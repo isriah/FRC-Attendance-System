@@ -5,10 +5,10 @@
 Current production API:
 
 - Worker URL: `https://frc-attendance-api.frc-attendance.workers.dev`
-- Latest deployed Worker version: `06dd4431-fa1a-4914-890a-94ac33805892`
+- Latest deployed Worker version: `0e13fb6a-e62c-4abf-b8be-71734043ef4d`
 - D1 database: `frc-attendance`
 - D1 database ID: `c02c0ca8-033b-435f-ae21-2d8f3b203b22`
-- Applied remote migrations: `0001_initial.sql` through `0010_attendance_exclusions.sql`
+- Applied remote migrations: `0001_initial.sql` through `0011_attendance_exclusion_supersession.sql`
 - Workers account subdomain: `frc-attendance.workers.dev`
 - Registered bench kiosk: `bench-01`
 
@@ -16,7 +16,7 @@ Current production dashboard:
 
 - Cloudflare Pages project: `frc-attendance-dashboard`
 - Pages URL: `https://frc-attendance-dashboard.pages.dev`
-- Latest verified deployment: `https://5af7d94a.frc-attendance-dashboard.pages.dev`
+- Latest verified deployment: `https://734664b5.frc-attendance-dashboard.pages.dev`
 - API base URL baked into the uploaded Vite build: `https://frc-attendance-api.frc-attendance.workers.dev`
 - Google OAuth client ID baked into the uploaded Vite build: `180849199739-v04bktp7rfmimgjpvohmq7pinrrpr337.apps.googleusercontent.com`
 
@@ -328,9 +328,9 @@ Dashboard admins can review contests from the global **Contests** tab or from th
 - **Reject** marks the contest `rejected` without changing attendance.
 - **Mark reviewed/no attendance change** maps to the existing `acknowledged` status for data compatibility and does not change attendance.
 
-Migration `0011_attendance_exclusion_supersession.sql` preserves the original absence-correction row while adding supersession metadata and a partial unique constraint for active exclusions. Apply this migration before deploying a Worker containing contest approval. Production remains on the migration level listed at the top of this guide until the director applies and verifies the migration.
+Migration `0011_attendance_exclusion_supersession.sql` preserves the original absence-correction row while adding supersession metadata and a partial unique constraint for active exclusions. Production has this migration applied; it must remain in place for Workers containing contest approval.
 
-Production D1 migrations through `0009_attendance_contest_idempotency.sql` are applied. `DISCORD_PUBLIC_KEY`, `DISCORD_BOT_TOKEN`, and `DISCORD_ATTENDANCE_CHANNEL_ID` are configured on the production Worker; the contest interaction and bot notification code is deployed in Worker version `65155f00-751d-4e56-91c9-c77a99fb0daf`.
+Production D1 migrations through `0011_attendance_exclusion_supersession.sql` are applied. `DISCORD_PUBLIC_KEY`, `DISCORD_BOT_TOKEN`, and `DISCORD_ATTENDANCE_CHANNEL_ID` are configured on the production Worker; contest interaction, bot notification, and audited contest approval are deployed in Worker version `0e13fb6a-e62c-4abf-b8be-71734043ef4d`.
 
 Application setup and guild-scoped development registration:
 
