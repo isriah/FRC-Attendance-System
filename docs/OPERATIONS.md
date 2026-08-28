@@ -240,6 +240,14 @@ Dashboard admins can manage database-backed OAuth access from the Admins tab by 
 
 Dashboard roster records can store an optional member email for user association. That member email does not grant dashboard admin access by itself; add the email on the Admins tab or keep it covered by the Worker env allowlist/domain.
 
+## Audited Attendance Corrections
+
+Authenticated admins can mark one currently present member absent for one meeting with `POST /admin/attendance/remove-member`. The request requires `memberId`, `meetingDate`, and a non-empty `reason`; the API records the correction ID, member, meeting date, reason, admin email, and creation time in `attendance_exclusions`. Migration `0010_attendance_exclusions.sql` creates this audit table and must be applied before deploying the matching Worker.
+
+An exclusion removes the member's derived sessions for that meeting and remains effective when sessions are rebuilt. Original fingerprint `scan_events` and mentor `manual_events` are not deleted or rewritten. Presence, absence, roster attendance, per-member percentages, exports, and notification previews therefore treat the excluded member as absent while retaining the source-event audit trail. The Meetings detail UI exposes this as **Mark absent**, requires a reason, and confirms before saving.
+
+The existing typed `CLEAR YYYY-MM-DD` operation remains the explicit destructive date-level cleanup path. It removes source scan/manual events and any attendance exclusions for that date before rebuilding sessions.
+
 ## Member Email Notifications
 
 The Worker exposes authenticated admin `POST /admin/notifications/meeting-absence` for completed required scheduled meetings. The request body accepts `meetingDate`, optional `preview`, and optional `resend`; the dashboard uses preview first, then confirms before sending when a provider is configured.

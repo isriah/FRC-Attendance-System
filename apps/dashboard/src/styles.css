@@ -684,6 +684,10 @@ textarea {
   color: var(--primary-color);
 }
 
+.member-name-link {
+  font-weight: 700;
+}
+
 .data-table-wrap {
   max-width: 100%;
   overflow-x: auto;
@@ -726,6 +730,17 @@ textarea {
   padding: 7px 9px;
 }
 
+.roster-row-actions .disclosure-button {
+  align-items: center;
+  display: inline-flex;
+  font-size: 18px;
+  height: 34px;
+  justify-content: center;
+  line-height: 1;
+  padding: 0;
+  width: 34px;
+}
+
 .member-detail-row > td {
   background: var(--page-bg);
 }
@@ -734,6 +749,22 @@ textarea {
   display: grid;
   gap: 14px;
   padding: 4px 0;
+}
+
+.member-admin-actions {
+  align-items: center;
+  background: var(--surface-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  padding: 12px;
+}
+
+.member-admin-actions h4,
+.member-admin-actions .report-context {
+  margin: 0;
 }
 
 .member-detail-grid {

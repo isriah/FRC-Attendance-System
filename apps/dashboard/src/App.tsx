@@ -269,6 +269,12 @@ function App() {
   const [session, setSession] = useState<DashboardSession>(readStoredSession);
   const [tab, setTab] = useState<Tab>("overview");
   const [themeMode, setThemeMode] = useState<ThemeMode>(readStoredThemeMode);
+  const [rosterNavigation, setRosterNavigation] = useState<{ memberId: string; requestId: string }>();
+
+  function openRosterMember(memberId: string) {
+    setRosterNavigation({ memberId, requestId: crypto.randomUUID() });
+    setTab("roster");
+  }
 
   useEffect(() => {
     document.documentElement.dataset.theme = themeMode;
@@ -305,20 +311,20 @@ function App() {
           }}>Sign out</button>
         </header>
         {tab === "overview" && <Overview session={session} />}
-        {tab === "roster" && <Roster session={session} />}
+        {tab === "roster" && <Roster session={session} navigation={rosterNavigation} />}
         {tab === "admins" && <AdminUsers session={session} />}
-        {tab === "meetings" && <Meetings session={session} />}
-        {tab === "contests" && <AttendanceContests session={session} onOpenReports={() => setTab("reports")} />}
+        {tab === "meetings" && <Meetings session={session} onOpenMember={openRosterMember} />}
+        {tab === "contests" && <AttendanceContests session={session} onOpenReports={() => setTab("reports")} onOpenMember={openRosterMember} />}
         {tab === "kiosks" && <Kiosks session={session} />}
-        {tab === "events" && <Events session={session} />}
-        {tab === "reports" && <Reports session={session} />}
+        {tab === "events" && <Events session={session} onOpenMember={openRosterMember} />}
+        {tab === "reports" && <Reports session={session} onOpenMember={openRosterMember} />}
         {tab === "export" && <LegacyExport session={session} />}
       </section>
     </main>
   );
 }
 
-function AttendanceContests({ session, onOpenReports }: { session: DashboardSession; onOpenReports: () => void }) {
+function AttendanceContests({ session, onOpenReports, onOpenMember }: { session: DashboardSession; onOpenReports: () => void; onOpenMember: (memberId: string) => void }) {
   const { data, error, loading, reload } = useApi<{ contests: AttendanceContestRow[] }>("/admin/attendance-contests", session);
   const [statusFilter, setStatusFilter] = useState<AttendanceContestStatus | "all">("pending");
   const [reviewNotes, setReviewNotes] = useState<Record<string, string>>({});
@@ -374,7 +380,9 @@ function AttendanceContests({ session, onOpenReports }: { session: DashboardSess
           <article className="contest-row" key={contest.id}>
             <div className="contest-summary">
               <div>
-                <strong>{contest.firstName} {contest.lastName}</strong>
+                <button type="button" className="link-button member-name-link" onClick={() => onOpenMember(contest.memberId)} title="Open roster details">
+                  {contest.firstName} {contest.lastName}
+                </button>
                 <span>Member {contest.memberId} · Discord {contest.discordUserId}</span>
               </div>
               <span className={`status-badge ${contest.status}`}>{contest.status}</span>
@@ -543,7 +551,7 @@ function Overview({ session }: { session: DashboardSession }) {
   );
 }
 
-function Roster({ session }: { session: DashboardSession }) {
+function Roster({ session, navigation }: { session: DashboardSession; navigation?: { memberId: string; requestId: string } }) {
   const { data, error, reload } = useApi<{ members: MemberRow[] }>("/admin/members", session);
   const { data: rosterSummary, error: rosterSummaryError, reload: reloadRosterSummary } = useApi<{ members: RosterAttendanceSummaryRow[] }>("/admin/reports/roster-attendance", session);
   const { data: meetingSummary } = useApi<{ meetings: MeetingSummaryReportRow[] }>("/admin/reports/meetings", session);
@@ -634,6 +642,15 @@ function Roster({ session }: { session: DashboardSession }) {
       return next;
     });
   }, [data?.members]);
+
+  useEffect(() => {
+    if (!navigation || !data?.members) return;
+    const member = data.members.find((candidate) => candidate.memberId === navigation.memberId);
+    if (!member) return;
+    setRosterViewTab(member.active ? "active" : "deactivated");
+    setRosterSearch(member.memberId);
+    setSelectedDetailMemberId(member.memberId);
+  }, [data?.members, navigation?.requestId]);
 
   async function saveMemberEmail(member: MemberRow) {
     const email = emailDrafts[member.memberId]?.trim() ?? "";
@@ -877,9 +894,7 @@ function Roster({ session }: { session: DashboardSession }) {
           <MemberManagementTable
             members={filteredActiveRosterRows}
             busyMemberId={busyMemberId}
-            onDeactivate={(member) => setMemberActive(member, false)}
             onReactivate={(member) => setMemberActive(member, true)}
-            onHardDelete={hardDeleteMember}
             onToggleDetails={(member) => openMemberDetails(member)}
             onEnrollFingerprint={(member) => openMemberDetails(member, true)}
             selectedMemberId={selectedDetailMemberId}
@@ -893,6 +908,8 @@ function Roster({ session }: { session: DashboardSession }) {
                 onDiscordDraftChange={(discordUserId) => setDiscordDrafts((drafts) => ({ ...drafts, [member.memberId]: discordUserId }))}
                 onSaveDiscordUserId={() => saveMemberDiscordUserId(member)}
                 onEmailAttendanceReport={() => emailMemberAttendanceReport(member)}
+                onDeactivate={() => setMemberActive(member, false)}
+                onHardDelete={() => hardDeleteMember(member)}
                 busy={busyMemberId === member.memberId}
                 reportEmailBusy={memberReportEmailBusyId === member.memberId}
                 reportEmailResult={memberReportEmailResult?.memberId === member.memberId ? memberReportEmailResult : undefined}
@@ -928,9 +945,7 @@ function Roster({ session }: { session: DashboardSession }) {
           <MemberManagementTable
             members={filteredDeactivatedMembers}
             busyMemberId={busyMemberId}
-            onDeactivate={(member) => setMemberActive(member, false)}
             onReactivate={(member) => setMemberActive(member, true)}
-            onHardDelete={hardDeleteMember}
             onToggleDetails={(member) => openMemberDetails(member)}
             onEnrollFingerprint={(member) => openMemberDetails(member, true)}
             selectedMemberId={selectedDetailMemberId}
@@ -944,6 +959,8 @@ function Roster({ session }: { session: DashboardSession }) {
                 onDiscordDraftChange={(discordUserId) => setDiscordDrafts((drafts) => ({ ...drafts, [member.memberId]: discordUserId }))}
                 onSaveDiscordUserId={() => saveMemberDiscordUserId(member)}
                 onEmailAttendanceReport={() => emailMemberAttendanceReport(member)}
+                onDeactivate={() => setMemberActive(member, false)}
+                onHardDelete={() => hardDeleteMember(member)}
                 busy={busyMemberId === member.memberId}
                 reportEmailBusy={memberReportEmailBusyId === member.memberId}
                 reportEmailResult={memberReportEmailResult?.memberId === member.memberId ? memberReportEmailResult : undefined}
@@ -1020,9 +1037,7 @@ function Roster({ session }: { session: DashboardSession }) {
 function MemberManagementTable({
   members,
   busyMemberId,
-  onDeactivate,
   onReactivate,
-  onHardDelete,
   onToggleDetails,
   onEnrollFingerprint,
   selectedMemberId,
@@ -1032,9 +1047,7 @@ function MemberManagementTable({
 }: {
   members: Array<MemberRow & { attendance?: string; requiredMeetings?: number | string }>;
   busyMemberId?: string;
-  onDeactivate: (member: MemberRow) => void;
   onReactivate: (member: MemberRow) => void;
-  onHardDelete: (member: MemberRow) => void;
   onToggleDetails: (member: MemberRow) => void;
   onEnrollFingerprint: (member: MemberRow) => void;
   selectedMemberId: string;
@@ -1064,18 +1077,23 @@ function MemberManagementTable({
                 {showAttendance ? <td>{member.attendance ?? ""}</td> : null}
                 <td>
                   <div className="mapping-actions roster-row-actions">
-                    <button type="button" disabled={busyMemberId === member.memberId} onClick={() => onToggleDetails(member)}>
-                      {selectedMemberId === member.memberId ? "Hide details" : "Details"}
+                    <button
+                      type="button"
+                      className="disclosure-button"
+                      disabled={busyMemberId === member.memberId}
+                      onClick={() => onToggleDetails(member)}
+                      aria-expanded={selectedMemberId === member.memberId}
+                      aria-label={`${selectedMemberId === member.memberId ? "Collapse" : "Expand"} details for ${member.firstName} ${member.lastName}`}
+                      title={`${selectedMemberId === member.memberId ? "Collapse" : "Expand"} member details`}
+                    >
+                      <span aria-hidden="true">{selectedMemberId === member.memberId ? "▾" : "▸"}</span>
                     </button>
                     {member.active && fingerprintEnrollmentAvailable ? (
                       <button type="button" disabled={busyMemberId === member.memberId} onClick={() => onEnrollFingerprint(member)}>Enroll fingerprint</button>
                     ) : null}
-                    {member.active ? (
-                      <button type="button" disabled={busyMemberId === member.memberId} onClick={() => onDeactivate(member)}>Deactivate</button>
-                    ) : (
+                    {!member.active ? (
                       <button type="button" disabled={busyMemberId === member.memberId} onClick={() => onReactivate(member)}>Reactivate</button>
-                    )}
-                    <button type="button" className="danger-button" disabled={busyMemberId === member.memberId} onClick={() => onHardDelete(member)}>Hard delete</button>
+                    ) : null}
                   </div>
                 </td>
               </tr>
@@ -1101,6 +1119,8 @@ function MemberDetailsPanel({
   onDiscordDraftChange,
   onSaveDiscordUserId,
   onEmailAttendanceReport,
+  onDeactivate,
+  onHardDelete,
   busy,
   reportEmailBusy,
   reportEmailResult,
@@ -1135,6 +1155,8 @@ function MemberDetailsPanel({
   onDiscordDraftChange: (discordUserId: string) => void;
   onSaveDiscordUserId: () => void;
   onEmailAttendanceReport: () => void;
+  onDeactivate: () => void;
+  onHardDelete: () => void;
   busy: boolean;
   reportEmailBusy: boolean;
   reportEmailResult?: MemberAttendanceReportNotificationResult;
@@ -1199,6 +1221,17 @@ function MemberDetailsPanel({
         {!canEmailAttendanceReport ? <span className="muted">Save an email address before sending this report.</span> : null}
       </div>
       {reportEmailResult ? <p className={`notice ${reportEmailResult.errorCount > 0 ? "error" : "success"}`}>{memberAttendanceNotificationSummary(reportEmailResult)}</p> : null}
+
+      <div className="member-admin-actions">
+        <div>
+          <h4>Roster administration</h4>
+          <p className="report-context">These actions affect this member only. Attendance history is preserved by deactivation; hard delete permanently removes member-owned data.</p>
+        </div>
+        <div className="mapping-actions">
+          {member.active ? <button type="button" disabled={busy} onClick={onDeactivate}>Deactivate</button> : null}
+          <button type="button" className="danger-button" disabled={busy} onClick={onHardDelete}>Hard delete</button>
+        </div>
+      </div>
 
       {memberReportError ? <p className="error">{memberReportError}</p> : null}
       {memberReport ? (
@@ -1462,7 +1495,7 @@ function FingerprintEnrollmentTable({
   );
 }
 
-function Meetings({ session }: { session: DashboardSession }) {
+function Meetings({ session, onOpenMember }: { session: DashboardSession; onOpenMember: (memberId: string) => void }) {
   const { data, error, reload } = useApi<{ meetings: ScheduledMeeting[] }>("/admin/meetings", session);
   const [showUnscheduledAttendance, setShowUnscheduledAttendance] = useState(false);
   const meetingReportQuery = showUnscheduledAttendance ? "?includeUnscheduled=1" : "";
@@ -1733,17 +1766,46 @@ function Meetings({ session }: { session: DashboardSession }) {
   }
 
   async function clearUnscheduledAttendance(summary: MeetingSummaryReportRow) {
-    const confirmation = window.prompt(`This permanently deletes scan and manual attendance data for ${summary.meetingDate}. Scheduled meetings, roster, kiosks, and fingerprint mappings are preserved. Type CLEAR ${summary.meetingDate} to continue.`);
+    const confirmation = window.prompt(`This permanently deletes scan events, manual events, and attendance exclusions for ${summary.meetingDate}. Scheduled meetings, roster, kiosks, and fingerprint mappings are preserved. Type CLEAR ${summary.meetingDate} to continue.`);
     if (confirmation === null) return;
     setSaving(true);
     setMessage(undefined);
     try {
-      const result = await apiPost<{ deletedScanEvents: number; deletedManualEvents: number }>("/admin/attendance/clear-date", {
+      const result = await apiPost<{ deletedScanEvents: number; deletedManualEvents: number; deletedAttendanceExclusions: number }>("/admin/attendance/clear-date", {
         meetingDate: summary.meetingDate,
         confirmation
       }, session);
-      setMessage({ kind: "success", text: `Cleared ${summary.meetingDate}: deleted ${pluralize(result.deletedScanEvents, "scan event")} and ${pluralize(result.deletedManualEvents, "manual event")}.` });
+      setMessage({ kind: "success", text: `Cleared ${summary.meetingDate}: deleted ${pluralize(result.deletedScanEvents, "scan event")}, ${pluralize(result.deletedManualEvents, "manual event")}, and ${pluralize(result.deletedAttendanceExclusions, "attendance exclusion")}.` });
       if (selectedMeetingDate === summary.meetingDate) setSelectedMeetingDate("");
+      reloadMeetingSummary();
+      reloadSelectedPresence();
+      reloadSelectedAbsences();
+    } catch (err) {
+      setMessage({ kind: "error", text: friendlyDashboardError(err) });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function removePresentMember(row: Record<string, unknown>) {
+    const memberId = String(row.memberId ?? row.member_id ?? "");
+    const memberName = [row.firstName, row.lastName].filter(Boolean).join(" ") || `member ${memberId}`;
+    const reasonInput = window.prompt(`Why should ${memberName} be marked absent for ${selectedMeetingDate}? This reason will be saved in the correction audit.`);
+    if (reasonInput === null) return;
+    const reason = reasonInput.trim();
+    if (!reason) {
+      setMessage({ kind: "error", text: "A correction reason is required to remove a member from a meeting." });
+      return;
+    }
+    if (!window.confirm(`Mark ${memberName} absent for ${selectedMeetingDate}? Original scan and manual event records will be preserved.`)) return;
+
+    setSaving(true);
+    setMessage(undefined);
+    try {
+      await apiPost("/admin/attendance/remove-member", { memberId, meetingDate: selectedMeetingDate, reason }, session);
+      setMessage({ kind: "success", text: `Marked ${memberName} absent for ${selectedMeetingDate}. Original attendance events were preserved in the audit trail.` });
+      setNotificationResult(undefined);
+      setDiscordNotificationResult(undefined);
       reloadMeetingSummary();
       reloadSelectedPresence();
       reloadSelectedAbsences();
@@ -1950,6 +2012,8 @@ function Meetings({ session }: { session: DashboardSession }) {
                 onClear={clearUnscheduledAttendance}
                 onEmailAbsent={emailAbsentMembers}
                 onDiscordPingAbsent={pingMissingMembersInDiscord}
+                onOpenMember={onOpenMember}
+                onRemoveMember={removePresentMember}
               />
           </>
         ) : null}
@@ -2207,7 +2271,9 @@ function MeetingDetails({
   discordNotificationResult,
   discordNotificationBusy,
   onEmailAbsent,
-  onDiscordPingAbsent
+  onDiscordPingAbsent,
+  onOpenMember,
+  onRemoveMember
 }: {
   meeting?: ScheduledMeeting;
   summary?: MeetingSummaryReportRow;
@@ -2227,6 +2293,8 @@ function MeetingDetails({
   onClear: (summary: MeetingSummaryReportRow) => void;
   onEmailAbsent: (meetingDate: string) => void;
   onDiscordPingAbsent: (meetingDate: string) => void;
+  onOpenMember: (memberId: string) => void;
+  onRemoveMember: (row: Record<string, unknown>) => void;
 }) {
   if (!meeting && !summary) {
     return <p className="empty-state">Select a meeting on the calendar to see attendance details.</p>;
@@ -2296,8 +2364,8 @@ function MeetingDetails({
       </div>
       {presenceError ? <p className="error">{presenceError}</p> : null}
       {absencesError ? <p className="error">{absencesError}</p> : null}
-      {notificationResult ? <NotificationResultPanel result={notificationResult} /> : null}
-      {discordNotificationResult ? <DiscordNotificationResultPanel result={discordNotificationResult} /> : null}
+      {notificationResult ? <NotificationResultPanel result={notificationResult} onOpenMember={onOpenMember} /> : null}
+      {discordNotificationResult ? <DiscordNotificationResultPanel result={discordNotificationResult} onOpenMember={onOpenMember} /> : null}
       <div className="meeting-detail-grid">
         <div>
           <div className="meeting-detail-subheading">
@@ -2305,7 +2373,14 @@ function MeetingDetails({
             <span>{presence ? meetingPresentRows.length : "..."}</span>
           </div>
           <p className="empty-state">{presentStateText}</p>
-          <DataTable rows={meetingPresentRows} columns={["memberId", "firstName", "lastName", "checkInAt", "checkOutAt"]} density="compact" />
+          <DataTable
+            rows={meetingPresentRows}
+            columns={["memberId", "firstName", "lastName", "checkInAt", "checkOutAt", "actions"]}
+            density="compact"
+            onOpenMember={onOpenMember}
+            onRemoveFromMeeting={onRemoveMember}
+            actionsDisabled={saving}
+          />
         </div>
         <div>
           <div className="meeting-detail-subheading">
@@ -2314,7 +2389,7 @@ function MeetingDetails({
           </div>
           <p className="empty-state">{absentStateText}</p>
           {!attendanceOnly && required ? (
-            <DataTable rows={absentRows} columns={["memberId", "firstName", "lastName"]} density="compact" />
+            <DataTable rows={absentRows} columns={["memberId", "firstName", "lastName"]} density="compact" onOpenMember={onOpenMember} />
           ) : (
             <p className="notice info">Track attendance here as present-only participation; use required meetings for absence accountability.</p>
           )}
@@ -2324,7 +2399,7 @@ function MeetingDetails({
   );
 }
 
-function NotificationResultPanel({ result }: { result: MeetingAbsenceNotificationResult }) {
+function NotificationResultPanel({ result, onOpenMember }: { result: MeetingAbsenceNotificationResult; onOpenMember?: (memberId: string) => void }) {
   const recipientRows = result.recipients.map((recipient) => ({
     memberId: recipient.memberId,
     firstName: recipient.firstName,
@@ -2347,18 +2422,18 @@ function NotificationResultPanel({ result }: { result: MeetingAbsenceNotificatio
         {notificationSummary(result)}
       </p>
       {result.warnings.length > 0 ? <p className="report-context">{result.warnings.join(" ")}</p> : null}
-      {recipientRows.length > 0 ? <DataTable rows={recipientRows} columns={["memberId", "firstName", "lastName", "email", "status", "error"]} density="compact" /> : null}
+      {recipientRows.length > 0 ? <DataTable rows={recipientRows} columns={["memberId", "firstName", "lastName", "email", "status", "error"]} density="compact" onOpenMember={onOpenMember} /> : null}
       {missingRows.length > 0 ? (
         <>
           <p className="report-context">{pluralize(missingRows.length, "absent member")} missing email.</p>
-          <DataTable rows={missingRows} columns={["memberId", "firstName", "lastName", "status"]} density="compact" />
+          <DataTable rows={missingRows} columns={["memberId", "firstName", "lastName", "status"]} density="compact" onOpenMember={onOpenMember} />
         </>
       ) : null}
     </div>
   );
 }
 
-function DiscordNotificationResultPanel({ result }: { result: DiscordMissingMemberNotificationResult }) {
+function DiscordNotificationResultPanel({ result, onOpenMember }: { result: DiscordMissingMemberNotificationResult; onOpenMember?: (memberId: string) => void }) {
   const recipientRows = result.recipients.map((recipient) => ({
     memberId: recipient.memberId,
     firstName: recipient.firstName,
@@ -2383,11 +2458,11 @@ function DiscordNotificationResultPanel({ result }: { result: DiscordMissingMemb
       </p>
       {result.eligibleAt ? <p className="report-context">Configured delay: {result.delayMinutes ?? 30} minutes; eligible {formatDateTime(result.eligibleAt)}.</p> : null}
       {result.warnings.length > 0 ? <p className="report-context">{result.warnings.join(" ")}</p> : null}
-      {recipientRows.length > 0 ? <DataTable rows={recipientRows} columns={["memberId", "firstName", "lastName", "discordUserId", "mention", "status", "error"]} density="compact" /> : null}
+      {recipientRows.length > 0 ? <DataTable rows={recipientRows} columns={["memberId", "firstName", "lastName", "discordUserId", "mention", "status", "error"]} density="compact" onOpenMember={onOpenMember} /> : null}
       {missingRows.length > 0 ? (
         <>
           <p className="report-context">{pluralize(missingRows.length, "absent member")} missing Discord user ID.</p>
-          <DataTable rows={missingRows} columns={["memberId", "firstName", "lastName", "status"]} density="compact" />
+          <DataTable rows={missingRows} columns={["memberId", "firstName", "lastName", "status"]} density="compact" onOpenMember={onOpenMember} />
         </>
       ) : null}
     </div>
@@ -2550,12 +2625,12 @@ function StatusBadge({ status }: { status: KioskCommandStatus | KioskHealthStatu
   return <span className={`status-badge ${status}`}>{statusLabel(status)}</span>;
 }
 
-function Events({ session }: { session: DashboardSession }) {
+function Events({ session, onOpenMember }: { session: DashboardSession; onOpenMember: (memberId: string) => void }) {
   const { data, error } = useApi<{ events: Array<Record<string, unknown>> }>("/admin/events", session);
-  return <Table title="Recent scan events" error={error} rows={data?.events ?? []} columns={["memberId", "kioskId", "occurredAt", "status", "rejectionReason"]} />;
+  return <Table title="Recent scan events" error={error} rows={data?.events ?? []} columns={["memberId", "kioskId", "occurredAt", "status", "rejectionReason"]} onOpenMember={onOpenMember} />;
 }
 
-function Reports({ session }: { session: DashboardSession }) {
+function Reports({ session, onOpenMember }: { session: DashboardSession; onOpenMember: (memberId: string) => void }) {
   const { data: members } = useApi<{ members: MemberRow[] }>("/admin/members", session);
   const { data: meetingData } = useApi<{ meetings: ScheduledMeeting[] }>("/admin/meetings", session);
   const [reportStartDate, setReportStartDate] = useState("");
@@ -2616,16 +2691,16 @@ function Reports({ session }: { session: DashboardSession }) {
   }
 
   async function clearAttendanceDate(meeting: MeetingSummaryReportRow) {
-    const confirmation = window.prompt(`This permanently deletes scan and manual attendance data for ${meeting.meetingDate}. Scheduled meetings, roster, kiosks, and fingerprint mappings are preserved. Type CLEAR ${meeting.meetingDate} to continue.`);
+    const confirmation = window.prompt(`This permanently deletes scan events, manual events, and attendance exclusions for ${meeting.meetingDate}. Scheduled meetings, roster, kiosks, and fingerprint mappings are preserved. Type CLEAR ${meeting.meetingDate} to continue.`);
     if (confirmation === null) return;
     setAttendanceActionBusyDate(meeting.meetingDate);
     setAttendanceActionMessage(undefined);
     try {
-      const result = await apiPost<{ deletedScanEvents: number; deletedManualEvents: number }>("/admin/attendance/clear-date", {
+      const result = await apiPost<{ deletedScanEvents: number; deletedManualEvents: number; deletedAttendanceExclusions: number }>("/admin/attendance/clear-date", {
         meetingDate: meeting.meetingDate,
         confirmation
       }, session);
-      setAttendanceActionMessage({ kind: "success", text: `Cleared ${meeting.meetingDate}: deleted ${pluralize(result.deletedScanEvents, "scan event")} and ${pluralize(result.deletedManualEvents, "manual event")}.` });
+      setAttendanceActionMessage({ kind: "success", text: `Cleared ${meeting.meetingDate}: deleted ${pluralize(result.deletedScanEvents, "scan event")}, ${pluralize(result.deletedManualEvents, "manual event")}, and ${pluralize(result.deletedAttendanceExclusions, "attendance exclusion")}.` });
       if (selectedMeetingDate === meeting.meetingDate) setSelectedMeetingDate("");
       reloadMeetingSummary();
       reloadRosterSummary();
@@ -2738,8 +2813,8 @@ function Reports({ session }: { session: DashboardSession }) {
             : "Pick a meeting to see the active members who missed it."}
         </p>
         {absencesError ? <p className="error">{absencesError}</p> : null}
-        {absenceNotificationResult?.meetingDate === absenceDate ? <NotificationResultPanel result={absenceNotificationResult} /> : null}
-        <DataTable rows={absences?.rows ?? []} columns={["memberId", "firstName", "lastName"]} />
+        {absenceNotificationResult?.meetingDate === absenceDate ? <NotificationResultPanel result={absenceNotificationResult} onOpenMember={onOpenMember} /> : null}
+        <DataTable rows={absences?.rows ?? []} columns={["memberId", "firstName", "lastName"]} onOpenMember={onOpenMember} />
       </section>
 
       <section>
@@ -2762,6 +2837,7 @@ function Reports({ session }: { session: DashboardSession }) {
         <DataTable
           rows={presence?.rows ?? []}
           columns={["memberId", "firstName", "lastName", "status", "checkInAt", "checkOutAt"]}
+          onOpenMember={onOpenMember}
         />
       </section>
 
@@ -2786,7 +2862,7 @@ function Reports({ session }: { session: DashboardSession }) {
               <Metric label="Required Present" value={memberReport.presentMeetings} />
               <Metric label="Required Missed" value={memberReport.missedMeetings} />
             </div>
-            <h3>{memberReport.firstName} {memberReport.lastName}</h3>
+            <h3><button type="button" className="link-button member-name-link" onClick={() => onOpenMember(memberReport.memberId)}>{memberReport.firstName} {memberReport.lastName}</button></h3>
             <p className="report-context">Optional meetings are excluded from this attendance rate and missed-meeting count. The range filter above applies here too.</p>
             <DataTable
               rows={[{
@@ -2819,6 +2895,7 @@ function Reports({ session }: { session: DashboardSession }) {
             openCheckIns: member.openSessionWarning ? member.openSessionDates.join(", ") : ""
           }))}
           columns={["memberId", "firstName", "lastName", "requiredMeetings", "present", "missed", "attendance", "lastSeenAt", "openCheckIns"]}
+          onOpenMember={onOpenMember}
         />
       </section>
 
@@ -2846,7 +2923,7 @@ function Reports({ session }: { session: DashboardSession }) {
         <input name="reason" placeholder="Correction reason" required />
         <button>Add manual event</button>
       </form>
-      <Table title="Attendance session audit" error={sessionError} rows={sessionRows?.sessions ?? []} columns={["meeting_date", "meeting_title", "required", "has_attendance", "member_id", "check_in_at", "check_out_at", "status"]} />
+      <Table title="Attendance session audit" error={sessionError} rows={sessionRows?.sessions ?? []} columns={["meeting_date", "meeting_title", "required", "has_attendance", "member_id", "check_in_at", "check_out_at", "status"]} onOpenMember={onOpenMember} />
     </>
   );
 }
@@ -2931,30 +3008,77 @@ function Metric({ label, value }: { label: string; value: string | number }) {
   return <article className="metric"><span>{label}</span><strong>{value}</strong></article>;
 }
 
-function Table({ title, rows, columns, error, note }: { title: string; rows: Array<Record<string, unknown>>; columns: string[]; error?: string; note?: string }) {
+function Table({ title, rows, columns, error, note, onOpenMember }: { title: string; rows: Array<Record<string, unknown>>; columns: string[]; error?: string; note?: string; onOpenMember?: (memberId: string) => void }) {
   return (
     <section>
       <h2>{title}</h2>
       {note ? <p className="report-context">{note}</p> : null}
       {error ? <p className="error">{error}</p> : null}
-      <DataTable rows={rows} columns={columns} />
+      <DataTable rows={rows} columns={columns} onOpenMember={onOpenMember} />
     </section>
   );
 }
 
-function DataTable({ rows, columns, density = "regular" }: { rows: Array<Record<string, unknown>>; columns: string[]; density?: "regular" | "compact" }) {
+function DataTable({
+  rows,
+  columns,
+  density = "regular",
+  onOpenMember,
+  onRemoveFromMeeting,
+  actionsDisabled = false
+}: {
+  rows: Array<Record<string, unknown>>;
+  columns: string[];
+  density?: "regular" | "compact";
+  onOpenMember?: (memberId: string) => void;
+  onRemoveFromMeeting?: (row: Record<string, unknown>) => void;
+  actionsDisabled?: boolean;
+}) {
   return (
     <div className="data-table-wrap">
       <table className={`data-table ${density === "compact" ? "compact-data-table" : ""}`}>
         <thead><tr>{columns.map((column) => <th key={column}>{columnLabel(column)}</th>)}</tr></thead>
         <tbody>
-          {rows.map((row, index) => (
-            <tr key={index}>{columns.map((column) => <td key={column}>{formatTableCell(column, row[column])}</td>)}</tr>
-          ))}
+          {rows.map((row, index) => {
+            const memberId = tableRowMemberId(row);
+            const memberName = [row.firstName ?? row.first_name, row.lastName ?? row.last_name].filter(Boolean).join(" ");
+            return (
+              <tr key={index}>{columns.map((column) => {
+                if (column === "actions" && onRemoveFromMeeting) {
+                  return <td key={column}><button type="button" className="danger-button" disabled={actionsDisabled} onClick={() => onRemoveFromMeeting(row)}>Mark absent</button></td>;
+                }
+                const value = row[column];
+                if (onOpenMember && memberId && value !== undefined && value !== null && isMemberReferenceColumn(column)) {
+                  return (
+                    <td key={column}>
+                      <button
+                        type="button"
+                        className="link-button"
+                        onClick={() => onOpenMember(memberId)}
+                        title="Open roster details"
+                        aria-label={`Open roster details for ${memberName || `member ${memberId}`}`}
+                      >
+                        {formatTableCell(column, value)}
+                      </button>
+                    </td>
+                  );
+                }
+                return <td key={column}>{formatTableCell(column, value)}</td>;
+              })}</tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
   );
+}
+
+function tableRowMemberId(row: Record<string, unknown>): string {
+  return String(row.memberId ?? row.member_id ?? row.studentId ?? row.student_id ?? "");
+}
+
+function isMemberReferenceColumn(column: string): boolean {
+  return ["memberId", "member_id", "studentId", "student_id", "firstName", "first_name", "lastName", "last_name"].includes(column);
 }
 
 function useApi<T>(path: string, session: DashboardSession) {

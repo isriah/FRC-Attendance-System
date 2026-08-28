@@ -87,7 +87,7 @@ describe("roster sync", () => {
     ]);
   });
 
-  it("hard deletes member-owned roster, attendance, event, fingerprint, notification, and contest rows without deleting admin users", async () => {
+  it("hard deletes member-owned roster, attendance, event, correction, fingerprint, notification, and contest rows without deleting admin users", async () => {
     const env = createRosterTestEnv();
 
     await syncRoster(env, [
@@ -110,6 +110,7 @@ describe("roster sync", () => {
     await expectRowCount(env, "fingerprint_enrollments", "student_id", "100001", 0);
     await expectRowCount(env, "notification_deliveries", "student_id", "100001", 0);
     await expectRowCount(env, "attendance_contests", "student_id", "100001", 0);
+    await expectRowCount(env, "attendance_exclusions", "student_id", "100001", 0);
     const admin = await env.DB.prepare("SELECT active FROM admin_users WHERE email = ?").bind("ada@example.org").first<{ active: number }>();
     expect(admin?.active).toBe(1);
   });
@@ -205,6 +206,10 @@ async function seedMemberData(env: Env, memberId: string) {
   await env.DB.prepare(`
     INSERT INTO manual_events (id, student_id, occurred_at, action, reason, admin_email)
     VALUES ('manual-1', ?, '2026-01-10T16:00:00.000Z', 'check_out', 'mentor correction', 'mentor@example.org')
+  `).bind(memberId).run();
+  await env.DB.prepare(`
+    INSERT INTO attendance_exclusions (id, student_id, meeting_date, reason, admin_email)
+    VALUES ('exclusion-1', ?, '2026-01-10', 'confirmed absence', 'mentor@example.org')
   `).bind(memberId).run();
   await env.DB.prepare(`
     INSERT INTO fingerprint_enrollments (student_id, kiosk_id, template_slot, finger_label, enrolled_at)
@@ -304,6 +309,16 @@ function createRosterTestEnv(): Env {
       status TEXT NOT NULL,
       source_event_ids TEXT NOT NULL,
       rebuilt_at TEXT NOT NULL
+    );
+
+    CREATE TABLE attendance_exclusions (
+      id TEXT PRIMARY KEY,
+      student_id TEXT NOT NULL,
+      meeting_date TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      admin_email TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(student_id, meeting_date)
     );
 
     CREATE TABLE notification_deliveries (

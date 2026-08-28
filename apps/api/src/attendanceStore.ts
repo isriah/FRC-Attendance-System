@@ -96,6 +96,43 @@ export async function addManualEvent(env: Env, input: { memberId: string; occurr
   return { id, ...input };
 }
 
+export async function removeMemberFromMeeting(env: Env, input: { memberId: string; meetingDate?: unknown; reason: string; adminEmail: string }) {
+  const meetingDate = requireIsoDate(input.meetingDate, "meetingDate");
+  const member = await env.DB.prepare(
+    "SELECT first_name, last_name FROM students WHERE student_id = ?"
+  ).bind(input.memberId).first<{ first_name: string; last_name: string }>();
+  if (!member) throw Object.assign(new Error("Member not found"), { status: 404 });
+
+  const sessions = await env.DB.prepare(
+    "SELECT source_event_ids FROM attendance_sessions WHERE student_id = ? AND meeting_date = ?"
+  ).bind(input.memberId, meetingDate).all<{ source_event_ids: string }>();
+  if (sessions.results.length === 0) throw Object.assign(new Error("Member is not present for this meeting"), { status: 409 });
+
+  const existing = await env.DB.prepare(
+    "SELECT id FROM attendance_exclusions WHERE student_id = ? AND meeting_date = ?"
+  ).bind(input.memberId, meetingDate).first<{ id: string }>();
+  if (existing) throw Object.assign(new Error("Member has already been removed from this meeting"), { status: 409 });
+
+  const id = crypto.randomUUID();
+  await env.DB.batch([
+    env.DB.prepare(
+      "INSERT INTO attendance_exclusions (id, student_id, meeting_date, reason, admin_email) VALUES (?, ?, ?, ?, ?)"
+    ).bind(id, input.memberId, meetingDate, input.reason, input.adminEmail),
+    env.DB.prepare("DELETE FROM attendance_sessions WHERE student_id = ? AND meeting_date = ?").bind(input.memberId, meetingDate)
+  ]);
+
+  return {
+    id,
+    memberId: input.memberId,
+    firstName: member.first_name,
+    lastName: member.last_name,
+    meetingDate,
+    reason: input.reason,
+    adminEmail: input.adminEmail,
+    preservedSourceEventIds: [...new Set(sessions.results.flatMap((session) => JSON.parse(session.source_event_ids) as string[]))]
+  };
+}
+
 export async function clearAttendanceForDate(env: Env, input: { meetingDate?: unknown; confirmation?: unknown }) {
   const meetingDate = requireIsoDate(input.meetingDate, "meetingDate");
   const expectedConfirmation = `CLEAR ${meetingDate}`;
@@ -104,13 +141,16 @@ export async function clearAttendanceForDate(env: Env, input: { meetingDate?: un
   }
 
   const bounds = broadUtcBoundsForLocalDate(meetingDate);
-  const [scanRows, manualRows] = await Promise.all([
+  const [scanRows, manualRows, exclusionRows] = await Promise.all([
     env.DB.prepare("SELECT id, occurred_at FROM scan_events WHERE occurred_at >= ? AND occurred_at < ?")
       .bind(bounds.start, bounds.end)
       .all<{ id: string; occurred_at: string }>(),
     env.DB.prepare("SELECT id, occurred_at FROM manual_events WHERE occurred_at >= ? AND occurred_at < ?")
       .bind(bounds.start, bounds.end)
-      .all<{ id: string; occurred_at: string }>()
+      .all<{ id: string; occurred_at: string }>(),
+    env.DB.prepare("SELECT id FROM attendance_exclusions WHERE meeting_date = ?")
+      .bind(meetingDate)
+      .all<{ id: string }>()
   ]);
 
   const scanIds = scanRows.results
@@ -122,7 +162,8 @@ export async function clearAttendanceForDate(env: Env, input: { meetingDate?: un
 
   const deleteStatements = [
     ...scanIds.map((id) => env.DB.prepare("DELETE FROM scan_events WHERE id = ?").bind(id)),
-    ...manualIds.map((id) => env.DB.prepare("DELETE FROM manual_events WHERE id = ?").bind(id))
+    ...manualIds.map((id) => env.DB.prepare("DELETE FROM manual_events WHERE id = ?").bind(id)),
+    ...exclusionRows.results.map((row) => env.DB.prepare("DELETE FROM attendance_exclusions WHERE id = ?").bind(row.id))
   ];
   if (deleteStatements.length > 0) await env.DB.batch(deleteStatements);
   await rebuildAttendanceSessions(env);
@@ -131,6 +172,7 @@ export async function clearAttendanceForDate(env: Env, input: { meetingDate?: un
     meetingDate,
     deletedScanEvents: scanIds.length,
     deletedManualEvents: manualIds.length,
+    deletedAttendanceExclusions: exclusionRows.results.length,
     confirmation: expectedConfirmation
   };
 }
@@ -142,6 +184,10 @@ export async function rebuildAttendanceSessions(env: Env): Promise<void> {
   const manual = await env.DB.prepare(
     "SELECT id, student_id, occurred_at, action, reason, admin_email FROM manual_events ORDER BY occurred_at ASC"
   ).all<{ id: string; student_id: string; occurred_at: string; action: "check_in" | "check_out"; reason: string; admin_email: string }>();
+  const exclusions = await env.DB.prepare(
+    "SELECT student_id, meeting_date FROM attendance_exclusions"
+  ).all<{ student_id: string; meeting_date: string }>();
+  const excludedMemberDates = new Set(exclusions.results.map((row) => `${row.student_id}:${row.meeting_date}`));
 
   const sessions = deriveAttendanceSessions(
     scans.results.map((row) => ({ id: row.id, memberId: row.student_id, occurredAt: row.occurred_at, status: row.status })),
@@ -154,7 +200,7 @@ export async function rebuildAttendanceSessions(env: Env): Promise<void> {
       adminEmail: row.admin_email
     })),
     env.TIME_ZONE
-  );
+  ).filter((session) => !excludedMemberDates.has(`${session.memberId}:${session.meetingDate}`));
 
   await env.DB.batch([
     env.DB.prepare("DELETE FROM attendance_sessions"),

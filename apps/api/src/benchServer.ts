@@ -88,6 +88,16 @@ db.exec(`
   );
 
   CREATE INDEX IF NOT EXISTS scheduled_meetings_required_date_idx ON scheduled_meetings(required, meeting_date);
+
+  CREATE TABLE IF NOT EXISTS attendance_exclusions (
+    id TEXT PRIMARY KEY,
+    student_id TEXT NOT NULL,
+    meeting_date TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    admin_email TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(student_id, meeting_date)
+  );
 `);
 ensureColumn("kiosks", "name", "TEXT NOT NULL DEFAULT 'Bench kiosk'");
 ensureColumn("kiosks", "location", "TEXT");
@@ -331,6 +341,17 @@ const server = createServer(async (request, response) => {
       return;
     }
 
+    if (request.method === "POST" && request.url === "/admin/attendance/remove-member") {
+      const body = await readBody<{ memberId?: unknown; studentId?: unknown; meetingDate?: unknown; reason?: unknown }>(request);
+      sendJson(response, 200, removeMemberFromBenchMeeting({
+        memberId: requireNonEmptyString(body.memberId ?? body.studentId, "memberId"),
+        meetingDate: body.meetingDate,
+        reason: requireNonEmptyString(body.reason, "reason"),
+        adminEmail: request.headers["x-admin-email"] || "local-admin"
+      }));
+      return;
+    }
+
     if (request.method === "POST" && request.url === "/admin/fingerprint/enroll") {
       const body = await readBody<{ memberId: string; slot: number; fingerLabel?: string; confirmOverwrite?: boolean }>(request);
       const result = await enrollFingerprint(body);
@@ -540,6 +561,7 @@ function hardDeleteMember(memberId: string) {
   const normalizedMemberId = requireNonEmptyString(memberId, "memberId");
   const member = requireExistingMember(normalizedMemberId);
   const transaction = db.transaction(() => {
+    db.prepare("DELETE FROM attendance_exclusions WHERE student_id = ?").run(normalizedMemberId);
     db.prepare("DELETE FROM scan_events WHERE student_id = ?").run(normalizedMemberId);
     db.prepare("DELETE FROM students WHERE student_id = ?").run(normalizedMemberId);
   });
@@ -711,12 +733,40 @@ function clearBenchAttendanceForDate(input: { meetingDate?: unknown; confirmatio
     for (const id of ids) deleteScanEvent.run(id);
   });
   deleteMany(scanIds);
+  const deletedAttendanceExclusions = db.prepare("DELETE FROM attendance_exclusions WHERE meeting_date = ?").run(meetingDate).changes;
 
   return {
     meetingDate,
     deletedScanEvents: scanIds.length,
     deletedManualEvents: 0,
+    deletedAttendanceExclusions,
     confirmation: expectedConfirmation
+  };
+}
+
+function removeMemberFromBenchMeeting(input: { memberId: string; meetingDate?: unknown; reason: string; adminEmail: string | string[] }) {
+  const meetingDate = requireIsoDate(input.meetingDate, "meetingDate");
+  const member = requireExistingMember(input.memberId);
+  const session = deriveBenchSessions().find((candidate) => candidate.memberId === input.memberId && candidate.meetingDate === meetingDate);
+  if (!session) throw httpError(409, "Member is not present for this meeting");
+  const existing = db.prepare("SELECT id FROM attendance_exclusions WHERE student_id = ? AND meeting_date = ?").get(input.memberId, meetingDate);
+  if (existing) throw httpError(409, "Member has already been removed from this meeting");
+
+  const id = crypto.randomUUID();
+  const adminEmail = Array.isArray(input.adminEmail) ? input.adminEmail[0] ?? "local-admin" : input.adminEmail;
+  db.prepare(`
+    INSERT INTO attendance_exclusions (id, student_id, meeting_date, reason, admin_email, created_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(id, input.memberId, meetingDate, input.reason, adminEmail, new Date().toISOString());
+  return {
+    id,
+    memberId: input.memberId,
+    firstName: member.first_name,
+    lastName: member.last_name,
+    meetingDate,
+    reason: input.reason,
+    adminEmail,
+    preservedSourceEventIds: session.sourceEventIds
   };
 }
 
@@ -1635,7 +1685,10 @@ function deriveBenchSessions(): AttendanceSession[] {
     occurred_at: string;
     status: "accepted";
   }>;
-  return deriveAttendanceSessions(rows.map((row) => ({ id: row.id, memberId: row.student_id, occurredAt: row.occurred_at, status: row.status })));
+  const excludedMemberDates = new Set((db.prepare("SELECT student_id, meeting_date FROM attendance_exclusions").all() as Array<{ student_id: string; meeting_date: string }>)
+    .map((row) => `${row.student_id}:${row.meeting_date}`));
+  return deriveAttendanceSessions(rows.map((row) => ({ id: row.id, memberId: row.student_id, occurredAt: row.occurred_at, status: row.status })))
+    .filter((session) => !excludedMemberDates.has(`${session.memberId}:${session.meetingDate}`));
 }
 
 function setDisplayState(state: Omit<KioskDisplayState, "updatedAt">) {
