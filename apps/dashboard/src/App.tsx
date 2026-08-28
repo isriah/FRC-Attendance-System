@@ -1,6 +1,7 @@
 import { FormEvent, Fragment, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { apiBaseUrl, apiDelete, apiGet, apiPost, apiPut, type DashboardSession } from "./api";
+import { fingerLabelOptions, fingerprintEnrollmentName, nextAvailableFingerprintSlot, normalizeFingerLabel, type FingerprintEnrollment } from "./fingerprintEnrollment";
 import { formatDateTime, formatTime, localTimeInputValue } from "./timeFormat";
 import "./styles.css";
 
@@ -53,16 +54,6 @@ interface AdminUserRow {
   role: "mentor" | "admin";
   active: boolean;
   lastLoginAt?: string;
-}
-
-interface FingerprintEnrollment {
-  memberId: string;
-  firstName?: string;
-  lastName?: string;
-  active: number;
-  slot: number;
-  fingerLabel?: string;
-  enrolledAt: string;
 }
 
 interface ScheduledMeeting {
@@ -271,18 +262,6 @@ const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
 const googleAuthEnabled = Boolean(googleClientId);
 const fingerprintEnrollmentAvailable = !apiBaseUrl.includes("workers.dev");
 const productionRosterPullAvailable = fingerprintEnrollmentAvailable;
-const fingerLabelOptions = [
-  ["right-thumb", "Right thumb"],
-  ["right-index", "Right index"],
-  ["right-middle", "Right middle"],
-  ["right-ring", "Right ring"],
-  ["right-pinky", "Right pinky"],
-  ["left-thumb", "Left thumb"],
-  ["left-index", "Left index"],
-  ["left-middle", "Left middle"],
-  ["left-ring", "Left ring"],
-  ["left-pinky", "Left pinky"]
-] as const;
 const weekdayOptions = [
   { value: 0, label: "Sun" },
   { value: 1, label: "Mon" },
@@ -910,15 +889,18 @@ function Roster({ session, navigation }: { session: DashboardSession; navigation
     }
   }
 
-  function startRemapEnrollment(enrollment: FingerprintEnrollment) {
-    setSelectedDetailMemberId(enrollment.memberId);
-    setEnrollMemberId(enrollment.memberId);
+  function startRemapEnrollment(enrollment: FingerprintEnrollment, targetMemberId?: string) {
+    const memberId = targetMemberId ?? enrollment.memberId;
+    setSelectedDetailMemberId(memberId);
+    setEnrollMemberId(memberId);
     setEnrollSlot(String(enrollment.slot));
     setEnrollFingerLabel(normalizeFingerLabel(enrollment.fingerLabel));
     setConfirmOverwrite(false);
     setEnrollMessage({
       kind: "info",
-      text: `Slot ${enrollment.slot} is loaded for remapping. Check the replace confirmation before saving changes.`
+      text: targetMemberId && targetMemberId !== enrollment.memberId
+        ? `Slot ${enrollment.slot} is loaded to remap from ${fingerprintEnrollmentName(enrollment)}. Check the replace confirmation before saving changes.`
+        : `Slot ${enrollment.slot} is loaded for remapping. Check the replace confirmation before saving changes.`
     });
   }
 
@@ -1259,7 +1241,7 @@ function MemberDetailsPanel({
   onConfirmOverwriteChange: (confirm: boolean) => void;
   onSubmitEnrollment: (mapOnly?: boolean) => void | Promise<void>;
   onDeleteEnrollment: (slot: number) => void;
-  onRemapEnrollment: (enrollment: FingerprintEnrollment) => void;
+  onRemapEnrollment: (enrollment: FingerprintEnrollment, targetMemberId?: string) => void;
 }) {
   const meetingsByDate = new Map(meetingSummaryRows.map((meeting) => [meeting.meetingDate, meeting]));
   const missedMeetings = memberReport?.absentDates.map((date) => meetingsByDate.get(date) ?? {
@@ -1271,7 +1253,6 @@ function MemberDetailsPanel({
     .filter((row) => String(row.member_id ?? row.memberId ?? "") === member.memberId && Number(row.required ?? 1) === 0)
     .map((row) => String(row.meeting_date ?? row.meetingDate ?? "")));
   const optionalMeetings = meetingSummaryRows.filter((meeting) => !meeting.required);
-  const memberEnrollments = enrollments.filter((enrollment) => enrollment.memberId === member.memberId);
   const canEmailAttendanceReport = Boolean(member.email?.trim());
 
   return (
@@ -1389,7 +1370,13 @@ function MemberDetailsPanel({
             ) : null}
             {enrollMessage && enrollMemberId === member.memberId ? <p className={`notice ${enrollMessage.kind}`}>{enrollMessage.text}</p> : null}
             {enrollmentError ? <p className="error">{enrollmentError}</p> : null}
-            <FingerprintEnrollmentTable enrollments={memberEnrollments} onDelete={onDeleteEnrollment} onRemap={onRemapEnrollment} busy={enrolling} />
+            <FingerprintEnrollmentTable
+              enrollments={enrollments}
+              currentMemberId={member.memberId}
+              onDelete={onDeleteEnrollment}
+              onRemap={onRemapEnrollment}
+              busy={enrolling}
+            />
           </>
         ) : null}
       </div>
@@ -1523,13 +1510,15 @@ function AdminUsers({ session }: { session: DashboardSession }) {
 
 function FingerprintEnrollmentTable({
   enrollments,
+  currentMemberId,
   onDelete,
   onRemap,
   busy
 }: {
   enrollments: FingerprintEnrollment[];
+  currentMemberId: string;
   onDelete: (slot: number) => void;
-  onRemap: (enrollment: FingerprintEnrollment) => void;
+  onRemap: (enrollment: FingerprintEnrollment, targetMemberId?: string) => void;
   busy: boolean;
 }) {
   if (enrollments.length === 0) {
@@ -1555,13 +1544,19 @@ function FingerprintEnrollmentTable({
               <td>{enrollment.slot}</td>
               <td>
                 {fingerprintEnrollmentName(enrollment)}
+                {enrollment.memberId === currentMemberId ? <span className="status-badge active"> current member</span> : null}
                 {!enrollment.active ? <span className="muted"> inactive</span> : null}
               </td>
               <td>{enrollment.fingerLabel ?? ""}</td>
               <td>{formatDateTime(enrollment.enrolledAt)}</td>
               <td>
                 <div className="mapping-actions">
-                  <button type="button" disabled={busy} onClick={() => onRemap(enrollment)}>Remap</button>
+                  <button type="button" disabled={busy} onClick={() => onRemap(enrollment)}>
+                    {enrollment.memberId === currentMemberId ? "Edit mapping" : "Open owner"}
+                  </button>
+                  {enrollment.memberId !== currentMemberId ? (
+                    <button type="button" disabled={busy} onClick={() => onRemap(enrollment, currentMemberId)}>Use for this member</button>
+                  ) : null}
                   <button type="button" disabled={busy} onClick={() => onDelete(enrollment.slot)}>Remove mapping</button>
                 </div>
               </td>
@@ -3784,28 +3779,10 @@ function groupCommandsByKiosk(commands: KioskCommandRow[]) {
   }, {});
 }
 
-function nextAvailableFingerprintSlot(enrollments: FingerprintEnrollment[], pendingOccupiedSlot?: number) {
-  const occupiedSlots = new Set(enrollments.map((enrollment) => enrollment.slot));
-  if (pendingOccupiedSlot) occupiedSlots.add(pendingOccupiedSlot);
-  for (let slot = 1; slot <= 200; slot += 1) {
-    if (!occupiedSlots.has(slot)) return slot;
-  }
-  return 200;
-}
-
-function normalizeFingerLabel(value?: string) {
-  return value && fingerLabelOptions.some(([option]) => option === value) ? value : "right-index";
-}
-
 function meetingSummaryLabel(meeting: Pick<MeetingSummaryReportRow, "meetingDate" | "title" | "startsAt" | "endsAt">) {
   const title = meeting.title ?? "Unscheduled attendance";
   const time = meetingTimeRange({ startsAt: meeting.startsAt, endsAt: meeting.endsAt });
   return `${meeting.meetingDate} - ${title}${time ? `, ${time}` : ""}`;
-}
-
-function fingerprintEnrollmentName(enrollment: FingerprintEnrollment) {
-  const name = [enrollment.firstName, enrollment.lastName].filter(Boolean).join(" ");
-  return name ? `${enrollment.memberId} - ${name}` : enrollment.memberId;
 }
 
 function commandTimestamp(command: KioskCommandRow) {
