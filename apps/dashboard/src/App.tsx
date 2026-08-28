@@ -925,7 +925,7 @@ function Roster({ session, navigation }: { session: DashboardSession; navigation
 
   return (
     <>
-      <section>
+      <section className="roster-section">
         <div className="section-heading">
           <h2>Roster</h2>
           <span className="muted">{activeMembers.length} active, {deactivatedMembers.length} deactivated</span>
@@ -1058,7 +1058,7 @@ function Roster({ session, navigation }: { session: DashboardSession; navigation
           />
         ) : null}
         {rosterViewTab === "import" ? (
-          <form className="stack" onSubmit={async (event) => {
+          <form className="stack roster-import-form" onSubmit={async (event) => {
             event.preventDefault();
             try {
               const members = parseRosterCsv(importText);
