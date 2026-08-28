@@ -379,7 +379,8 @@ function createTestEnv(): Env {
       student_id TEXT PRIMARY KEY,
       first_name TEXT NOT NULL,
       last_name TEXT NOT NULL,
-      active INTEGER NOT NULL DEFAULT 1
+      active INTEGER NOT NULL DEFAULT 1,
+      attendance_required_from_date TEXT
     );
 
     CREATE TABLE attendance_exclusions (
