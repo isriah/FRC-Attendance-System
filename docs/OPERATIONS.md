@@ -322,7 +322,13 @@ Migration `0008_attendance_contests.sql` creates admin-reviewable attendance con
 
 Contest buttons are handled by the same signed `POST /discord/interactions` endpoint and every user-facing response is ephemeral. The Worker resolves the clicking Discord account to its active linked member, verifies that member was included in the exact delivered bot message, and verifies attendance still shows the member absent. It then creates one pending contest without changing sessions, scan events, or attendance results. Invalid buttons, another member's message, unlinked users, and members already marked present do not create contest rows.
 
-Dashboard admins review contests from the **Contests** tab. The list shows the member, meeting, Discord user ID, status, created time, review time/admin, and notes. Admins can acknowledge, resolve, or reject a contest. These review actions are audit state only; use the Reports tab's manual attendance correction form when a verified contest requires a check-in or check-out correction, then mark the contest resolved with a note.
+Dashboard admins can review contests from the global **Contests** tab or from the contest list in a selected meeting's details. Both views show the member, meeting, Discord user ID, submitted time, status, review time/admin, and notes, with member names linked to roster details. Pending contests have three clear actions:
+
+- **Approve and mark present** records a `confirm_present` manual correction event, rebuilds attendance through the normal derivation path, and marks the contest `resolved` with the reviewing admin and note. If an audited absent correction exists for the same member and meeting, approval supersedes that exclusion instead of deleting it.
+- **Reject** marks the contest `rejected` without changing attendance.
+- **Mark reviewed/no attendance change** maps to the existing `acknowledged` status for data compatibility and does not change attendance.
+
+Migration `0011_attendance_exclusion_supersession.sql` preserves the original absence-correction row while adding supersession metadata and a partial unique constraint for active exclusions. Apply this migration before deploying a Worker containing contest approval. Production remains on the migration level listed at the top of this guide until the director applies and verifies the migration.
 
 Production D1 migrations through `0009_attendance_contest_idempotency.sql` are applied. `DISCORD_PUBLIC_KEY`, `DISCORD_BOT_TOKEN`, and `DISCORD_ATTENDANCE_CHANNEL_ID` are configured on the production Worker; the contest interaction and bot notification code is deployed in Worker version `65155f00-751d-4e56-91c9-c77a99fb0daf`.
 
@@ -378,8 +384,8 @@ Application setup and guild-scoped development registration:
    - Confirm the meeting has an `endsAt` at least 30 minutes in the past, or temporarily use a lower non-negative `DISCORD_MISSING_MEMBER_DELAY_MINUTES` in a non-production environment.
    - In Meetings, open the meeting and choose **Ping missing members with contest button**. Review the preview, confirm the send, and verify Discord receives one message with only the expected member mentions and a `Contest absence` button.
    - Click the button as one linked absent test member. Confirm the response is ephemeral and states that attendance was not changed.
-   - Open the dashboard **Contests** tab, verify the pending row, add a review note, and acknowledge, resolve, or reject it.
-   - If testing a correction, add the manual attendance event from Reports and then mark the contest resolved. Confirm no contest action by itself created an attendance session or scan event.
+   - Open the dashboard **Contests** tab and the meeting's detail view, and verify the pending row appears in both places.
+   - Approve the contest and confirm one audited `confirm_present` manual event is recorded, the contest becomes resolved, and normal reports show the member present. Alternatively, reject it or mark it reviewed and confirm attendance remains unchanged.
    - Click the Discord button again and confirm no duplicate contest row is created.
 
 ## Kiosk Provisioning

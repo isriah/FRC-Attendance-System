@@ -41,7 +41,7 @@ export function deriveAttendanceSessions(
         occurredAt: event.occurredAt,
         forcedAction: undefined as ManualEvent["action"] | undefined
       })),
-    ...manualEvents.map((event) => ({
+    ...manualEvents.filter((event) => event.action !== "confirm_present").map((event) => ({
       id: event.id,
       memberId: event.memberId,
       occurredAt: event.occurredAt,
@@ -51,9 +51,13 @@ export function deriveAttendanceSessions(
     const timeDelta = new Date(a.occurredAt).getTime() - new Date(b.occurredAt).getTime();
     return timeDelta || a.id.localeCompare(b.id);
   });
+  const presentConfirmations = manualEvents
+    .filter((event) => event.action === "confirm_present")
+    .sort((a, b) => new Date(a.occurredAt).getTime() - new Date(b.occurredAt).getTime() || a.id.localeCompare(b.id));
 
   const sessions: AttendanceSession[] = [];
   const openByMemberDate = new Map<string, AttendanceSession>();
+  const lastByMemberDate = new Map<string, AttendanceSession>();
 
   for (const event of normalized) {
     const meetingDate = meetingDateForTimestamp(event.occurredAt, timeZone);
@@ -79,6 +83,7 @@ export function deriveAttendanceSessions(
         status: "closed",
         sourceEventIds: [event.id]
       });
+      lastByMemberDate.set(key, sessions[sessions.length - 1]!);
       continue;
     }
 
@@ -92,6 +97,29 @@ export function deriveAttendanceSessions(
     };
     sessions.push(session);
     openByMemberDate.set(key, session);
+    lastByMemberDate.set(key, session);
+  }
+
+  // A presence confirmation is an audited correction, not another toggle in the scan sequence.
+  // Attach it to existing attendance when possible so approving a contest cannot create duplicate sessions.
+  for (const event of presentConfirmations) {
+    const meetingDate = meetingDateForTimestamp(event.occurredAt, timeZone);
+    const key = `${event.memberId}:${meetingDate}`;
+    const last = lastByMemberDate.get(key);
+    if (last) {
+      last.sourceEventIds.push(event.id);
+      continue;
+    }
+    const session: AttendanceSession = {
+      id: `session:${event.memberId}:${meetingDate}:${event.id}`,
+      memberId: event.memberId,
+      meetingDate,
+      checkInAt: event.occurredAt,
+      status: "open",
+      sourceEventIds: [event.id]
+    };
+    sessions.push(session);
+    lastByMemberDate.set(key, session);
   }
 
   return sessions;

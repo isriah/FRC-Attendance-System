@@ -327,35 +327,15 @@ function App() {
 function AttendanceContests({ session, onOpenReports, onOpenMember }: { session: DashboardSession; onOpenReports: () => void; onOpenMember: (memberId: string) => void }) {
   const { data, error, loading, reload } = useApi<{ contests: AttendanceContestRow[] }>("/admin/attendance-contests", session);
   const [statusFilter, setStatusFilter] = useState<AttendanceContestStatus | "all">("pending");
-  const [reviewNotes, setReviewNotes] = useState<Record<string, string>>({});
-  const [busyContestId, setBusyContestId] = useState("");
-  const [message, setMessage] = useState<{ kind: "success" | "error"; text: string }>();
   const contests = data?.contests ?? [];
   const visibleContests = statusFilter === "all" ? contests : contests.filter((contest) => contest.status === statusFilter);
-
-  async function reviewContest(contest: AttendanceContestRow, status: Exclude<AttendanceContestStatus, "pending">) {
-    setBusyContestId(contest.id);
-    setMessage(undefined);
-    try {
-      await apiPut<AttendanceContestRow>(`/admin/attendance-contests/${encodeURIComponent(contest.id)}`, {
-        status,
-        reviewNote: reviewNotes[contest.id]?.trim() || undefined
-      }, session);
-      setMessage({ kind: "success", text: `Marked ${contest.firstName} ${contest.lastName}'s ${contest.meetingDate} contest ${status}. Attendance was not changed.` });
-      reload();
-    } catch (err) {
-      setMessage({ kind: "error", text: friendlyDashboardError(err) });
-    } finally {
-      setBusyContestId("");
-    }
-  }
 
   return (
     <section>
       <div className="section-heading">
         <div>
           <h2>Attendance Contests</h2>
-          <p className="report-context">Discord contests are review requests only. Acknowledging, resolving, or rejecting one never changes attendance.</p>
+          <p className="report-context">Approve a verified contest to create an audited present correction. Rejecting or marking reviewed leaves attendance unchanged.</p>
         </div>
         <button type="button" onClick={reload} disabled={loading}>Refresh</button>
       </div>
@@ -372,11 +352,76 @@ function AttendanceContests({ session, onOpenReports, onOpenMember }: { session:
         </label>
         <button type="button" onClick={onOpenReports}>Open attendance correction tools</button>
       </div>
-      {message ? <p className={`notice ${message.kind}`}>{message.text}</p> : null}
       {error ? <p className="error">{error}</p> : null}
-      {!loading && visibleContests.length === 0 ? <p className="empty-state">No {statusFilter === "all" ? "" : `${statusFilter} `}attendance contests.</p> : null}
+      <AttendanceContestCards
+        contests={visibleContests}
+        session={session}
+        onOpenMember={onOpenMember}
+        onChanged={reload}
+        emptyMessage={!loading ? `No ${statusFilter === "all" ? "" : `${statusFilter} `}attendance contests.` : "Loading attendance contests..."}
+      />
+    </section>
+  );
+}
+
+function AttendanceContestCards({
+  contests,
+  session,
+  onOpenMember,
+  onChanged,
+  emptyMessage
+}: {
+  contests: AttendanceContestRow[];
+  session: DashboardSession;
+  onOpenMember: (memberId: string) => void;
+  onChanged: () => void;
+  emptyMessage: string;
+}) {
+  const [reviewNotes, setReviewNotes] = useState<Record<string, string>>({});
+  const [busyContestId, setBusyContestId] = useState("");
+  const [message, setMessage] = useState<{ kind: "success" | "error"; text: string }>();
+
+  async function reviewContest(contest: AttendanceContestRow, status: "acknowledged" | "rejected") {
+    setBusyContestId(contest.id);
+    setMessage(undefined);
+    try {
+      await apiPut<AttendanceContestRow>(`/admin/attendance-contests/${encodeURIComponent(contest.id)}`, {
+        status,
+        reviewNote: reviewNotes[contest.id]?.trim() || undefined
+      }, session);
+      const action = status === "rejected" ? "Rejected" : "Marked reviewed";
+      setMessage({ kind: "success", text: `${action}: ${contest.firstName} ${contest.lastName}'s ${contest.meetingDate} contest. Attendance was not changed.` });
+      onChanged();
+    } catch (err) {
+      setMessage({ kind: "error", text: friendlyDashboardError(err) });
+    } finally {
+      setBusyContestId("");
+    }
+  }
+
+  async function approveContest(contest: AttendanceContestRow) {
+    if (!window.confirm(`Approve ${contest.firstName} ${contest.lastName}'s contest and create an audited present correction for ${contest.meetingDate}?`)) return;
+    setBusyContestId(contest.id);
+    setMessage(undefined);
+    try {
+      await apiPost(`/admin/attendance-contests/${encodeURIComponent(contest.id)}/approve`, {
+        reviewNote: reviewNotes[contest.id]?.trim() || undefined
+      }, session);
+      setMessage({ kind: "success", text: `Approved ${contest.firstName} ${contest.lastName}'s contest and marked them present for ${contest.meetingDate}.` });
+      onChanged();
+    } catch (err) {
+      setMessage({ kind: "error", text: friendlyDashboardError(err) });
+    } finally {
+      setBusyContestId("");
+    }
+  }
+
+  return (
+    <>
+      {message ? <p className={`notice ${message.kind}`}>{message.text}</p> : null}
+      {contests.length === 0 ? <p className="empty-state">{emptyMessage}</p> : null}
       <div className="contest-list">
-        {visibleContests.map((contest) => (
+        {contests.map((contest) => (
           <article className="contest-row" key={contest.id}>
             <div className="contest-summary">
               <div>
@@ -392,25 +437,30 @@ function AttendanceContests({ session, onOpenReports, onOpenMember }: { session:
               Contested {formatDateTime(contest.createdAt)}
               {contest.reviewedAt ? ` · Reviewed ${formatDateTime(contest.reviewedAt)} by ${contest.reviewedByAdminEmail ?? "admin"}` : ""}
             </p>
+            {contest.reason ? <p className="report-context">Member note: {contest.reason}</p> : null}
             {contest.reviewNote ? <p className="notice info">Review note: {contest.reviewNote}</p> : null}
-            <label className="field-label wide-field">
-              <span>Review note</span>
-              <input
-                value={reviewNotes[contest.id] ?? contest.reviewNote ?? ""}
-                onChange={(event) => setReviewNotes((notes) => ({ ...notes, [contest.id]: event.target.value }))}
-                placeholder="Optional context for this review"
-                maxLength={1000}
-              />
-            </label>
-            <div className="kiosk-actions">
-              <button type="button" disabled={busyContestId === contest.id} onClick={() => reviewContest(contest, "acknowledged")}>Acknowledge</button>
-              <button type="button" disabled={busyContestId === contest.id} onClick={() => reviewContest(contest, "resolved")}>Mark resolved</button>
-              <button type="button" className="danger-button" disabled={busyContestId === contest.id} onClick={() => reviewContest(contest, "rejected")}>Reject</button>
-            </div>
+            {contest.status === "pending" ? (
+              <>
+                <label className="field-label wide-field">
+                  <span>Review or correction note</span>
+                  <input
+                    value={reviewNotes[contest.id] ?? ""}
+                    onChange={(event) => setReviewNotes((notes) => ({ ...notes, [contest.id]: event.target.value }))}
+                    placeholder="Optional; approval also records the reviewing admin"
+                    maxLength={1000}
+                  />
+                </label>
+                <div className="kiosk-actions">
+                  <button type="button" disabled={busyContestId === contest.id} onClick={() => approveContest(contest)}>Approve and mark present</button>
+                  <button type="button" disabled={busyContestId === contest.id} onClick={() => reviewContest(contest, "acknowledged")}>Mark reviewed/no attendance change</button>
+                  <button type="button" className="danger-button" disabled={busyContestId === contest.id} onClick={() => reviewContest(contest, "rejected")}>Reject</button>
+                </div>
+              </>
+            ) : null}
           </article>
         ))}
       </div>
-    </section>
+    </>
   );
 }
 
@@ -1531,6 +1581,15 @@ function Meetings({ session, onOpenMember }: { session: DashboardSession; onOpen
     selectedMeetingDate ? `/admin/reports/meeting-absences?date=${selectedMeetingDate}` : undefined,
     session
   );
+  const {
+    data: selectedContestData,
+    error: selectedContestsError,
+    loading: selectedContestsLoading,
+    reload: reloadSelectedContests
+  } = useOptionalApi<{ contests: AttendanceContestRow[] }>(
+    selectedMeeting ? `/admin/attendance-contests?meetingDate=${encodeURIComponent(selectedMeeting.meetingDate)}` : undefined,
+    session
+  );
   const presentRows = (selectedPresence?.rows ?? []).filter((row) => row.status === "signed_in" || row.status === "signed_out");
   const existingMeetingDates = new Set(meetings.map((meeting) => meeting.meetingDate));
   const recurringPreview = formState.repeats ? previewRecurringMeetings(formState, existingMeetingDates) : undefined;
@@ -1994,6 +2053,7 @@ function Meetings({ session, onOpenMember }: { session: DashboardSession; onOpen
               />
             ) : <p className="empty-state">No scheduled meetings yet.</p>}
               <MeetingDetails
+                session={session}
                 meeting={selectedMeeting}
                 summary={selectedMeetingSummary}
               presence={selectedPresence}
@@ -2006,6 +2066,9 @@ function Meetings({ session, onOpenMember }: { session: DashboardSession; onOpen
                 notificationBusy={notificationBusyDate === selectedMeetingDate}
                 discordNotificationResult={discordNotificationResult?.meetingDate === selectedMeetingDate ? discordNotificationResult : undefined}
                 discordNotificationBusy={discordNotificationBusyDate === selectedMeetingDate}
+                contests={selectedContestData?.contests ?? []}
+                contestsError={selectedContestsError}
+                contestsLoading={selectedContestsLoading}
                 onEdit={startEditing}
                 onDelete={deleteMeeting}
                 onConvert={startConvertingUnscheduled}
@@ -2014,6 +2077,12 @@ function Meetings({ session, onOpenMember }: { session: DashboardSession; onOpen
                 onDiscordPingAbsent={pingMissingMembersInDiscord}
                 onOpenMember={onOpenMember}
                 onRemoveMember={removePresentMember}
+                onContestChanged={() => {
+                  reloadSelectedContests();
+                  reloadMeetingSummary();
+                  reloadSelectedPresence();
+                  reloadSelectedAbsences();
+                }}
               />
           </>
         ) : null}
@@ -2254,6 +2323,7 @@ function MeetingCalendar({
 }
 
 function MeetingDetails({
+  session,
   meeting,
   summary,
   presence,
@@ -2270,11 +2340,16 @@ function MeetingDetails({
   notificationBusy,
   discordNotificationResult,
   discordNotificationBusy,
+  contests,
+  contestsError,
+  contestsLoading,
   onEmailAbsent,
   onDiscordPingAbsent,
   onOpenMember,
-  onRemoveMember
+  onRemoveMember,
+  onContestChanged
 }: {
+  session: DashboardSession;
   meeting?: ScheduledMeeting;
   summary?: MeetingSummaryReportRow;
   presence?: PresenceReport;
@@ -2287,6 +2362,9 @@ function MeetingDetails({
   notificationBusy: boolean;
   discordNotificationResult?: DiscordMissingMemberNotificationResult;
   discordNotificationBusy: boolean;
+  contests: AttendanceContestRow[];
+  contestsError?: string;
+  contestsLoading: boolean;
   onEdit: (meeting: ScheduledMeeting) => void;
   onDelete: (meeting: ScheduledMeeting) => void;
   onConvert: (summary: MeetingSummaryReportRow) => void;
@@ -2295,6 +2373,7 @@ function MeetingDetails({
   onDiscordPingAbsent: (meetingDate: string) => void;
   onOpenMember: (memberId: string) => void;
   onRemoveMember: (row: Record<string, unknown>) => void;
+  onContestChanged: () => void;
 }) {
   if (!meeting && !summary) {
     return <p className="empty-state">Select a meeting on the calendar to see attendance details.</p>;
@@ -2366,6 +2445,23 @@ function MeetingDetails({
       {absencesError ? <p className="error">{absencesError}</p> : null}
       {notificationResult ? <NotificationResultPanel result={notificationResult} onOpenMember={onOpenMember} /> : null}
       {discordNotificationResult ? <DiscordNotificationResultPanel result={discordNotificationResult} onOpenMember={onOpenMember} /> : null}
+      {meeting ? (
+        <div className="meeting-contests">
+          <div className="meeting-detail-subheading">
+            <h3>Attendance Contests</h3>
+            <span>{contestsLoading ? "..." : contests.length}</span>
+          </div>
+          <p className="report-context">Discord contests for this meeting stay visible here after review.</p>
+          {contestsError ? <p className="error">{contestsError}</p> : null}
+          <AttendanceContestCards
+            contests={contests}
+            session={session}
+            onOpenMember={onOpenMember}
+            onChanged={onContestChanged}
+            emptyMessage={contestsLoading ? "Loading attendance contests..." : "No Discord attendance contests for this meeting."}
+          />
+        </div>
+      ) : null}
       <div className="meeting-detail-grid">
         <div>
           <div className="meeting-detail-subheading">

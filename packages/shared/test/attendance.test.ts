@@ -71,4 +71,39 @@ describe("attendance rules", () => {
     expect(sessions[0]?.status).toBe("open");
     expect(sessions[0]?.checkOutAt).toBeUndefined();
   });
+
+  it("records a confirm-present correction without duplicating an existing session", () => {
+    const sessions = deriveAttendanceSessions([
+      scan("in", "123", "2026-01-01T20:00:00.000Z"),
+      scan("out", "123", "2026-01-01T22:00:00.000Z")
+    ], [{
+      id: "contest-approval",
+      memberId: "123",
+      occurredAt: "2026-01-01T21:00:00.000Z",
+      action: "confirm_present",
+      reason: "Discord contest approved",
+      adminEmail: "mentor@example.com"
+    }]);
+
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0]?.sourceEventIds).toEqual(["in", "out", "contest-approval"]);
+  });
+
+  it("creates attendance when confirm-present is the only event", () => {
+    const sessions = deriveAttendanceSessions([], [{
+      id: "contest-approval",
+      memberId: "123",
+      occurredAt: "2026-01-01T20:00:00.000Z",
+      action: "confirm_present",
+      reason: "Discord contest approved",
+      adminEmail: "mentor@example.com"
+    }]);
+
+    expect(sessions).toEqual([expect.objectContaining({
+      memberId: "123",
+      meetingDate: "2026-01-01",
+      status: "open",
+      sourceEventIds: ["contest-approval"]
+    })]);
+  });
 });

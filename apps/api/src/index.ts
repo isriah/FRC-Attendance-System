@@ -4,7 +4,7 @@ import { addManualEvent, clearAttendanceForDate, removeMemberFromMeeting, syncKi
 import type { Env } from "./env";
 import { buildLegacySheetExport } from "./export";
 import { handleDiscordInteraction } from "./discordInteractions";
-import { listAttendanceContests, reviewAttendanceContest, sendDiscordBotMissingMemberNotifications, type DiscordBotMissingMemberNotificationInput } from "./discordAttendance";
+import { approveAttendanceContest, listAttendanceContests, reviewAttendanceContest, sendDiscordBotMissingMemberNotifications, type DiscordBotMissingMemberNotificationInput } from "./discordAttendance";
 import { errorResponse, json, noContent, optionsResponse, readJson } from "./http";
 import { claimPendingKioskCommands, completeKioskCommand, createKioskCommand, listRecentKioskCommands, requireKioskCommandAction } from "./kioskCommands";
 import { bulkDeleteScheduledMeetings, convertUnscheduledAttendanceToMeeting, createScheduledMeeting, deleteScheduledMeeting, listScheduledMeetings, updateScheduledMeeting, type BulkScheduledMeetingDeleteInput, type ScheduledMeetingInput } from "./meetings";
@@ -273,7 +273,16 @@ export default {
 
       if (route === "GET /admin/attendance-contests") {
         await requireAdmin(request, env);
-        return json({ contests: await listAttendanceContests(env, url.searchParams.get("status")) });
+        return json({ contests: await listAttendanceContests(env, url.searchParams.get("status"), url.searchParams.get("meetingDate")) });
+      }
+
+      const adminAttendanceContestApproval = url.pathname.match(/^\/admin\/attendance-contests\/([^/]+)\/approve$/);
+      if (request.method === "POST" && adminAttendanceContestApproval) {
+        const admin = await requireAdmin(request, env);
+        const contestId = adminAttendanceContestApproval[1];
+        if (!contestId) throw Object.assign(new Error("Attendance contest id is required"), { status: 400 });
+        const body = await readJson<{ reviewNote?: unknown }>(request);
+        return json(await approveAttendanceContest(env, decodeURIComponent(contestId), body, admin));
       }
 
       const adminAttendanceContest = url.pathname.match(/^\/admin\/attendance-contests\/([^/]+)$/);
