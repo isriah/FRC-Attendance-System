@@ -5,7 +5,7 @@
 Current production API:
 
 - Worker URL: `https://frc-attendance-api.frc-attendance.workers.dev`
-- Latest deployed Worker version: `e179c5ff-61fd-4bf0-9db9-f0de9b0aa9ae`
+- Latest deployed Worker version: `0d907192-bff0-465d-af14-075f0b642609`
 - D1 database: `frc-attendance`
 - D1 database ID: `c02c0ca8-033b-435f-ae21-2d8f3b203b22`
 - Applied remote migrations: `0001_initial.sql` through `0013_discord_kiosk_status_messages.sql`
@@ -352,7 +352,7 @@ The default threshold is `KIOSK_DISCORD_OFFLINE_THRESHOLD_MINUTES=1`. This inten
 
 Create/edit operations are claimed in D1 before calling Discord, so overlapping Cron executions do not both create or edit the persistent message. Discord failures leave the row in `error` with the message text and are retried by a later Cron run. If `DISCORD_ATTENDANCE_CHANNEL_ID` is changed, the Worker creates and tracks a separate persistent message for the newly configured channel instead of editing the old channel's message.
 
-Production D1 migrations through `0013_discord_kiosk_status_messages.sql` are applied. `DISCORD_BOT_TOKEN`, `DISCORD_ATTENDANCE_CHANNEL_ID`, and `KIOSK_DISCORD_OFFLINE_THRESHOLD_MINUTES=1` are configured on the production Worker. Persistent Discord kiosk status delivery is deployed in Worker version `3bf7949a-e84e-4727-bafe-b13e69cf8aaf`.
+Production D1 migrations through `0013_discord_kiosk_status_messages.sql` are applied. `DISCORD_BOT_TOKEN`, `DISCORD_ATTENDANCE_CHANNEL_ID`, and `KIOSK_DISCORD_OFFLINE_THRESHOLD_MINUTES=1` are configured on the production Worker. Persistent Discord kiosk status delivery is deployed in Worker version `0d907192-bff0-465d-af14-075f0b642609`.
 
 Application setup and guild-scoped development registration:
 
