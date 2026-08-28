@@ -211,21 +211,21 @@ function kioskStatus(kiosk: KioskRow, now: Date, offlineThresholdMinutes: number
   if (!kiosk.active) {
     return {
       status: "inactive",
-      statusKey: `inactive|pending:${pendingScanCount}|reader:${readerKey(kiosk.reader_online)}|syncError:${syncError}`,
+      statusKey: "inactive",
       details: ["inactive registration"]
     };
   }
   if (!heartbeatAt) {
     return {
       status: "unknown",
-      statusKey: `unknown|pending:${pendingScanCount}|reader:${readerKey(kiosk.reader_online)}|syncError:${syncError}`,
+      statusKey: "unknown",
       details: ["no heartbeat yet"]
     };
   }
   if (now.getTime() - heartbeatAt.getTime() > thresholdMs) {
     return {
       status: "offline",
-      statusKey: `offline|pending:${pendingScanCount}|reader:${readerKey(kiosk.reader_online)}|syncError:${syncError}`,
+      statusKey: "offline",
       details: [`heartbeat older than ${offlineThresholdMinutes} min`]
     };
   }

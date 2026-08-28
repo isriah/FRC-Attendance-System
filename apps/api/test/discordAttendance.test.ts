@@ -266,6 +266,35 @@ describe("Discord kiosk status message", () => {
     expect(snapshot["bench-01"]?.changedAt).toBe("2026-01-02T22:30:00.000Z");
   });
 
+  it("does not edit offline status for hidden health detail changes", async () => {
+    const env = createTestEnv({
+      DISCORD_BOT_TOKEN: "test-bot-token",
+      DISCORD_ATTENDANCE_CHANNEL_ID: "890334748730351629",
+      KIOSK_DISCORD_OFFLINE_THRESHOLD_MINUTES: "1"
+    });
+    insertKiosk(env, {
+      kioskId: "bench-01",
+      name: "Bench kiosk",
+      lastHeartbeatAt: "2026-01-02T22:28:59.000Z",
+      readerOnline: 1
+    });
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ id: "555555555555555555" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await refreshDiscordKioskStatusMessage(env, new Date("2026-01-02T22:30:00.000Z"));
+    await env.DB.prepare(`
+      UPDATE kiosks
+      SET reader_online = 0, pending_scan_count = 3, last_sync_error = 'still offline'
+      WHERE kiosk_id = 'bench-01'
+    `).run();
+
+    const result = await refreshDiscordKioskStatusMessage(env, new Date("2026-01-02T22:40:00.000Z"));
+
+    expect(result).toMatchObject({ status: "unchanged", messageId: "555555555555555555" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const snapshot = JSON.parse(statusMessageRows(env)[0]?.status_snapshot_json ?? "{}") as Record<string, { changedAt: string }>;
+    expect(snapshot["bench-01"]?.changedAt).toBe("2026-01-02T22:30:00.000Z");
+  });
+
   it("marks a kiosk offline when heartbeat exceeds the configured threshold", async () => {
     const env = createTestEnv({
       DISCORD_BOT_TOKEN: "test-bot-token",
