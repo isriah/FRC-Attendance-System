@@ -5,10 +5,10 @@
 Current production API:
 
 - Worker URL: `https://frc-attendance-api.frc-attendance.workers.dev`
-- Latest deployed Worker version: `65155f00-751d-4e56-91c9-c77a99fb0daf`
+- Latest deployed Worker version: `06dd4431-fa1a-4914-890a-94ac33805892`
 - D1 database: `frc-attendance`
 - D1 database ID: `c02c0ca8-033b-435f-ae21-2d8f3b203b22`
-- Applied remote migrations: `0001_initial.sql` through `0009_attendance_contest_idempotency.sql`
+- Applied remote migrations: `0001_initial.sql` through `0010_attendance_exclusions.sql`
 - Workers account subdomain: `frc-attendance.workers.dev`
 - Registered bench kiosk: `bench-01`
 
@@ -16,7 +16,7 @@ Current production dashboard:
 
 - Cloudflare Pages project: `frc-attendance-dashboard`
 - Pages URL: `https://frc-attendance-dashboard.pages.dev`
-- Latest verified deployment: `https://4333ae0a.frc-attendance-dashboard.pages.dev`
+- Latest verified deployment: `https://5af7d94a.frc-attendance-dashboard.pages.dev`
 - API base URL baked into the uploaded Vite build: `https://frc-attendance-api.frc-attendance.workers.dev`
 - Google OAuth client ID baked into the uploaded Vite build: `180849199739-v04bktp7rfmimgjpvohmq7pinrrpr337.apps.googleusercontent.com`
 
@@ -224,6 +224,8 @@ Deployment `https://242b08af.frc-attendance-dashboard.pages.dev` hardens dashboa
 
 Deployment `https://4333ae0a.frc-attendance-dashboard.pages.dev` and Worker version `65155f00-751d-4e56-91c9-c77a99fb0daf` add delayed bot-delivered Discord missing-member messages with a private contest button plus admin contest review in the dashboard. Remote D1 migration `0009_attendance_contest_idempotency.sql` was applied, `DISCORD_ATTENDANCE_CHANNEL_ID` is configured, and the delay defaults to 30 minutes. API/dashboard focused tests, full repository tests/typecheck/build, local migration verification, production Worker health, Pages serving, baked dashboard configuration, and unauthenticated contest-route rejection passed on 2026-08-27 with Pi smoke skipped because this slice does not change Pi services.
 
+Deployment `https://5af7d94a.frc-attendance-dashboard.pages.dev` and Worker version `06dd4431-fa1a-4914-890a-94ac33805892` add audited per-member meeting attendance removal, member links from attendance-related views into matching roster details, and expanded-detail placement for roster deactivation and hard-delete controls. Remote D1 migration `0010_attendance_exclusions.sql` was applied before the Worker deploy. All 129 repository tests, workspace typechecks, dashboard/kiosk builds, local migrations, production Worker health, unauthenticated admin rejection, Pages serving, baked production configuration, and rendered Google sign-in passed on 2026-08-27. No real attendance was removed, and Pi smoke was skipped because this slice does not change Pi services.
+
 The dashboard login UI follows the same boundary: when `VITE_GOOGLE_CLIENT_ID` is configured, it shows Google sign-in and a production notice that email-only local login is disabled. The email-only form is rendered only for local development builds with no Google client ID.
 
 For local development only, if no Google client ID is configured, the dashboard can send an `x-admin-email` header and the API will still enforce the configured allowlist.
@@ -242,7 +244,7 @@ Dashboard roster records can store an optional member email for user association
 
 ## Audited Attendance Corrections
 
-Authenticated admins can mark one currently present member absent for one meeting with `POST /admin/attendance/remove-member`. The request requires `memberId`, `meetingDate`, and a non-empty `reason`; the API records the correction ID, member, meeting date, reason, admin email, and creation time in `attendance_exclusions`. Migration `0010_attendance_exclusions.sql` creates this audit table and must be applied before deploying the matching Worker.
+Authenticated admins can mark one currently present member absent for one meeting with `POST /admin/attendance/remove-member`. The request requires `memberId`, `meetingDate`, and a non-empty `reason`; the API records the correction ID, member, meeting date, reason, admin email, and creation time in `attendance_exclusions`. Migration `0010_attendance_exclusions.sql` creates this audit table and is applied in production.
 
 An exclusion removes the member's derived sessions for that meeting and remains effective when sessions are rebuilt. Original fingerprint `scan_events` and mentor `manual_events` are not deleted or rewritten. Presence, absence, roster attendance, per-member percentages, exports, and notification previews therefore treat the excluded member as absent while retaining the source-event audit trail. The Meetings detail UI exposes this as **Mark absent**, requires a reason, and confirms before saving.
 
