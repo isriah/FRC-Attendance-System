@@ -87,7 +87,7 @@ describe("roster sync", () => {
     ]);
   });
 
-  it("hard deletes member-owned roster, attendance, event, fingerprint, and notification rows without deleting admin users", async () => {
+  it("hard deletes member-owned roster, attendance, event, fingerprint, notification, and contest rows without deleting admin users", async () => {
     const env = createRosterTestEnv();
 
     await syncRoster(env, [
@@ -109,6 +109,7 @@ describe("roster sync", () => {
     await expectRowCount(env, "manual_events", "student_id", "100001", 0);
     await expectRowCount(env, "fingerprint_enrollments", "student_id", "100001", 0);
     await expectRowCount(env, "notification_deliveries", "student_id", "100001", 0);
+    await expectRowCount(env, "attendance_contests", "student_id", "100001", 0);
     const admin = await env.DB.prepare("SELECT active FROM admin_users WHERE email = ?").bind("ada@example.org").first<{ active: number }>();
     expect(admin?.active).toBe(1);
   });
@@ -184,6 +185,18 @@ async function seedMemberData(env: Env, memberId: string) {
   await env.DB.prepare(`
     INSERT INTO scan_events (id, kiosk_id, local_event_id, student_id, occurred_at, synced_at, source, status)
     VALUES ('scan-1', 'bench-01', 'local-1', ?, '2026-01-10T15:00:00.000Z', '2026-01-10T15:00:01.000Z', 'fingerprint', 'accepted')
+  `).bind(memberId).run();
+  await env.DB.prepare(`
+    INSERT INTO attendance_contests (
+      id,
+      student_id,
+      scheduled_meeting_id,
+      meeting_date,
+      discord_user_id,
+      interaction_id,
+      status,
+      created_at
+    ) VALUES ('contest-1', ?, 'meeting-1', '2026-01-10', '111111111111111111', 'interaction-1', 'pending', '2026-01-11T00:00:00.000Z')
   `).bind(memberId).run();
   await env.DB.prepare(`
     INSERT INTO attendance_sessions (id, student_id, meeting_date, check_in_at, status, source_event_ids, rebuilt_at)
@@ -306,6 +319,23 @@ function createRosterTestEnv(): Env {
       error_at TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE attendance_contests (
+      id TEXT PRIMARY KEY,
+      student_id TEXT NOT NULL,
+      scheduled_meeting_id TEXT NOT NULL,
+      meeting_date TEXT NOT NULL,
+      discord_user_id TEXT NOT NULL,
+      interaction_id TEXT NOT NULL UNIQUE,
+      source_message_id TEXT,
+      source_channel_id TEXT,
+      reason TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',
+      created_at TEXT NOT NULL,
+      reviewed_at TEXT,
+      reviewed_by_admin_email TEXT,
+      review_note TEXT
     );
   `);
 

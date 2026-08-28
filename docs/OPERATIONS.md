@@ -62,6 +62,7 @@ This repeatable check verifies the production Worker `/health` response, verifie
    - `EMAIL_FROM_NAME`: optional display name, defaults to `FRC Attendance`.
    - `EMAIL_PROVIDER_URL` and `EMAIL_PROVIDER_API_KEY`: optional legacy generic HTTP provider settings retained for local experiments; prefer Resend for production.
    - `DISCORD_MISSING_MEMBERS_WEBHOOK_URL`: optional Discord channel webhook URL for missing-member pings. Store as a Worker secret. `DISCORD_WEBHOOK_URL` is accepted as a generic fallback, but the missing-members-specific name is preferred.
+   - `DISCORD_PUBLIC_KEY`: Discord application's Ed25519 Public Key (hex) used to verify `POST /discord/interactions`. Configure it as a Worker secret or environment variable; do not hard-code an application-specific value.
 
 6. Deploy the Worker:
 
@@ -293,6 +294,54 @@ Discord setup:
 4. Deploy the Worker and dashboard.
 5. Save Discord user IDs on member details or include an optional `discordUserId` column in roster import. Use numeric Discord user IDs, not display names.
 6. Preview one completed required meeting from the dashboard before sending. Confirm the Discord message appears in the intended channel and `notification_deliveries` rows are written with `notification_kind = 'discord_missing_members'`.
+
+### Discord Application interactions
+
+The first Discord Application/Bot interactions slice exposes `POST /discord/interactions`. It verifies the exact raw request body with Discord's `X-Signature-Ed25519` and `X-Signature-Timestamp` headers, answers Discord `PING` requests, and supports the guild slash command `/link-attendance member_id:<id>`. Command responses are ephemeral. Linking writes only the invoking Discord user ID to the matching active roster member; it will not overwrite a member linked to another Discord account or reuse a Discord user ID linked to another member.
+
+Migration `0008_attendance_contests.sql` prepares admin-reviewable attendance contest records. This slice does not yet create contest rows, schedule delayed missing-member messages, handle contest buttons, or change attendance. Those behaviors require the follow-up bot notification/interaction slice.
+
+Application setup and guild-scoped development registration:
+
+1. Create or select a Discord application in the Developer Portal and add a bot user. Copy the Application ID, Public Key, and bot token. Treat the bot token as a secret; the Application ID, Guild ID, and Public Key are identifiers rather than credentials but should still remain environment-specific.
+2. Apply the D1 migration before deploying this Worker version, because hard deletion of a member now also cleans up that member's contest rows:
+
+   ```powershell
+   npm.cmd --workspace @frc-attendance/api run db:migrate
+   ```
+
+3. Configure the application Public Key on the Worker without committing it:
+
+   ```powershell
+   npx.cmd wrangler secret put DISCORD_PUBLIC_KEY --config apps/api/wrangler.toml
+   ```
+
+4. Deploy the Worker:
+
+   ```powershell
+   npm.cmd --workspace @frc-attendance/api run deploy
+   ```
+
+5. In the Discord Developer Portal, set the application's Interactions Endpoint URL to:
+
+   ```text
+   https://frc-attendance-api.frc-attendance.workers.dev/discord/interactions
+   ```
+
+   Discord validates the endpoint with a signed `PING`; saving the URL should succeed only after `DISCORD_PUBLIC_KEY` is configured and the Worker is deployed.
+
+6. Register the development command in one guild. Set these only in the current shell; do not place the bot token in source or `wrangler.toml`:
+
+   ```powershell
+   $env:DISCORD_APPLICATION_ID = "<application-id>"
+   $env:DISCORD_BOT_TOKEN = "<bot-token>"
+   $env:DISCORD_GUILD_ID = "<development-guild-id>"
+   npm.cmd --workspace @frc-attendance/api run discord:register:guild
+   ```
+
+7. In that guild, run `/link-attendance` with an active member ID. Confirm the response is visible only to the invoking user and that the dashboard member details show the Discord user ID.
+
+The delayed missing-member/contest follow-up will additionally need a bot-accessible attendance channel ID. Use `DISCORD_ATTENDANCE_CHANNEL_ID` for that future Worker configuration and `DISCORD_MISSING_MEMBER_DELAY_MINUTES` for the delay, defaulting to `30`; neither variable is consumed by this foundation slice yet.
 
 ## Kiosk Provisioning
 

@@ -8,6 +8,7 @@
     "dev": "wrangler dev",
     "dev:bench": "tsx src/benchServer.ts",
     "deploy": "npm run check:deploy-config && wrangler deploy",
+    "discord:register:guild": "node scripts/register-discord-commands.mjs",
     "db:migrate:local": "wrangler d1 migrations apply frc-attendance --local",
     "db:migrate": "npm run check:deploy-config && wrangler d1 migrations apply frc-attendance --remote",
     "smoke:pi-roster-pull": "node scripts/smoke-pi-roster-pull.mjs",

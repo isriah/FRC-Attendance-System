@@ -127,6 +127,7 @@ export async function hardDeleteMember(env: Env, memberId: string) {
     env.DB.prepare("DELETE FROM attendance_sessions WHERE student_id = ?").bind(normalizedMemberId),
     env.DB.prepare("DELETE FROM scan_events WHERE student_id = ?").bind(normalizedMemberId),
     env.DB.prepare("DELETE FROM notification_deliveries WHERE student_id = ?").bind(normalizedMemberId),
+    env.DB.prepare("DELETE FROM attendance_contests WHERE student_id = ?").bind(normalizedMemberId),
     env.DB.prepare("DELETE FROM students WHERE student_id = ?").bind(normalizedMemberId)
   ];
   await env.DB.batch(statements);

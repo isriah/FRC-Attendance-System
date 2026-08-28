@@ -13,6 +13,7 @@ export interface Env {
   EMAIL_FROM_NAME?: string;
   DISCORD_MISSING_MEMBERS_WEBHOOK_URL?: string;
   DISCORD_WEBHOOK_URL?: string;
+  DISCORD_PUBLIC_KEY?: string;
   WORKER_VERSION?: string;
   CF_VERSION_METADATA?: { id?: string };
 }
