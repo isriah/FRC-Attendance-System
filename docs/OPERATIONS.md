@@ -8,7 +8,7 @@ Current production API:
 - Latest deployed Worker version: `e179c5ff-61fd-4bf0-9db9-f0de9b0aa9ae`
 - D1 database: `frc-attendance`
 - D1 database ID: `c02c0ca8-033b-435f-ae21-2d8f3b203b22`
-- Applied remote migrations: `0001_initial.sql` through `0012_scheduled_notification_locks.sql`
+- Applied remote migrations: `0001_initial.sql` through `0013_discord_kiosk_status_messages.sql`
 - Workers account subdomain: `frc-attendance.workers.dev`
 - Registered bench kiosk: `bench-01`
 
@@ -66,7 +66,8 @@ This repeatable check verifies the production Worker `/health` response, verifie
    - `DISCORD_BOT_TOKEN`: Discord application's bot token for contestable missing-member messages. Store it as a Worker secret.
    - `DISCORD_ATTENDANCE_CHANNEL_ID`: numeric ID of the bot-accessible channel that receives contestable attendance messages. Store it as a Worker secret or deployment variable.
    - `DISCORD_MISSING_MEMBER_DELAY_MINUTES`: non-negative delay after the scheduled meeting end before a bot ping is allowed. Defaults to `30` and is committed as a non-secret Worker variable.
-   - The Worker has a Cron Trigger (`*/10 * * * *`) that checks for completed required scheduled meetings whose valid `ends_at` timestamp plus the configured delay has elapsed, then sends the contestable bot missing-member ping automatically.
+   - `KIOSK_DISCORD_OFFLINE_THRESHOLD_MINUTES`: integer minutes before a kiosk health heartbeat is considered offline in the persistent Discord kiosk status message. Defaults to `1`, matching the dashboard's 60-second offline rule. The kiosk service reports health every 15 seconds, so this permits several missed reports before Discord changes to offline.
+   - The Worker has one Cron Trigger (`*/10 * * * *`) that runs both automatic Discord jobs: completed required meeting missing-member pings and persistent kiosk status refresh. The jobs use separate durable idempotency tables and can safely coexist in the same scheduled invocation.
 
 6. Deploy the Worker:
 
@@ -334,6 +335,24 @@ Dashboard admins can review contests from the global **Contests** tab or from th
 Migration `0011_attendance_exclusion_supersession.sql` preserves the original absence-correction row while adding supersession metadata and a partial unique constraint for active exclusions. Production has this migration applied; it must remain in place for Workers containing contest approval.
 
 Production D1 migrations through `0012_scheduled_notification_locks.sql` are applied. `DISCORD_PUBLIC_KEY`, `DISCORD_BOT_TOKEN`, and `DISCORD_ATTENDANCE_CHANNEL_ID` are configured on the production Worker. Contest interaction, bot notification, audited contest approval, and automatic scheduled Discord missing-member delivery are deployed in Worker version `e179c5ff-61fd-4bf0-9db9-f0de9b0aa9ae`.
+
+## Discord Kiosk Status Message
+
+The Worker scheduled path maintains one persistent bot-authored kiosk status message in the configured attendance channel. It uses the existing Discord bot token and `DISCORD_ATTENDANCE_CHANNEL_ID`; no webhook or additional secret is required. Migration `0013_discord_kiosk_status_messages.sql` persists the Discord channel/message identity, the last rendered hash, retry/error state, and a compact per-kiosk status snapshot so the message can be edited instead of reposted.
+
+The message covers all registered kiosks, ordered with active kiosks first. A kiosk renders as:
+
+- `Online` when active, recently heartbeating, no sync error, no queued scans, and the reader is not reporting offline.
+- `Degraded` when active and recently heartbeating but the reader is offline, scans are queued, or the latest sync error is present.
+- `Offline` when active but the latest health heartbeat is older than `KIOSK_DISCORD_OFFLINE_THRESHOLD_MINUTES`.
+- `Unknown` when active but no health heartbeat has ever been reported.
+- `Inactive` when the kiosk registration is inactive.
+
+The default threshold is `KIOSK_DISCORD_OFFLINE_THRESHOLD_MINUTES=1`. This intentionally matches the dashboard's existing 60-second kiosk-health rule while remaining conservative relative to the Pi service's 15-second health report interval. The rendered message includes the timestamp when each kiosk's displayed status last changed. The scheduler does not call Discord when the rendered content hash is unchanged, including routine heartbeat timestamp churn that does not change the displayed status.
+
+Create/edit operations are claimed in D1 before calling Discord, so overlapping Cron executions do not both create or edit the persistent message. Discord failures leave the row in `error` with the message text and are retried by a later Cron run. If `DISCORD_ATTENDANCE_CHANNEL_ID` is changed, the Worker creates and tracks a separate persistent message for the newly configured channel instead of editing the old channel's message.
+
+Production D1 migrations through `0013_discord_kiosk_status_messages.sql` are applied. `DISCORD_BOT_TOKEN`, `DISCORD_ATTENDANCE_CHANNEL_ID`, and `KIOSK_DISCORD_OFFLINE_THRESHOLD_MINUTES=1` are configured on the production Worker. Persistent Discord kiosk status delivery is deployed in Worker version `3bf7949a-e84e-4727-bafe-b13e69cf8aaf`.
 
 Application setup and guild-scoped development registration:
 

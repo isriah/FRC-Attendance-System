@@ -5,6 +5,7 @@ import type { Env } from "./env";
 import { buildLegacySheetExport } from "./export";
 import { handleDiscordInteraction } from "./discordInteractions";
 import { approveAttendanceContest, listAttendanceContests, reviewAttendanceContest, sendDiscordBotMissingMemberNotifications, sendScheduledDiscordBotMissingMemberNotifications, type DiscordBotMissingMemberNotificationInput } from "./discordAttendance";
+import { refreshDiscordKioskStatusMessage } from "./discordKioskStatus";
 import { errorResponse, json, noContent, optionsResponse, readJson } from "./http";
 import { claimPendingKioskCommands, completeKioskCommand, createKioskCommand, listRecentKioskCommands, requireKioskCommandAction } from "./kioskCommands";
 import { bulkDeleteScheduledMeetings, convertUnscheduledAttendanceToMeeting, createScheduledMeeting, deleteScheduledMeeting, listScheduledMeetings, updateScheduledMeeting, type BulkScheduledMeetingDeleteInput, type ScheduledMeetingInput } from "./meetings";
@@ -350,6 +351,7 @@ export default {
 
   async scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
     ctx.waitUntil(sendScheduledDiscordBotMissingMemberNotifications(env));
+    ctx.waitUntil(refreshDiscordKioskStatusMessage(env));
   }
 };
 

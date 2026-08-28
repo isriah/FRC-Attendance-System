@@ -8,6 +8,7 @@ import {
   sendDiscordBotMissingMemberNotifications,
   sendScheduledDiscordBotMissingMemberNotifications
 } from "../src/discordAttendance";
+import { refreshDiscordKioskStatusMessage } from "../src/discordKioskStatus";
 import type { Env } from "../src/env";
 
 describe("Discord bot attendance notifications", () => {
@@ -165,6 +166,157 @@ describe("Discord bot attendance notifications", () => {
     expect(parseAttendanceContestCustomId("attendance-contest:v1:2026-99-99")).toBeNull();
     expect(parseAttendanceContestCustomId("other:v1:2026-01-02")).toBeNull();
     expect(parseAttendanceContestCustomId("attendance-contest:v1:2026-01-02:100001")).toBeNull();
+  });
+});
+
+describe("Discord kiosk status message", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("creates one persistent bot status message when absent", async () => {
+    const env = createTestEnv({
+      DISCORD_BOT_TOKEN: "test-bot-token",
+      DISCORD_ATTENDANCE_CHANNEL_ID: "890334748730351629"
+    });
+    insertKiosk(env, {
+      kioskId: "bench-01",
+      name: "Bench kiosk",
+      lastHeartbeatAt: "2026-01-02T22:29:30.000Z",
+      readerOnline: 1
+    });
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ id: "555555555555555555" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await refreshDiscordKioskStatusMessage(env, new Date("2026-01-02T22:30:00.000Z"));
+
+    expect(result).toMatchObject({
+      notificationKind: "discord_kiosk_status",
+      providerConfigured: true,
+      offlineThresholdMinutes: 1,
+      kioskCount: 1,
+      status: "created",
+      messageId: "555555555555555555"
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://discord.com/api/v10/channels/890334748730351629/messages",
+      expect.objectContaining({ method: "POST" })
+    );
+    const body = fetchBody(fetchMock);
+    expect(body.allowed_mentions).toEqual({ parse: [] });
+    expect(String(body.content)).toContain("FRC Attendance kiosk status");
+    expect(String(body.content)).toContain("Status: Online since <t:1767393000:f>");
+    expect(statusMessageRows(env)).toMatchObject([{
+      channel_id: "890334748730351629",
+      message_id: "555555555555555555",
+      operation_status: "idle",
+      attempts: 1,
+      error_message: null
+    }]);
+  });
+
+  it("edits the persistent message when rendered status changes", async () => {
+    const env = createTestEnv({
+      DISCORD_BOT_TOKEN: "test-bot-token",
+      DISCORD_ATTENDANCE_CHANNEL_ID: "890334748730351629"
+    });
+    insertKiosk(env, {
+      kioskId: "bench-01",
+      name: "Bench kiosk",
+      lastHeartbeatAt: "2026-01-02T22:29:30.000Z",
+      readerOnline: 1
+    });
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ id: "555555555555555555" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await refreshDiscordKioskStatusMessage(env, new Date("2026-01-02T22:30:00.000Z"));
+    await env.DB.prepare("UPDATE kiosks SET reader_online = 0, last_heartbeat_at = '2026-01-02T22:30:30.000Z' WHERE kiosk_id = 'bench-01'").run();
+
+    const result = await refreshDiscordKioskStatusMessage(env, new Date("2026-01-02T22:31:00.000Z"));
+
+    expect(result).toMatchObject({ status: "edited", messageId: "555555555555555555" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const calls = fetchMock.mock.calls as unknown as Array<[string, RequestInit]>;
+    expect(calls[1]?.[0]).toBe("https://discord.com/api/v10/channels/890334748730351629/messages/555555555555555555");
+    expect(calls[1]?.[1]).toMatchObject({ method: "PATCH" });
+    const editBody = fetchBodyAt(fetchMock, 1);
+    expect(String(editBody.content)).toContain("Status: Degraded since <t:1767393060:f>");
+    expect(String(editBody.content)).toContain("reader offline");
+  });
+
+  it("does not call Discord when status rendering is unchanged", async () => {
+    const env = createTestEnv({
+      DISCORD_BOT_TOKEN: "test-bot-token",
+      DISCORD_ATTENDANCE_CHANNEL_ID: "890334748730351629"
+    });
+    insertKiosk(env, {
+      kioskId: "bench-01",
+      name: "Bench kiosk",
+      lastHeartbeatAt: "2026-01-02T22:29:30.000Z",
+      readerOnline: 1
+    });
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ id: "555555555555555555" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await refreshDiscordKioskStatusMessage(env, new Date("2026-01-02T22:30:00.000Z"));
+    await env.DB.prepare("UPDATE kiosks SET last_heartbeat_at = '2026-01-02T22:30:45.000Z' WHERE kiosk_id = 'bench-01'").run();
+
+    const result = await refreshDiscordKioskStatusMessage(env, new Date("2026-01-02T22:31:00.000Z"));
+
+    expect(result).toMatchObject({ status: "unchanged", messageId: "555555555555555555" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const snapshot = JSON.parse(statusMessageRows(env)[0]?.status_snapshot_json ?? "{}") as Record<string, { changedAt: string }>;
+    expect(snapshot["bench-01"]?.changedAt).toBe("2026-01-02T22:30:00.000Z");
+  });
+
+  it("marks a kiosk offline when heartbeat exceeds the configured threshold", async () => {
+    const env = createTestEnv({
+      DISCORD_BOT_TOKEN: "test-bot-token",
+      DISCORD_ATTENDANCE_CHANNEL_ID: "890334748730351629",
+      KIOSK_DISCORD_OFFLINE_THRESHOLD_MINUTES: "1"
+    });
+    insertKiosk(env, {
+      kioskId: "bench-01",
+      name: "Bench kiosk",
+      lastHeartbeatAt: "2026-01-02T22:28:59.000Z",
+      readerOnline: 1
+    });
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ id: "555555555555555555" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await refreshDiscordKioskStatusMessage(env, new Date("2026-01-02T22:30:00.000Z"));
+
+    expect(result).toMatchObject({ status: "created" });
+    const body = fetchBody(fetchMock);
+    expect(String(body.content)).toContain("Status: Offline since <t:1767393000:f>");
+    expect(String(body.content)).toContain("heartbeat older than 1 min");
+  });
+
+  it("records Discord errors and retries a failed initial create", async () => {
+    const env = createTestEnv({
+      DISCORD_BOT_TOKEN: "test-bot-token",
+      DISCORD_ATTENDANCE_CHANNEL_ID: "890334748730351629"
+    });
+    insertKiosk(env, {
+      kioskId: "bench-01",
+      name: "Bench kiosk",
+      lastHeartbeatAt: "2026-01-02T22:29:30.000Z",
+      readerOnline: 1
+    });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response("temporary Discord failure", { status: 503 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "555555555555555555" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const first = await refreshDiscordKioskStatusMessage(env, new Date("2026-01-02T22:30:00.000Z"));
+    const second = await refreshDiscordKioskStatusMessage(env, new Date("2026-01-02T22:40:00.000Z"));
+
+    expect(first).toMatchObject({ status: "error", error: "temporary Discord failure" });
+    expect(second).toMatchObject({ status: "created", messageId: "555555555555555555" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(statusMessageRows(env)).toMatchObject([{
+      message_id: "555555555555555555",
+      operation_status: "idle",
+      attempts: 2,
+      error_message: null
+    }]);
   });
 });
 
@@ -442,6 +594,34 @@ function createTestEnv(overrides: Partial<Env> = {}): Env {
       updated_at TEXT NOT NULL,
       UNIQUE(notification_kind, meeting_date)
     );
+    CREATE TABLE kiosks (
+      kiosk_id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      location TEXT,
+      token_hash TEXT NOT NULL,
+      active INTEGER NOT NULL DEFAULT 1,
+      last_seen_at TEXT,
+      last_heartbeat_at TEXT,
+      reader_online INTEGER,
+      pending_scan_count INTEGER NOT NULL DEFAULT 0,
+      last_sync_at TEXT,
+      last_sync_error TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE discord_kiosk_status_messages (
+      channel_id TEXT PRIMARY KEY,
+      message_id TEXT,
+      status_snapshot_json TEXT NOT NULL DEFAULT '{}',
+      rendered_hash TEXT,
+      operation_status TEXT NOT NULL DEFAULT 'idle',
+      attempts INTEGER NOT NULL DEFAULT 0,
+      locked_at TEXT,
+      last_attempt_at TEXT,
+      last_success_at TEXT,
+      error_message TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
     CREATE TABLE attendance_contests (
       id TEXT PRIMARY KEY,
       student_id TEXT NOT NULL REFERENCES students(student_id),
@@ -519,7 +699,11 @@ function adminRequest(env: Env, method: string, path: string, body?: unknown) {
 }
 
 function fetchBody(fetchMock: ReturnType<typeof vi.fn>) {
-  const init = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
+  return fetchBodyAt(fetchMock, 0);
+}
+
+function fetchBodyAt(fetchMock: ReturnType<typeof vi.fn>, index: number) {
+  const init = fetchMock.mock.calls[index]?.[1] as RequestInit | undefined;
   if (!init || typeof init.body !== "string") throw new Error("Expected JSON request body");
   return JSON.parse(init.body) as Record<string, unknown>;
 }
@@ -533,6 +717,56 @@ function deliveryMessageIds(env: Env): string[] {
 function lockRows(env: Env): Array<{ meeting_date: string; status: string; attempts: number }> {
   const db = env.DB as unknown as ReturnType<typeof d1>;
   return db.sqlite.prepare("SELECT meeting_date, status, attempts FROM scheduled_notification_locks ORDER BY meeting_date").all() as Array<{ meeting_date: string; status: string; attempts: number }>;
+}
+
+function statusMessageRows(env: Env): Array<{
+  channel_id: string;
+  message_id: string | null;
+  status_snapshot_json: string;
+  operation_status: string;
+  attempts: number;
+  error_message: string | null;
+}> {
+  const db = env.DB as unknown as ReturnType<typeof d1>;
+  return db.sqlite.prepare(`
+    SELECT channel_id, message_id, status_snapshot_json, operation_status, attempts, error_message
+    FROM discord_kiosk_status_messages
+    ORDER BY channel_id
+  `).all() as Array<{
+    channel_id: string;
+    message_id: string | null;
+    status_snapshot_json: string;
+    operation_status: string;
+    attempts: number;
+    error_message: string | null;
+  }>;
+}
+
+function insertKiosk(env: Env, input: {
+  kioskId: string;
+  name: string;
+  location?: string | null;
+  active?: number;
+  lastHeartbeatAt?: string | null;
+  readerOnline?: number | null;
+  pendingScanCount?: number;
+  lastSyncError?: string | null;
+}) {
+  return env.DB.prepare(`
+    INSERT INTO kiosks (
+      kiosk_id, name, location, token_hash, active, last_heartbeat_at,
+      reader_online, pending_scan_count, last_sync_error
+    ) VALUES (?, ?, ?, 'token-hash', ?, ?, ?, ?, ?)
+  `).bind(
+    input.kioskId,
+    input.name,
+    input.location ?? null,
+    input.active ?? 1,
+    input.lastHeartbeatAt ?? null,
+    input.readerOnline ?? null,
+    input.pendingScanCount ?? 0,
+    input.lastSyncError ?? null
+  ).run();
 }
 
 function countRows(env: Env, table: string): number {

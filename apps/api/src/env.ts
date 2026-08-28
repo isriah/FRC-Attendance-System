@@ -17,6 +17,7 @@ export interface Env {
   DISCORD_BOT_TOKEN?: string;
   DISCORD_ATTENDANCE_CHANNEL_ID?: string;
   DISCORD_MISSING_MEMBER_DELAY_MINUTES?: string;
+  KIOSK_DISCORD_OFFLINE_THRESHOLD_MINUTES?: string;
   WORKER_VERSION?: string;
   CF_VERSION_METADATA?: { id?: string };
 }
