@@ -5,10 +5,10 @@
 Current production API:
 
 - Worker URL: `https://frc-attendance-api.frc-attendance.workers.dev`
-- Latest deployed Worker version: `abfe2271-ebc5-4014-a007-3d07cf6eb994`
+- Latest deployed Worker version: `65155f00-751d-4e56-91c9-c77a99fb0daf`
 - D1 database: `frc-attendance`
 - D1 database ID: `c02c0ca8-033b-435f-ae21-2d8f3b203b22`
-- Applied remote migrations: `0001_initial.sql` through `0008_attendance_contests.sql`
+- Applied remote migrations: `0001_initial.sql` through `0009_attendance_contest_idempotency.sql`
 - Workers account subdomain: `frc-attendance.workers.dev`
 - Registered bench kiosk: `bench-01`
 
@@ -16,7 +16,7 @@ Current production dashboard:
 
 - Cloudflare Pages project: `frc-attendance-dashboard`
 - Pages URL: `https://frc-attendance-dashboard.pages.dev`
-- Latest verified deployment: `https://242b08af.frc-attendance-dashboard.pages.dev`
+- Latest verified deployment: `https://4333ae0a.frc-attendance-dashboard.pages.dev`
 - API base URL baked into the uploaded Vite build: `https://frc-attendance-api.frc-attendance.workers.dev`
 - Google OAuth client ID baked into the uploaded Vite build: `180849199739-v04bktp7rfmimgjpvohmq7pinrrpr337.apps.googleusercontent.com`
 
@@ -63,6 +63,9 @@ This repeatable check verifies the production Worker `/health` response, verifie
    - `EMAIL_PROVIDER_URL` and `EMAIL_PROVIDER_API_KEY`: optional legacy generic HTTP provider settings retained for local experiments; prefer Resend for production.
    - `DISCORD_MISSING_MEMBERS_WEBHOOK_URL`: optional Discord channel webhook URL for missing-member pings. Store as a Worker secret. `DISCORD_WEBHOOK_URL` is accepted as a generic fallback, but the missing-members-specific name is preferred.
    - `DISCORD_PUBLIC_KEY`: Discord application's Ed25519 Public Key (hex) used to verify `POST /discord/interactions`. Configure it as a Worker secret or environment variable; do not hard-code an application-specific value.
+   - `DISCORD_BOT_TOKEN`: Discord application's bot token for contestable missing-member messages. Store it as a Worker secret.
+   - `DISCORD_ATTENDANCE_CHANNEL_ID`: numeric ID of the bot-accessible channel that receives contestable attendance messages. Store it as a Worker secret or deployment variable.
+   - `DISCORD_MISSING_MEMBER_DELAY_MINUTES`: non-negative delay after the scheduled meeting end before a bot ping is allowed. Defaults to `30` and is committed as a non-secret Worker variable.
 
 6. Deploy the Worker:
 
@@ -219,6 +222,8 @@ Deployment `https://314abc98.frc-attendance-dashboard.pages.dev` polishes report
 
 Deployment `https://242b08af.frc-attendance-dashboard.pages.dev` hardens dashboard time formatting so legacy time-only values like `15:00` and legacy date-plus-time values like `2026-08-26+15:00:00` no longer throw during route rendering. No Worker change or D1 migration was required. Focused time-format tests, dashboard typecheck/build, root typecheck/build, root build, production-env dashboard build, immutable Pages serving, baked dashboard config, and authenticated production UI smoke passed on 2026-08-27. Authenticated smoke confirmed the Meetings page rendered the `2026-08-26` meeting with 48 present, 13 absent, and 4 open check-ins, and Reports/Events still loaded with no fresh route-fatal console errors.
 
+Deployment `https://4333ae0a.frc-attendance-dashboard.pages.dev` and Worker version `65155f00-751d-4e56-91c9-c77a99fb0daf` add delayed bot-delivered Discord missing-member messages with a private contest button plus admin contest review in the dashboard. Remote D1 migration `0009_attendance_contest_idempotency.sql` was applied, `DISCORD_ATTENDANCE_CHANNEL_ID` is configured, and the delay defaults to 30 minutes. API/dashboard focused tests, full repository tests/typecheck/build, local migration verification, production Worker health, Pages serving, baked dashboard configuration, and unauthenticated contest-route rejection passed on 2026-08-27 with Pi smoke skipped because this slice does not change Pi services.
+
 The dashboard login UI follows the same boundary: when `VITE_GOOGLE_CLIENT_ID` is configured, it shows Google sign-in and a production notice that email-only local login is disabled. The email-only form is rendered only for local development builds with no Google client ID.
 
 For local development only, if no Google client ID is configured, the dashboard can send an `x-admin-email` header and the API will still enforce the configured allowlist.
@@ -277,6 +282,10 @@ The Worker source exposes authenticated admin `POST /admin/notifications/discord
 
 Discord delivery uses one configured channel webhook message per meeting, not a gateway bot. The message mentions only saved Discord user IDs as `<@id>` and sends Discord `allowed_mentions` with `parse: []` plus the explicit `users` list, so `@everyone`, `@here`, and accidental role/user parsing are not enabled. Optional meetings and future/in-progress meetings are rejected using the same completed-required-meeting guard as missed-meeting emails.
 
+The webhook route above remains available for the original preview/send workflow. The contestable follow-up uses a separate authenticated admin route, `POST /admin/notifications/discord/bot/missing-members`, so webhook callers are not changed. The bot route accepts the same `meetingDate`, optional `preview`, and optional `resend` fields. It posts one message through `DISCORD_BOT_TOKEN` to `DISCORD_ATTENDANCE_CHANNEL_ID`, restricts `allowed_mentions` to the explicit absent linked Discord user IDs, and includes one scalable `Contest absence` button shared by all mentioned members.
+
+Bot delivery is deliberately manual in this slice: an admin uses the meeting detail action after the meeting. The Worker rejects the action until the scheduled `endsAt` plus `DISCORD_MISSING_MEMBER_DELAY_MINUTES`; the default is 30 minutes. A meeting without an end time becomes eligible at the start of the following local day plus the configured delay. Previously successful bot deliveries are skipped unless `resend: true` is explicitly requested.
+
 For safe webhook delivery checks without a real eligible meeting, the Worker also exposes authenticated admin `POST /admin/notifications/discord/test`. The dashboard Overview tab has a compact `Send Discord test` action for this route. It uses the same configured Discord webhook provider but never reads or mutates meeting, attendance, member, or `notification_deliveries` data. The test message includes non-secret debug metadata such as app name, timestamp, notification kind, and Worker version metadata when available. It sends `allowed_mentions` with `parse: []` and an empty `users` array, and the message body contains no user, role, `@everyone`, or `@here` mentions. When no webhook secret is configured, the route returns preview-only disabled feedback without calling Discord.
 
 Production has `DISCORD_MISSING_MEMBERS_WEBHOOK_URL` configured as a Worker secret. Sending is disabled unless `DISCORD_MISSING_MEMBERS_WEBHOOK_URL` or fallback `DISCORD_WEBHOOK_URL` is configured. In disabled mode, the endpoint returns preview data and warnings without writing delivery audit rows. Successful sends use `notification_kind = 'discord_missing_members'` in `notification_deliveries`; the existing `recipient_email` compatibility column stores the Discord user ID for duplicate detection. Prior successful pings for the same meeting/member are skipped by default; `resend: true` intentionally includes them again.
@@ -299,14 +308,18 @@ Discord setup:
 
 The first Discord Application/Bot interactions slice exposes `POST /discord/interactions`. It verifies the exact raw request body with Discord's `X-Signature-Ed25519` and `X-Signature-Timestamp` headers, answers Discord `PING` requests, and supports the guild slash command `/link-attendance member_id:<id>`. Command responses are ephemeral. Linking writes only the invoking Discord user ID to the matching active roster member; it will not overwrite a member linked to another Discord account or reuse a Discord user ID linked to another member.
 
-Migration `0008_attendance_contests.sql` prepares admin-reviewable attendance contest records. This slice does not yet create contest rows, schedule delayed missing-member messages, handle contest buttons, or change attendance. Those behaviors require the follow-up bot notification/interaction slice.
+Migration `0008_attendance_contests.sql` creates admin-reviewable attendance contest records. Migration `0009_attendance_contest_idempotency.sql` adds one-contest-per-member-per-meeting enforcement so repeated Discord button clicks remain idempotent.
 
-Production D1 migration `0008_attendance_contests.sql` was applied on 2026-08-27. The interactions Worker code was intentionally not deployed at that time because `DISCORD_PUBLIC_KEY` was not yet configured; configure that key before deploying this Worker version.
+Contest buttons are handled by the same signed `POST /discord/interactions` endpoint and every user-facing response is ephemeral. The Worker resolves the clicking Discord account to its active linked member, verifies that member was included in the exact delivered bot message, and verifies attendance still shows the member absent. It then creates one pending contest without changing sessions, scan events, or attendance results. Invalid buttons, another member's message, unlinked users, and members already marked present do not create contest rows.
+
+Dashboard admins review contests from the **Contests** tab. The list shows the member, meeting, Discord user ID, status, created time, review time/admin, and notes. Admins can acknowledge, resolve, or reject a contest. These review actions are audit state only; use the Reports tab's manual attendance correction form when a verified contest requires a check-in or check-out correction, then mark the contest resolved with a note.
+
+Production D1 migrations through `0009_attendance_contest_idempotency.sql` are applied. `DISCORD_PUBLIC_KEY`, `DISCORD_BOT_TOKEN`, and `DISCORD_ATTENDANCE_CHANNEL_ID` are configured on the production Worker; the contest interaction and bot notification code is deployed in Worker version `65155f00-751d-4e56-91c9-c77a99fb0daf`.
 
 Application setup and guild-scoped development registration:
 
 1. Create or select a Discord application in the Developer Portal and add a bot user. Copy the Application ID, Public Key, and bot token. Treat the bot token as a secret; the Application ID, Guild ID, and Public Key are identifiers rather than credentials but should still remain environment-specific.
-2. Apply the D1 migration before deploying this Worker version, because hard deletion of a member now also cleans up that member's contest rows:
+2. Apply the D1 migrations before deploying this Worker version, because hard deletion of a member now also cleans up that member's contest rows and migration `0009` enforces contest idempotency:
 
    ```powershell
    npm.cmd --workspace @frc-attendance/api run db:migrate
@@ -316,6 +329,13 @@ Application setup and guild-scoped development registration:
 
    ```powershell
    npx.cmd wrangler secret put DISCORD_PUBLIC_KEY --config apps/api/wrangler.toml
+   ```
+
+   Configure bot delivery at the same time. The channel ID is not a credential, but keeping it in deployment configuration avoids hard-coding a guild-specific ID:
+
+   ```powershell
+   npx.cmd wrangler secret put DISCORD_BOT_TOKEN --config apps/api/wrangler.toml
+   npx.cmd wrangler secret put DISCORD_ATTENDANCE_CHANNEL_ID --config apps/api/wrangler.toml
    ```
 
 4. Deploy the Worker:
@@ -343,7 +363,14 @@ Application setup and guild-scoped development registration:
 
 7. In that guild, run `/link-attendance` with an active member ID. Confirm the response is visible only to the invoking user and that the dashboard member details show the Discord user ID.
 
-The delayed missing-member/contest follow-up will additionally need a bot-accessible attendance channel ID. Use `DISCORD_ATTENDANCE_CHANNEL_ID` for that future Worker configuration and `DISCORD_MISSING_MEMBER_DELAY_MINUTES` for the delay, defaulting to `30`; neither variable is consumed by this foundation slice yet.
+8. Smoke-test the contest workflow with a completed required test meeting:
+
+   - Confirm the meeting has an `endsAt` at least 30 minutes in the past, or temporarily use a lower non-negative `DISCORD_MISSING_MEMBER_DELAY_MINUTES` in a non-production environment.
+   - In Meetings, open the meeting and choose **Ping missing members with contest button**. Review the preview, confirm the send, and verify Discord receives one message with only the expected member mentions and a `Contest absence` button.
+   - Click the button as one linked absent test member. Confirm the response is ephemeral and states that attendance was not changed.
+   - Open the dashboard **Contests** tab, verify the pending row, add a review note, and acknowledge, resolve, or reject it.
+   - If testing a correction, add the manual attendance event from Reports and then mark the contest resolved. Confirm no contest action by itself created an attendance session or scan event.
+   - Click the Discord button again and confirm no duplicate contest row is created.
 
 ## Kiosk Provisioning
 

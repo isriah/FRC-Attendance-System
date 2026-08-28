@@ -4,6 +4,7 @@ import { addManualEvent, clearAttendanceForDate, syncKioskEvents } from "./atten
 import type { Env } from "./env";
 import { buildLegacySheetExport } from "./export";
 import { handleDiscordInteraction } from "./discordInteractions";
+import { listAttendanceContests, reviewAttendanceContest, sendDiscordBotMissingMemberNotifications, type DiscordBotMissingMemberNotificationInput } from "./discordAttendance";
 import { errorResponse, json, noContent, optionsResponse, readJson } from "./http";
 import { claimPendingKioskCommands, completeKioskCommand, createKioskCommand, listRecentKioskCommands, requireKioskCommandAction } from "./kioskCommands";
 import { bulkDeleteScheduledMeetings, convertUnscheduledAttendanceToMeeting, createScheduledMeeting, deleteScheduledMeeting, listScheduledMeetings, updateScheduledMeeting, type BulkScheduledMeetingDeleteInput, type ScheduledMeetingInput } from "./meetings";
@@ -247,10 +248,30 @@ export default {
         return json(await sendDiscordMissingMemberNotifications(env, body));
       }
 
+      if (route === "POST /admin/notifications/discord/bot/missing-members") {
+        await requireAdmin(request, env);
+        const body = await readJson<DiscordBotMissingMemberNotificationInput>(request);
+        return json(await sendDiscordBotMissingMemberNotifications(env, body));
+      }
+
       if (route === "POST /admin/notifications/discord/test") {
         await requireAdmin(request, env);
         const body = await readJson<DiscordTestNotificationInput>(request);
         return json(await sendDiscordTestNotification(env, body));
+      }
+
+      if (route === "GET /admin/attendance-contests") {
+        await requireAdmin(request, env);
+        return json({ contests: await listAttendanceContests(env, url.searchParams.get("status")) });
+      }
+
+      const adminAttendanceContest = url.pathname.match(/^\/admin\/attendance-contests\/([^/]+)$/);
+      if (request.method === "PUT" && adminAttendanceContest) {
+        const admin = await requireAdmin(request, env);
+        const contestId = adminAttendanceContest[1];
+        if (!contestId) throw Object.assign(new Error("Attendance contest id is required"), { status: 400 });
+        const body = await readJson<{ status?: unknown; reviewNote?: unknown }>(request);
+        return json(await reviewAttendanceContest(env, decodeURIComponent(contestId), body, admin));
       }
 
       if (route === "GET /admin/events") {

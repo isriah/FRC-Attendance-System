@@ -1,0 +1,2 @@
+CREATE UNIQUE INDEX attendance_contests_member_meeting_unique_idx
+ON attendance_contests(student_id, scheduled_meeting_id);

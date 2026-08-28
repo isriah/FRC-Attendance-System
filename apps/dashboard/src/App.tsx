@@ -4,7 +4,7 @@ import { apiBaseUrl, apiDelete, apiGet, apiPost, apiPut, type DashboardSession }
 import { formatDateTime, formatTime, localTimeInputValue } from "./timeFormat";
 import "./styles.css";
 
-type Tab = "overview" | "roster" | "admins" | "meetings" | "kiosks" | "events" | "reports" | "export";
+type Tab = "overview" | "roster" | "admins" | "meetings" | "contests" | "kiosks" | "events" | "reports" | "export";
 type RosterViewTab = "active" | "deactivated" | "import";
 type MeetingViewTab = "calendar" | "all" | "form";
 type ThemeMode = "themed" | "light" | "dark";
@@ -168,12 +168,14 @@ interface MemberAttendanceReportNotificationResult {
 interface DiscordMissingMemberNotificationResult {
   meetingDate: string;
   title: string | null;
-  notificationKind: "discord_missing_members";
+  notificationKind: "discord_missing_members" | "discord_bot_missing_members";
   providerConfigured: boolean;
   mode: "preview" | "send";
   sentCount: number;
   skippedDuplicateCount: number;
   errorCount: number;
+  delayMinutes?: number;
+  eligibleAt?: string;
   recipients: Array<{
     memberId: string;
     firstName: string;
@@ -190,6 +192,27 @@ interface DiscordMissingMemberNotificationResult {
     status: "missing_discord";
   }>;
   warnings: string[];
+}
+
+type AttendanceContestStatus = "pending" | "acknowledged" | "resolved" | "rejected";
+
+interface AttendanceContestRow {
+  id: string;
+  memberId: string;
+  firstName: string;
+  lastName: string;
+  scheduledMeetingId: string;
+  meetingDate: string;
+  meetingTitle: string | null;
+  discordUserId: string;
+  sourceMessageId: string | null;
+  sourceChannelId: string | null;
+  reason: string | null;
+  status: AttendanceContestStatus;
+  createdAt: string;
+  reviewedAt: string | null;
+  reviewedByAdminEmail: string | null;
+  reviewNote: string | null;
 }
 
 interface DiscordTestNotificationResult {
@@ -265,7 +288,7 @@ function App() {
     <main className="dashboard">
       <aside>
         <h1>Attendance Admin</h1>
-        {(["overview", "roster", "admins", "meetings", "kiosks", "events", "reports", "export"] as Tab[]).map((item) => (
+        {(["overview", "roster", "admins", "meetings", "contests", "kiosks", "events", "reports", "export"] as Tab[]).map((item) => (
           <button key={item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}>
             {item}
           </button>
@@ -285,12 +308,101 @@ function App() {
         {tab === "roster" && <Roster session={session} />}
         {tab === "admins" && <AdminUsers session={session} />}
         {tab === "meetings" && <Meetings session={session} />}
+        {tab === "contests" && <AttendanceContests session={session} onOpenReports={() => setTab("reports")} />}
         {tab === "kiosks" && <Kiosks session={session} />}
         {tab === "events" && <Events session={session} />}
         {tab === "reports" && <Reports session={session} />}
         {tab === "export" && <LegacyExport session={session} />}
       </section>
     </main>
+  );
+}
+
+function AttendanceContests({ session, onOpenReports }: { session: DashboardSession; onOpenReports: () => void }) {
+  const { data, error, loading, reload } = useApi<{ contests: AttendanceContestRow[] }>("/admin/attendance-contests", session);
+  const [statusFilter, setStatusFilter] = useState<AttendanceContestStatus | "all">("pending");
+  const [reviewNotes, setReviewNotes] = useState<Record<string, string>>({});
+  const [busyContestId, setBusyContestId] = useState("");
+  const [message, setMessage] = useState<{ kind: "success" | "error"; text: string }>();
+  const contests = data?.contests ?? [];
+  const visibleContests = statusFilter === "all" ? contests : contests.filter((contest) => contest.status === statusFilter);
+
+  async function reviewContest(contest: AttendanceContestRow, status: Exclude<AttendanceContestStatus, "pending">) {
+    setBusyContestId(contest.id);
+    setMessage(undefined);
+    try {
+      await apiPut<AttendanceContestRow>(`/admin/attendance-contests/${encodeURIComponent(contest.id)}`, {
+        status,
+        reviewNote: reviewNotes[contest.id]?.trim() || undefined
+      }, session);
+      setMessage({ kind: "success", text: `Marked ${contest.firstName} ${contest.lastName}'s ${contest.meetingDate} contest ${status}. Attendance was not changed.` });
+      reload();
+    } catch (err) {
+      setMessage({ kind: "error", text: friendlyDashboardError(err) });
+    } finally {
+      setBusyContestId("");
+    }
+  }
+
+  return (
+    <section>
+      <div className="section-heading">
+        <div>
+          <h2>Attendance Contests</h2>
+          <p className="report-context">Discord contests are review requests only. Acknowledging, resolving, or rejecting one never changes attendance.</p>
+        </div>
+        <button type="button" onClick={reload} disabled={loading}>Refresh</button>
+      </div>
+      <div className="toolbar wrap">
+        <label className="field-label">
+          <span>Status</span>
+          <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as AttendanceContestStatus | "all")}>
+            <option value="pending">Pending</option>
+            <option value="acknowledged">Acknowledged</option>
+            <option value="resolved">Resolved</option>
+            <option value="rejected">Rejected</option>
+            <option value="all">All</option>
+          </select>
+        </label>
+        <button type="button" onClick={onOpenReports}>Open attendance correction tools</button>
+      </div>
+      {message ? <p className={`notice ${message.kind}`}>{message.text}</p> : null}
+      {error ? <p className="error">{error}</p> : null}
+      {!loading && visibleContests.length === 0 ? <p className="empty-state">No {statusFilter === "all" ? "" : `${statusFilter} `}attendance contests.</p> : null}
+      <div className="contest-list">
+        {visibleContests.map((contest) => (
+          <article className="contest-row" key={contest.id}>
+            <div className="contest-summary">
+              <div>
+                <strong>{contest.firstName} {contest.lastName}</strong>
+                <span>Member {contest.memberId} · Discord {contest.discordUserId}</span>
+              </div>
+              <span className={`status-badge ${contest.status}`}>{contest.status}</span>
+            </div>
+            <p><strong>{contest.meetingTitle ?? "Required meeting"}</strong> · {contest.meetingDate}</p>
+            <p className="report-context">
+              Contested {formatDateTime(contest.createdAt)}
+              {contest.reviewedAt ? ` · Reviewed ${formatDateTime(contest.reviewedAt)} by ${contest.reviewedByAdminEmail ?? "admin"}` : ""}
+            </p>
+            {contest.reviewNote ? <p className="notice info">Review note: {contest.reviewNote}</p> : null}
+            <label className="field-label wide-field">
+              <span>Review note</span>
+              <input
+                value={reviewNotes[contest.id] ?? contest.reviewNote ?? ""}
+                onChange={(event) => setReviewNotes((notes) => ({ ...notes, [contest.id]: event.target.value }))}
+                placeholder="Optional context for this review"
+                maxLength={1000}
+              />
+            </label>
+            <div className="kiosk-actions">
+              <button type="button" disabled={busyContestId === contest.id} onClick={() => reviewContest(contest, "acknowledged")}>Acknowledge</button>
+              <button type="button" disabled={busyContestId === contest.id} onClick={() => reviewContest(contest, "resolved")}>Mark resolved</button>
+              <button type="button" className="danger-button" disabled={busyContestId === contest.id} onClick={() => reviewContest(contest, "rejected")}>Reject</button>
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -1680,14 +1792,14 @@ function Meetings({ session }: { session: DashboardSession }) {
     setDiscordNotificationBusyDate(meetingDate);
     setMessage(undefined);
     try {
-      const preview = await apiPost<DiscordMissingMemberNotificationResult>("/admin/notifications/discord/missing-members", {
+      const preview = await apiPost<DiscordMissingMemberNotificationResult>("/admin/notifications/discord/bot/missing-members", {
         meetingDate,
         preview: true
       }, session);
       setDiscordNotificationResult(preview);
       const sendableCount = preview.recipients.filter((recipient) => recipient.status === "would_send").length;
       if (!preview.providerConfigured) {
-        setMessage({ kind: "success", text: `Preview ready for ${pluralize(sendableCount, "member")}; Discord webhook is not configured.` });
+        setMessage({ kind: "success", text: `Preview ready for ${pluralize(sendableCount, "member")}; Discord bot delivery is not configured.` });
         return;
       }
       if (sendableCount === 0) {
@@ -1695,7 +1807,7 @@ function Meetings({ session }: { session: DashboardSession }) {
         return;
       }
       if (!window.confirm(`Ping ${pluralize(sendableCount, "missing member")} in Discord?`)) return;
-      const result = await apiPost<DiscordMissingMemberNotificationResult>("/admin/notifications/discord/missing-members", {
+      const result = await apiPost<DiscordMissingMemberNotificationResult>("/admin/notifications/discord/bot/missing-members", {
         meetingDate
       }, session);
       setDiscordNotificationResult(result);
@@ -2162,7 +2274,7 @@ function MeetingDetails({
             <>
               <MeetingRequirementBadge required={meeting.required} />
               {required ? <button type="button" onClick={() => onEmailAbsent(meeting.meetingDate)} disabled={saving || notificationBusy}>{notificationBusy ? "Checking..." : "Email absent members"}</button> : null}
-              {required ? <button type="button" onClick={() => onDiscordPingAbsent(meeting.meetingDate)} disabled={saving || discordNotificationBusy}>{discordNotificationBusy ? "Checking..." : "Ping missing members in Discord"}</button> : null}
+              {required ? <button type="button" onClick={() => onDiscordPingAbsent(meeting.meetingDate)} disabled={saving || discordNotificationBusy}>{discordNotificationBusy ? "Checking..." : "Ping missing members with contest button"}</button> : null}
               <button type="button" onClick={() => onEdit(meeting)} disabled={saving}>Edit</button>
               <button type="button" onClick={() => onDelete(meeting)} disabled={saving}>Delete</button>
             </>
@@ -2269,6 +2381,7 @@ function DiscordNotificationResultPanel({ result }: { result: DiscordMissingMemb
       <p className={`notice ${noticeKind}`}>
         {discordNotificationSummary(result)}
       </p>
+      {result.eligibleAt ? <p className="report-context">Configured delay: {result.delayMinutes ?? 30} minutes; eligible {formatDateTime(result.eligibleAt)}.</p> : null}
       {result.warnings.length > 0 ? <p className="report-context">{result.warnings.join(" ")}</p> : null}
       {recipientRows.length > 0 ? <DataTable rows={recipientRows} columns={["memberId", "firstName", "lastName", "discordUserId", "mention", "status", "error"]} density="compact" /> : null}
       {missingRows.length > 0 ? (
@@ -3200,10 +3313,11 @@ function notificationSummary(result: MeetingAbsenceNotificationResult) {
 
 function discordNotificationSummary(result: DiscordMissingMemberNotificationResult) {
   const deliverableCount = result.recipients.filter((recipient) => recipient.status === "would_send").length;
+  const providerLabel = result.notificationKind === "discord_bot_missing_members" ? "Discord bot" : "Discord webhook";
   if (result.mode === "preview") {
     return result.providerConfigured
       ? `${pluralize(deliverableCount, "absent member")} ready to ping; ${pluralize(result.missingDiscord.length, "missing Discord ID")}.`
-      : `${pluralize(deliverableCount, "absent member")} would be pinged; Discord webhook not configured. ${pluralize(result.missingDiscord.length, "missing Discord ID")}.`;
+      : `${pluralize(deliverableCount, "absent member")} would be pinged; ${providerLabel} not configured. ${pluralize(result.missingDiscord.length, "missing Discord ID")}.`;
   }
   return `Pinged ${pluralize(result.sentCount, "member")}; skipped ${pluralize(result.skippedDuplicateCount, "duplicate")}; ${pluralize(result.errorCount, "error")}.`;
 }

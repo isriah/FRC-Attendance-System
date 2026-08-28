@@ -910,7 +910,9 @@ pre {
 
 .status-badge.active,
 .status-badge.online,
-.status-badge.completed {
+.status-badge.completed,
+.status-badge.resolved,
+.status-badge.acknowledged {
   border-color: var(--primary-soft);
   color: var(--primary-dark);
   background: var(--primary-bg);
@@ -928,10 +930,43 @@ pre {
 
 .status-badge.failed,
 .status-badge.offline,
-.status-badge.inactive {
+.status-badge.inactive,
+.status-badge.rejected {
   border-color: var(--danger-soft);
   color: var(--danger-color);
   background: var(--danger-bg);
+}
+
+.contest-list {
+  display: grid;
+  gap: 12px;
+}
+
+.contest-row {
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 14px;
+}
+
+.contest-row p {
+  margin: 10px 0;
+}
+
+.contest-summary {
+  align-items: flex-start;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.contest-summary div {
+  display: grid;
+  gap: 4px;
+}
+
+.contest-summary span:not(.status-badge) {
+  color: var(--muted-color);
+  font-size: 13px;
 }
 
 .health-summary {

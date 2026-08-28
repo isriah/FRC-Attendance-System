@@ -124,6 +124,25 @@ describe("Discord interactions", () => {
     expect(discordIdFor(env, "100001")).toBe("222222222222222222");
     expect(discordIdFor(env, "100002")).toBeNull();
   });
+
+  it("records contest button clicks idempotently and responds ephemerally", async () => {
+    const env = createTestEnv();
+    insertStudent(env, "100001", "Ada", "Lovelace", 1, "111111111111111111");
+    insertMeetingAndDelivery(env, "100001", "111111111111111111");
+
+    const first = await signedRequest(env, contestButton("555555555555555551", "111111111111111111"));
+    const repeated = await signedRequest(env, contestButton("555555555555555552", "111111111111111111"));
+
+    expect(await first.json()).toMatchObject({
+      type: 4,
+      data: { flags: 64, content: expect.stringContaining("recorded for mentor review") }
+    });
+    expect(await repeated.json()).toMatchObject({
+      type: 4,
+      data: { flags: 64, content: expect.stringContaining("already have a pending") }
+    });
+    expect(countContests(env)).toBe(1);
+  });
 });
 
 function linkCommand(memberId: string, discordUserId: string) {
@@ -135,6 +154,17 @@ function linkCommand(memberId: string, discordUserId: string) {
       name: "link-attendance",
       options: [{ type: 3, name: "member_id", value: memberId }]
     }
+  };
+}
+
+function contestButton(interactionId: string, discordUserId: string) {
+  return {
+    id: interactionId,
+    type: 3,
+    channel_id: "890334748730351629",
+    member: { user: { id: discordUserId } },
+    message: { id: "444444444444444444" },
+    data: { custom_id: "attendance-contest:v1:2026-01-02" }
   };
 }
 
@@ -168,11 +198,87 @@ function createTestEnv(beforeRun?: (sql: string, sqlite: Database.Database) => v
     CREATE UNIQUE INDEX students_discord_user_id_unique_idx
     ON students(discord_user_id)
     WHERE discord_user_id IS NOT NULL;
+
+    CREATE TABLE attendance_sessions (
+      id TEXT PRIMARY KEY,
+      student_id TEXT NOT NULL,
+      meeting_date TEXT NOT NULL,
+      check_in_at TEXT NOT NULL,
+      check_out_at TEXT,
+      status TEXT NOT NULL,
+      source_event_ids TEXT NOT NULL,
+      rebuilt_at TEXT NOT NULL
+    );
+
+    CREATE TABLE scheduled_meetings (
+      id TEXT PRIMARY KEY,
+      meeting_date TEXT NOT NULL UNIQUE,
+      title TEXT NOT NULL,
+      required INTEGER NOT NULL DEFAULT 1,
+      starts_at TEXT,
+      ends_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE notification_deliveries (
+      id TEXT PRIMARY KEY,
+      notification_kind TEXT NOT NULL,
+      meeting_date TEXT NOT NULL,
+      student_id TEXT NOT NULL,
+      recipient_email TEXT NOT NULL,
+      status TEXT NOT NULL,
+      provider_message_id TEXT,
+      error_message TEXT,
+      sent_at TEXT,
+      error_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE attendance_contests (
+      id TEXT PRIMARY KEY,
+      student_id TEXT NOT NULL,
+      scheduled_meeting_id TEXT NOT NULL,
+      meeting_date TEXT NOT NULL,
+      discord_user_id TEXT NOT NULL,
+      interaction_id TEXT NOT NULL UNIQUE,
+      source_message_id TEXT,
+      source_channel_id TEXT,
+      reason TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',
+      created_at TEXT NOT NULL,
+      reviewed_at TEXT,
+      reviewed_by_admin_email TEXT,
+      review_note TEXT
+    );
+
+    CREATE UNIQUE INDEX attendance_contests_member_meeting_unique_idx
+    ON attendance_contests(student_id, scheduled_meeting_id);
   `);
   return {
     DB: d1(sqlite, beforeRun),
     DISCORD_PUBLIC_KEY: publicKeyHex
   } as unknown as Env;
+}
+
+function insertMeetingAndDelivery(env: Env, memberId: string, discordUserId: string) {
+  const now = "2026-01-02T22:30:00.000Z";
+  env.DB.prepare(`
+    INSERT INTO scheduled_meetings (id, meeting_date, title, required, starts_at, ends_at, created_at, updated_at)
+    VALUES ('meeting-2026-01-02', '2026-01-02', 'Required Build', 1, '2026-01-02T20:00:00.000Z', '2026-01-02T22:00:00.000Z', ?, ?)
+  `).bind(now, now).run();
+  env.DB.prepare(`
+    INSERT INTO notification_deliveries (
+      id, notification_kind, meeting_date, student_id, recipient_email, status,
+      provider_message_id, sent_at, created_at, updated_at
+    ) VALUES (?, 'discord_bot_missing_members', '2026-01-02', ?, ?, 'sent', '444444444444444444', ?, ?, ?)
+  `).bind(crypto.randomUUID(), memberId, discordUserId, now, now, now).run();
+}
+
+function countContests(env: Env) {
+  const db = env.DB as unknown as ReturnType<typeof d1>;
+  return (db.sqlite.prepare("SELECT COUNT(*) AS count FROM attendance_contests").get() as { count: number }).count;
 }
 
 function insertStudent(

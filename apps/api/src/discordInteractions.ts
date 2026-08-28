@@ -1,7 +1,9 @@
 import type { Env } from "./env";
+import { contestAttendanceAbsence, type AttendanceContestInteractionResult } from "./discordAttendance";
 
 const interactionPing = 1;
 const interactionApplicationCommand = 2;
+const interactionMessageComponent = 3;
 const responsePong = 1;
 const responseChannelMessage = 4;
 const ephemeralFlag = 64;
@@ -11,10 +13,13 @@ interface DiscordInteraction {
   type?: number;
   data?: {
     name?: string;
+    custom_id?: string;
     options?: Array<{ name?: string; type?: number; value?: unknown }>;
   };
   member?: { user?: { id?: string } };
   user?: { id?: string };
+  message?: { id?: string };
+  channel_id?: string;
 }
 
 interface LinkedMemberRow {
@@ -49,6 +54,9 @@ export async function handleDiscordInteraction(request: Request, env: Env): Prom
   }
 
   if (interaction.type === interactionPing) return discordJson({ type: responsePong });
+  if (interaction.type === interactionMessageComponent) {
+    return handleAttendanceContestButton(env, interaction);
+  }
   if (interaction.type !== interactionApplicationCommand) {
     return ephemeral("This Discord interaction is not supported yet.");
   }
@@ -68,6 +76,42 @@ export async function handleDiscordInteraction(request: Request, env: Env): Prom
   } catch (error) {
     console.error("Discord attendance link failed", error);
     return ephemeral("Attendance linking is temporarily unavailable. Please try again or ask a mentor for help.");
+  }
+}
+
+async function handleAttendanceContestButton(env: Env, interaction: DiscordInteraction): Promise<Response> {
+  const discordUserId = interaction.member?.user?.id ?? interaction.user?.id;
+  try {
+    const result = await contestAttendanceAbsence(env, {
+      interactionId: interaction.id,
+      discordUserId,
+      customId: interaction.data?.custom_id,
+      sourceMessageId: interaction.message?.id,
+      sourceChannelId: interaction.channel_id
+    });
+    return ephemeral(attendanceContestResultMessage(result));
+  } catch (error) {
+    console.error("Discord attendance contest failed", error);
+    return ephemeral("Your attendance contest could not be recorded right now. Please try again or ask a mentor for help.");
+  }
+}
+
+function attendanceContestResultMessage(result: AttendanceContestInteractionResult): string {
+  switch (result.status) {
+    case "created":
+      return `Your attendance contest for ${result.contest.meetingDate} was recorded for mentor review. Your attendance has not been changed.`;
+    case "already_pending":
+      return `You already have a pending attendance contest for ${result.contest.meetingDate}. A mentor can review it in the dashboard.`;
+    case "already_reviewed":
+      return `Your attendance contest for ${result.contest.meetingDate} was already reviewed with status ${result.contest.status}. Ask a mentor if you still need help.`;
+    case "not_linked":
+      return "Your Discord account is not linked to an active attendance member. Use `/link-attendance` or ask a mentor for help.";
+    case "already_present":
+      return "Attendance already shows you as present for this meeting, so no contest was created.";
+    case "not_eligible":
+      return "This contest button is not valid for your account or this meeting. Ask a mentor if you believe your attendance is wrong.";
+    case "invalid":
+      return "This attendance contest button is invalid or expired. Ask a mentor for help.";
   }
 }
 

@@ -14,6 +14,9 @@ export interface Env {
   DISCORD_MISSING_MEMBERS_WEBHOOK_URL?: string;
   DISCORD_WEBHOOK_URL?: string;
   DISCORD_PUBLIC_KEY?: string;
+  DISCORD_BOT_TOKEN?: string;
+  DISCORD_ATTENDANCE_CHANNEL_ID?: string;
+  DISCORD_MISSING_MEMBER_DELAY_MINUTES?: string;
   WORKER_VERSION?: string;
   CF_VERSION_METADATA?: { id?: string };
 }
