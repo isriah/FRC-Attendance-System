@@ -8,7 +8,7 @@ Current production API:
 - Latest deployed Worker version: `abfe2271-ebc5-4014-a007-3d07cf6eb994`
 - D1 database: `frc-attendance`
 - D1 database ID: `c02c0ca8-033b-435f-ae21-2d8f3b203b22`
-- Applied remote migrations: `0001_initial.sql` through `0007_student_discord_user_id.sql`
+- Applied remote migrations: `0001_initial.sql` through `0008_attendance_contests.sql`
 - Workers account subdomain: `frc-attendance.workers.dev`
 - Registered bench kiosk: `bench-01`
 
@@ -300,6 +300,8 @@ Discord setup:
 The first Discord Application/Bot interactions slice exposes `POST /discord/interactions`. It verifies the exact raw request body with Discord's `X-Signature-Ed25519` and `X-Signature-Timestamp` headers, answers Discord `PING` requests, and supports the guild slash command `/link-attendance member_id:<id>`. Command responses are ephemeral. Linking writes only the invoking Discord user ID to the matching active roster member; it will not overwrite a member linked to another Discord account or reuse a Discord user ID linked to another member.
 
 Migration `0008_attendance_contests.sql` prepares admin-reviewable attendance contest records. This slice does not yet create contest rows, schedule delayed missing-member messages, handle contest buttons, or change attendance. Those behaviors require the follow-up bot notification/interaction slice.
+
+Production D1 migration `0008_attendance_contests.sql` was applied on 2026-08-27. The interactions Worker code was intentionally not deployed at that time because `DISCORD_PUBLIC_KEY` was not yet configured; configure that key before deploying this Worker version.
 
 Application setup and guild-scoped development registration:
 
