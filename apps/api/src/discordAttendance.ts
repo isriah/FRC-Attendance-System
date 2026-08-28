@@ -5,6 +5,7 @@ import type { Env } from "./env";
 import { buildMeetingAbsenceReport } from "./reports";
 
 const discordBotMissingMembersKind = "discord_bot_missing_members";
+const scheduledDiscordBotMissingMembersKind = "scheduled_discord_bot_missing_members";
 const contestCustomIdPrefix = "attendance-contest:v1:";
 const defaultDelayMinutes = 30;
 
@@ -43,6 +44,27 @@ export interface DiscordBotMissingMemberNotificationResult {
     status: "missing_discord";
   }>;
   warnings: string[];
+}
+
+export interface ScheduledDiscordBotMissingMemberNotificationsResult {
+  notificationKind: typeof scheduledDiscordBotMissingMembersKind;
+  delayMinutes: number;
+  checkedAt: string;
+  eligibleCount: number;
+  claimedCount: number;
+  sentMeetingCount: number;
+  skippedLockedCount: number;
+  errorCount: number;
+  meetings: Array<{
+    meetingDate: string;
+    title: string | null;
+    eligibleAt: string;
+    status: "sent" | "skipped_locked" | "error";
+    sentCount?: number;
+    skippedDuplicateCount?: number;
+    errorCount?: number;
+    error?: string;
+  }>;
 }
 
 export type AttendanceContestStatus = "pending" | "acknowledged" | "resolved" | "rejected";
@@ -199,6 +221,102 @@ export async function sendDiscordBotMissingMemberNotifications(
     recipients,
     missingDiscord,
     warnings
+  };
+}
+
+export async function sendScheduledDiscordBotMissingMemberNotifications(
+  env: Env,
+  now = new Date()
+): Promise<ScheduledDiscordBotMissingMemberNotificationsResult> {
+  const delayMinutes = discordMissingMemberDelayMinutes(env);
+  const checkedAt = now.toISOString();
+  const eligibleMeetings = await eligibleScheduledDiscordBotMeetings(env, now, delayMinutes);
+  const meetings: ScheduledDiscordBotMissingMemberNotificationsResult["meetings"] = [];
+
+  for (const meeting of eligibleMeetings) {
+    const claimed = await claimScheduledNotification(env, meeting.meeting_date, checkedAt);
+    if (!claimed) {
+      meetings.push({
+        meetingDate: meeting.meeting_date,
+        title: meeting.title,
+        eligibleAt: meeting.eligibleAt,
+        status: "skipped_locked"
+      });
+      continue;
+    }
+
+    try {
+      const result = await sendDiscordBotMissingMemberNotifications(env, {
+        meetingDate: meeting.meeting_date,
+        preview: false,
+        resend: false
+      }, now);
+      if (result.mode !== "send") {
+        const message = result.warnings[0] ?? "Discord bot delivery is not configured";
+        await markScheduledNotificationError(env, meeting.meeting_date, message, checkedAt);
+        meetings.push({
+          meetingDate: meeting.meeting_date,
+          title: meeting.title,
+          eligibleAt: meeting.eligibleAt,
+          status: "error",
+          sentCount: result.sentCount,
+          skippedDuplicateCount: result.skippedDuplicateCount,
+          errorCount: result.errorCount,
+          error: message
+        });
+        continue;
+      }
+
+      if (result.errorCount > 0) {
+        const message = result.recipients.find((recipient) => recipient.status === "error")?.error
+          ?? "Discord bot delivery failed";
+        await markScheduledNotificationError(env, meeting.meeting_date, message, checkedAt);
+        meetings.push({
+          meetingDate: meeting.meeting_date,
+          title: meeting.title,
+          eligibleAt: meeting.eligibleAt,
+          status: "error",
+          sentCount: result.sentCount,
+          skippedDuplicateCount: result.skippedDuplicateCount,
+          errorCount: result.errorCount,
+          error: message
+        });
+        continue;
+      }
+
+      await markScheduledNotificationSent(env, meeting.meeting_date, checkedAt);
+      meetings.push({
+        meetingDate: meeting.meeting_date,
+        title: meeting.title,
+        eligibleAt: meeting.eligibleAt,
+        status: "sent",
+        sentCount: result.sentCount,
+        skippedDuplicateCount: result.skippedDuplicateCount,
+        errorCount: result.errorCount
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await markScheduledNotificationError(env, meeting.meeting_date, message, checkedAt);
+      meetings.push({
+        meetingDate: meeting.meeting_date,
+        title: meeting.title,
+        eligibleAt: meeting.eligibleAt,
+        status: "error",
+        error: message
+      });
+    }
+  }
+
+  return {
+    notificationKind: scheduledDiscordBotMissingMembersKind,
+    delayMinutes,
+    checkedAt,
+    eligibleCount: eligibleMeetings.length,
+    claimedCount: meetings.filter((meeting) => meeting.status !== "skipped_locked").length,
+    sentMeetingCount: meetings.filter((meeting) => meeting.status === "sent").length,
+    skippedLockedCount: meetings.filter((meeting) => meeting.status === "skipped_locked").length,
+    errorCount: meetings.filter((meeting) => meeting.status === "error").length,
+    meetings
   };
 }
 
@@ -540,6 +658,84 @@ async function requiredMeeting(env: Env, meetingDate: string): Promise<MeetingRo
   if (!meeting) throw Object.assign(new Error("Scheduled meeting not found"), { status: 404 });
   if (!meeting.required) throw Object.assign(new Error("Only required meetings can send Discord bot missing-member pings"), { status: 400 });
   return meeting;
+}
+
+async function eligibleScheduledDiscordBotMeetings(env: Env, now: Date, delayMinutes: number) {
+  const rows = await env.DB.prepare(`
+    SELECT id, meeting_date, title, required, starts_at, ends_at
+    FROM scheduled_meetings
+    WHERE required = 1
+      AND ends_at IS NOT NULL
+    ORDER BY meeting_date
+  `).all<MeetingRow>();
+  return rows.results.flatMap((meeting) => {
+    if (!meeting.ends_at) return [];
+    const endsAt = new Date(meeting.ends_at);
+    if (!Number.isFinite(endsAt.getTime())) return [];
+    const eligibleAt = new Date(endsAt.getTime() + delayMinutes * 60_000);
+    if (now.getTime() < eligibleAt.getTime()) return [];
+    return [{ ...meeting, eligibleAt: eligibleAt.toISOString() }];
+  });
+}
+
+async function claimScheduledNotification(env: Env, meetingDate: string, now: string): Promise<boolean> {
+  const insert = await env.DB.prepare(`
+    INSERT INTO scheduled_notification_locks (
+      id, notification_kind, meeting_date, status, attempts, locked_at, last_attempt_at, created_at, updated_at
+    ) VALUES (?, ?, ?, 'sending', 1, ?, ?, ?, ?)
+    ON CONFLICT(notification_kind, meeting_date) DO NOTHING
+  `).bind(
+    crypto.randomUUID(),
+    scheduledDiscordBotMissingMembersKind,
+    meetingDate,
+    now,
+    now,
+    now,
+    now
+  ).run();
+  if (changed(insert)) return true;
+
+  const update = await env.DB.prepare(`
+    UPDATE scheduled_notification_locks
+    SET status = 'sending',
+      attempts = attempts + 1,
+      locked_at = ?,
+      last_attempt_at = ?,
+      error_message = NULL,
+      updated_at = ?
+    WHERE notification_kind = ?
+      AND meeting_date = ?
+      AND status = 'error'
+  `).bind(now, now, now, scheduledDiscordBotMissingMembersKind, meetingDate).run();
+  return changed(update);
+}
+
+async function markScheduledNotificationSent(env: Env, meetingDate: string, now: string) {
+  await env.DB.prepare(`
+    UPDATE scheduled_notification_locks
+    SET status = 'sent',
+      completed_at = ?,
+      error_message = NULL,
+      updated_at = ?
+    WHERE notification_kind = ?
+      AND meeting_date = ?
+  `).bind(now, now, scheduledDiscordBotMissingMembersKind, meetingDate).run();
+}
+
+async function markScheduledNotificationError(env: Env, meetingDate: string, message: string, now: string) {
+  await env.DB.prepare(`
+    UPDATE scheduled_notification_locks
+    SET status = 'error',
+      error_message = ?,
+      updated_at = ?
+    WHERE notification_kind = ?
+      AND meeting_date = ?
+  `).bind(message.slice(0, 1000), now, scheduledDiscordBotMissingMembersKind, meetingDate).run();
+}
+
+function changed(result: unknown): boolean {
+  const row = result as { changes?: number; meta?: { changes?: number } };
+  return Number(row.changes ?? row.meta?.changes ?? 0) > 0;
 }
 
 function meetingNotificationEligibleAt(meeting: MeetingRow, timeZone: string, delayMinutes: number): Date {

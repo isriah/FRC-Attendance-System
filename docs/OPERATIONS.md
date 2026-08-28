@@ -5,10 +5,10 @@
 Current production API:
 
 - Worker URL: `https://frc-attendance-api.frc-attendance.workers.dev`
-- Latest deployed Worker version: `0e13fb6a-e62c-4abf-b8be-71734043ef4d`
+- Latest deployed Worker version: `e179c5ff-61fd-4bf0-9db9-f0de9b0aa9ae`
 - D1 database: `frc-attendance`
 - D1 database ID: `c02c0ca8-033b-435f-ae21-2d8f3b203b22`
-- Applied remote migrations: `0001_initial.sql` through `0011_attendance_exclusion_supersession.sql`
+- Applied remote migrations: `0001_initial.sql` through `0012_scheduled_notification_locks.sql`
 - Workers account subdomain: `frc-attendance.workers.dev`
 - Registered bench kiosk: `bench-01`
 
@@ -66,6 +66,7 @@ This repeatable check verifies the production Worker `/health` response, verifie
    - `DISCORD_BOT_TOKEN`: Discord application's bot token for contestable missing-member messages. Store it as a Worker secret.
    - `DISCORD_ATTENDANCE_CHANNEL_ID`: numeric ID of the bot-accessible channel that receives contestable attendance messages. Store it as a Worker secret or deployment variable.
    - `DISCORD_MISSING_MEMBER_DELAY_MINUTES`: non-negative delay after the scheduled meeting end before a bot ping is allowed. Defaults to `30` and is committed as a non-secret Worker variable.
+   - The Worker has a Cron Trigger (`*/10 * * * *`) that checks for completed required scheduled meetings whose valid `ends_at` timestamp plus the configured delay has elapsed, then sends the contestable bot missing-member ping automatically.
 
 6. Deploy the Worker:
 
@@ -294,7 +295,9 @@ Discord delivery uses one configured channel webhook message per meeting, not a 
 
 The webhook route above remains available for the original preview/send workflow. The contestable follow-up uses a separate authenticated admin route, `POST /admin/notifications/discord/bot/missing-members`, so webhook callers are not changed. The bot route accepts the same `meetingDate`, optional `preview`, and optional `resend` fields. It posts one message through `DISCORD_BOT_TOKEN` to `DISCORD_ATTENDANCE_CHANNEL_ID`, restricts `allowed_mentions` to the explicit absent linked Discord user IDs, and includes one scalable `Contest absence` button shared by all mentioned members.
 
-Bot delivery is deliberately manual in this slice: an admin uses the meeting detail action after the meeting. The Worker rejects the action until the scheduled `endsAt` plus `DISCORD_MISSING_MEMBER_DELAY_MINUTES`; the default is 30 minutes. A meeting without an end time becomes eligible at the start of the following local day plus the configured delay. Previously successful bot deliveries are skipped unless `resend: true` is explicitly requested.
+Bot delivery is automatic for scheduled meetings. The Worker Cron Trigger runs every 10 minutes and sends the contestable missing-member bot ping once for each required scheduled meeting whose valid `endsAt` timestamp plus `DISCORD_MISSING_MEMBER_DELAY_MINUTES` has elapsed; the default delay is 30 minutes. Meetings without an end time, meetings with invalid legacy end-time values, optional meetings, future meetings, and in-progress meetings are not eligible for automatic delivery. The authenticated admin preview/manual-send route remains available for checking a meeting, for manual recovery, and for intentional `resend: true` sends.
+
+Automatic sends use `scheduled_notification_locks` as a durable meeting-level idempotency lock before calling Discord, then keep the existing per-member `notification_deliveries` audit rows with `notification_kind = 'discord_bot_missing_members'` after a successful message. A scheduled run that has already claimed or sent a meeting skips it on later Cron retries, redeploys, or overlapping invocations. Provider errors mark the scheduled lock as `error`, so a later Cron run can retry without treating the meeting as delivered.
 
 For safe webhook delivery checks without a real eligible meeting, the Worker also exposes authenticated admin `POST /admin/notifications/discord/test`. The dashboard Overview tab has a compact `Send Discord test` action for this route. It uses the same configured Discord webhook provider but never reads or mutates meeting, attendance, member, or `notification_deliveries` data. The test message includes non-secret debug metadata such as app name, timestamp, notification kind, and Worker version metadata when available. It sends `allowed_mentions` with `parse: []` and an empty `users` array, and the message body contains no user, role, `@everyone`, or `@here` mentions. When no webhook secret is configured, the route returns preview-only disabled feedback without calling Discord.
 
@@ -330,7 +333,7 @@ Dashboard admins can review contests from the global **Contests** tab or from th
 
 Migration `0011_attendance_exclusion_supersession.sql` preserves the original absence-correction row while adding supersession metadata and a partial unique constraint for active exclusions. Production has this migration applied; it must remain in place for Workers containing contest approval.
 
-Production D1 migrations through `0011_attendance_exclusion_supersession.sql` are applied. `DISCORD_PUBLIC_KEY`, `DISCORD_BOT_TOKEN`, and `DISCORD_ATTENDANCE_CHANNEL_ID` are configured on the production Worker; contest interaction, bot notification, and audited contest approval are deployed in Worker version `0e13fb6a-e62c-4abf-b8be-71734043ef4d`.
+Production D1 migrations through `0012_scheduled_notification_locks.sql` are applied. `DISCORD_PUBLIC_KEY`, `DISCORD_BOT_TOKEN`, and `DISCORD_ATTENDANCE_CHANNEL_ID` are configured on the production Worker. Contest interaction, bot notification, audited contest approval, and automatic scheduled Discord missing-member delivery are deployed in Worker version `e179c5ff-61fd-4bf0-9db9-f0de9b0aa9ae`.
 
 Application setup and guild-scoped development registration:
 

@@ -5,7 +5,8 @@ import {
   attendanceContestCustomId,
   contestAttendanceAbsence,
   parseAttendanceContestCustomId,
-  sendDiscordBotMissingMemberNotifications
+  sendDiscordBotMissingMemberNotifications,
+  sendScheduledDiscordBotMissingMemberNotifications
 } from "../src/discordAttendance";
 import type { Env } from "../src/env";
 
@@ -73,6 +74,89 @@ describe("Discord bot attendance notifications", () => {
       { meetingDate: "2026-01-02", preview: true },
       new Date("2026-01-02T22:44:59.000Z")
     )).rejects.toThrow("delayed until 2026-01-02T22:45:00.000Z");
+  });
+
+  it("automatically sends eligible completed required meetings once from the scheduled path", async () => {
+    const env = createTestEnv({
+      DISCORD_BOT_TOKEN: "test-bot-token",
+      DISCORD_ATTENDANCE_CHANNEL_ID: "890334748730351629",
+      DISCORD_MISSING_MEMBER_DELAY_MINUTES: "30"
+    });
+    insertStudent(env, "100001", "Missing", "Member", "111111111111111111");
+    insertMeeting(env, "2026-01-02", "2026-01-02T22:00:00.000Z");
+    insertMeeting(env, "2026-01-03", "2026-01-03T22:00:00.000Z");
+    await env.DB.prepare("UPDATE scheduled_meetings SET required = 0 WHERE meeting_date = '2026-01-03'").run();
+    insertMeeting(env, "2026-01-04", "2026-01-04T22:00:00.000Z");
+    await env.DB.prepare("UPDATE scheduled_meetings SET ends_at = NULL WHERE meeting_date = '2026-01-04'").run();
+    insertMeeting(env, "2026-01-05", "not-a-date");
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ id: "444444444444444444" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await sendScheduledDiscordBotMissingMemberNotifications(env, new Date("2026-01-02T22:30:00.000Z"));
+
+    expect(result).toMatchObject({
+      notificationKind: "scheduled_discord_bot_missing_members",
+      eligibleCount: 1,
+      claimedCount: 1,
+      sentMeetingCount: 1,
+      skippedLockedCount: 0,
+      errorCount: 0,
+      meetings: [{
+        meetingDate: "2026-01-02",
+        status: "sent",
+        sentCount: 1,
+        eligibleAt: "2026-01-02T22:30:00.000Z"
+      }]
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(lockRows(env)).toEqual([{ meeting_date: "2026-01-02", status: "sent", attempts: 1 }]);
+    expect(deliveryMessageIds(env)).toEqual(["444444444444444444"]);
+  });
+
+  it("uses the scheduled lock to avoid duplicate messages after retries", async () => {
+    const env = createTestEnv({
+      DISCORD_BOT_TOKEN: "test-bot-token",
+      DISCORD_ATTENDANCE_CHANNEL_ID: "890334748730351629"
+    });
+    insertStudent(env, "100001", "Missing", "Member", "111111111111111111");
+    insertMeeting(env, "2026-01-02", "2026-01-02T22:00:00.000Z");
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ id: "444444444444444444" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const first = await sendScheduledDiscordBotMissingMemberNotifications(env, new Date("2026-01-02T22:30:00.000Z"));
+    const second = await sendScheduledDiscordBotMissingMemberNotifications(env, new Date("2026-01-02T22:40:00.000Z"));
+
+    expect(first.sentMeetingCount).toBe(1);
+    expect(second).toMatchObject({
+      eligibleCount: 1,
+      claimedCount: 0,
+      sentMeetingCount: 0,
+      skippedLockedCount: 1
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(deliveryMessageIds(env)).toEqual(["444444444444444444"]);
+  });
+
+  it("retries scheduled meetings after provider errors without treating them as delivered", async () => {
+    const env = createTestEnv({
+      DISCORD_BOT_TOKEN: "test-bot-token",
+      DISCORD_ATTENDANCE_CHANNEL_ID: "890334748730351629"
+    });
+    insertStudent(env, "100001", "Missing", "Member", "111111111111111111");
+    insertMeeting(env, "2026-01-02", "2026-01-02T22:00:00.000Z");
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response("temporary Discord failure", { status: 503 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "444444444444444444" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const first = await sendScheduledDiscordBotMissingMemberNotifications(env, new Date("2026-01-02T22:30:00.000Z"));
+    const second = await sendScheduledDiscordBotMissingMemberNotifications(env, new Date("2026-01-02T22:40:00.000Z"));
+
+    expect(first).toMatchObject({ sentMeetingCount: 0, errorCount: 1 });
+    expect(second).toMatchObject({ sentMeetingCount: 1, errorCount: 0 });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(lockRows(env)).toEqual([{ meeting_date: "2026-01-02", status: "sent", attempts: 2 }]);
+    expect(deliveryMessageIds(env)).toEqual(["444444444444444444"]);
   });
 
   it("strictly validates contest custom IDs", () => {
@@ -344,6 +428,20 @@ function createTestEnv(overrides: Partial<Env> = {}): Env {
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
+    CREATE TABLE scheduled_notification_locks (
+      id TEXT PRIMARY KEY,
+      notification_kind TEXT NOT NULL,
+      meeting_date TEXT NOT NULL,
+      status TEXT NOT NULL,
+      attempts INTEGER NOT NULL DEFAULT 1,
+      locked_at TEXT,
+      completed_at TEXT,
+      last_attempt_at TEXT,
+      error_message TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(notification_kind, meeting_date)
+    );
     CREATE TABLE attendance_contests (
       id TEXT PRIMARY KEY,
       student_id TEXT NOT NULL REFERENCES students(student_id),
@@ -428,8 +526,13 @@ function fetchBody(fetchMock: ReturnType<typeof vi.fn>) {
 
 function deliveryMessageIds(env: Env): string[] {
   const db = env.DB as unknown as ReturnType<typeof d1>;
-  const rows = db.sqlite.prepare("SELECT provider_message_id FROM notification_deliveries ORDER BY student_id").all() as Array<{ provider_message_id: string }>;
+  const rows = db.sqlite.prepare("SELECT provider_message_id FROM notification_deliveries WHERE status = 'sent' ORDER BY student_id").all() as Array<{ provider_message_id: string }>;
   return rows.map((row) => row.provider_message_id);
+}
+
+function lockRows(env: Env): Array<{ meeting_date: string; status: string; attempts: number }> {
+  const db = env.DB as unknown as ReturnType<typeof d1>;
+  return db.sqlite.prepare("SELECT meeting_date, status, attempts FROM scheduled_notification_locks ORDER BY meeting_date").all() as Array<{ meeting_date: string; status: string; attempts: number }>;
 }
 
 function countRows(env: Env, table: string): number {
