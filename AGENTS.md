@@ -37,6 +37,7 @@ At session start, agents should:
 - Prefer inspecting files, commit history, and deployed/local state directly over carrying forward a long chat transcript.
 - Keep each session focused on one discrete unit of work. If the next task is unrelated, start a fresh session with the short kickoff above.
 - When a director session is coordinating delegated child sessions, it should automatically review, merge, verify, push, deploy, update the Pi, smoke-test, document, and archive completed child work unless a real blocker appears: failed verification, destructive production data mutation, secrets/config uncertainty, or an unresolved product decision.
+- When creating a Codex child task, a director should use `gpt-5.6-terra` with medium reasoning effort by default. Use a different model or effort only when the user explicitly requests it.
 - Do not paste full docs, AGENTS content, command logs, or broad project history into chat unless specifically needed. Put durable handoff notes in a small repo file instead.
 
 If richer continuity is needed, create or update a short handoff file such as `docs/CODEX-HANDOFF.md` with only:
