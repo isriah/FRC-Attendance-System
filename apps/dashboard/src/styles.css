@@ -1070,6 +1070,16 @@ pre {
   padding: 7px 9px;
 }
 
+.table-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.table-actions button {
+  padding: 7px 9px;
+}
+
 .mapping-actions {
   display: flex;
   flex-wrap: wrap;

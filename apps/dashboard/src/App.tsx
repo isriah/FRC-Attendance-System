@@ -1,6 +1,7 @@
 import { FormEvent, Fragment, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { apiBaseUrl, apiDelete, apiGet, apiPost, apiPut, type DashboardSession } from "./api";
+import { buildClearMemberAttendanceSourceDataPayload, clearMemberAttendanceConfirmation } from "./attendanceDebugAction";
 import { fingerLabelOptions, fingerprintEnrollmentName, fingerprintOwnerNavigation, nextAvailableFingerprintSlot, normalizeFingerLabel, type FingerprintEnrollment } from "./fingerprintEnrollment";
 import { formatDateTime, formatTime, localTimeInputValue } from "./timeFormat";
 import "./styles.css";
@@ -1906,6 +1907,40 @@ function Meetings({ session, onOpenMember }: { session: DashboardSession; onOpen
     }
   }
 
+  async function clearPresentMemberAttendanceData(row: Record<string, unknown>) {
+    const memberId = String(row.memberId ?? row.member_id ?? "");
+    const memberName = [row.firstName, row.lastName].filter(Boolean).join(" ") || `member ${memberId}`;
+    const expectedConfirmation = clearMemberAttendanceConfirmation(memberId, selectedMeetingDate);
+    const reasonInput = window.prompt(`Debugging note for permanently clearing ${memberName}'s attendance source data on ${selectedMeetingDate}. This will be saved with the request and should explain why the scan/manual data is being removed.`);
+    if (reasonInput === null) return;
+    const confirmationInput = window.prompt(`This permanently deletes only ${memberName}'s scan and manual attendance source rows for ${selectedMeetingDate}, then rebuilds attendance. It does not delete the member, meeting, fingerprint mappings, other members' data, notification audits, contest records, or Mark absent exclusions. Type ${expectedConfirmation} to continue.`);
+    let payload: ReturnType<typeof buildClearMemberAttendanceSourceDataPayload>;
+    try {
+      payload = buildClearMemberAttendanceSourceDataPayload({ memberId, meetingDate: selectedMeetingDate, reasonInput, confirmationInput });
+    } catch (err) {
+      setMessage({ kind: "error", text: friendlyDashboardError(err) });
+      return;
+    }
+    if (!payload) return;
+
+    setSaving(true);
+    setMessage(undefined);
+    try {
+      const result = await apiPost<{ deletedScanEvents: number; deletedManualEvents: number }>("/admin/attendance/clear-member-source-data", payload, session);
+      setMessage({ kind: "success", text: `Cleared ${memberName}'s ${selectedMeetingDate} source data: deleted ${pluralize(result.deletedScanEvents, "scan event")} and ${pluralize(result.deletedManualEvents, "manual event")}. Attendance was rebuilt without creating a Mark absent exclusion.` });
+      setNotificationResult(undefined);
+      setDiscordNotificationResult(undefined);
+      reloadMeetingSummary();
+      reloadSelectedPresence();
+      reloadSelectedAbsences();
+      reloadSelectedContests();
+    } catch (err) {
+      setMessage({ kind: "error", text: friendlyDashboardError(err) });
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function emailAbsentMembers(meetingDate: string) {
     setNotificationBusyDate(meetingDate);
     setMessage(undefined);
@@ -2135,6 +2170,7 @@ function Meetings({ session, onOpenMember }: { session: DashboardSession; onOpen
                 onDiscordEventSync={(meeting) => syncMeetingsToDiscord([meeting.id])}
                 onOpenMember={onOpenMember}
                 onRemoveMember={removePresentMember}
+                onClearMemberAttendanceData={clearPresentMemberAttendanceData}
                 onContestChanged={() => {
                   reloadSelectedContests();
                   reloadMeetingSummary();
@@ -2412,6 +2448,7 @@ function MeetingDetails({
   onDiscordEventSync,
   onOpenMember,
   onRemoveMember,
+  onClearMemberAttendanceData,
   onContestChanged
 }: {
   session: DashboardSession;
@@ -2440,6 +2477,7 @@ function MeetingDetails({
   onDiscordEventSync: (meeting: ScheduledMeeting) => void;
   onOpenMember: (memberId: string) => void;
   onRemoveMember: (row: Record<string, unknown>) => void;
+  onClearMemberAttendanceData: (row: Record<string, unknown>) => void;
   onContestChanged: () => void;
 }) {
   if (!meeting && !summary) {
@@ -2543,6 +2581,7 @@ function MeetingDetails({
             density="compact"
             onOpenMember={onOpenMember}
             onRemoveFromMeeting={onRemoveMember}
+            onClearMemberAttendanceData={onClearMemberAttendanceData}
             actionsDisabled={saving}
           />
         </div>
@@ -3218,6 +3257,7 @@ function DataTable({
   density = "regular",
   onOpenMember,
   onRemoveFromMeeting,
+  onClearMemberAttendanceData,
   actionsDisabled = false
 }: {
   rows: Array<Record<string, unknown>>;
@@ -3225,6 +3265,7 @@ function DataTable({
   density?: "regular" | "compact";
   onOpenMember?: (memberId: string) => void;
   onRemoveFromMeeting?: (row: Record<string, unknown>) => void;
+  onClearMemberAttendanceData?: (row: Record<string, unknown>) => void;
   actionsDisabled?: boolean;
 }) {
   return (
@@ -3237,8 +3278,15 @@ function DataTable({
             const memberName = [row.firstName ?? row.first_name, row.lastName ?? row.last_name].filter(Boolean).join(" ");
             return (
               <tr key={index}>{columns.map((column) => {
-                if (column === "actions" && onRemoveFromMeeting) {
-                  return <td key={column}><button type="button" className="danger-button" disabled={actionsDisabled} onClick={() => onRemoveFromMeeting(row)}>Mark absent</button></td>;
+                if (column === "actions" && (onRemoveFromMeeting || onClearMemberAttendanceData)) {
+                  return (
+                    <td key={column}>
+                      <div className="table-actions">
+                        {onRemoveFromMeeting ? <button type="button" className="danger-button" disabled={actionsDisabled} onClick={() => onRemoveFromMeeting(row)}>Mark absent</button> : null}
+                        {onClearMemberAttendanceData ? <button type="button" className="danger-button" disabled={actionsDisabled} onClick={() => onClearMemberAttendanceData(row)}>Clear attendance data</button> : null}
+                      </div>
+                    </td>
+                  );
                 }
                 const value = row[column];
                 if (onOpenMember && memberId && value !== undefined && value !== null && isMemberReferenceColumn(column)) {

@@ -1,6 +1,6 @@
 import { requireIsoTimestamp, requireNonEmptyString, type KioskHealthReport, type KioskSyncRequest } from "@frc-attendance/shared";
 import { listAdminUsers, requireAdmin, requireKiosk, sha256Hex, upsertAdminUser } from "./auth";
-import { addManualEvent, clearAttendanceForDate, removeMemberFromMeeting, syncKioskEvents } from "./attendanceStore";
+import { addManualEvent, clearAttendanceForDate, clearMemberAttendanceSourceData, removeMemberFromMeeting, syncKioskEvents } from "./attendanceStore";
 import type { Env } from "./env";
 import { buildLegacySheetExport } from "./export";
 import { handleDiscordInteraction } from "./discordInteractions";
@@ -253,6 +253,18 @@ export default {
         return json(await removeMemberFromMeeting(env, {
           memberId: requireNonEmptyString(body.memberId ?? body.studentId, "memberId"),
           meetingDate: body.meetingDate,
+          reason: requireNonEmptyString(body.reason, "reason"),
+          adminEmail: admin.email
+        }));
+      }
+
+      if (route === "POST /admin/attendance/clear-member-source-data") {
+        const admin = await requireAdmin(request, env);
+        const body = await readJson<{ memberId?: unknown; studentId?: unknown; meetingDate?: unknown; confirmation?: unknown; reason?: unknown }>(request);
+        return json(await clearMemberAttendanceSourceData(env, {
+          memberId: requireNonEmptyString(body.memberId ?? body.studentId, "memberId"),
+          meetingDate: body.meetingDate,
+          confirmation: body.confirmation,
           reason: requireNonEmptyString(body.reason, "reason"),
           adminEmail: admin.email
         }));

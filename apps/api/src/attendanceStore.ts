@@ -133,6 +133,66 @@ export async function removeMemberFromMeeting(env: Env, input: { memberId: strin
   };
 }
 
+export async function clearMemberAttendanceSourceData(env: Env, input: { memberId: string; meetingDate?: unknown; confirmation?: unknown; reason: string; adminEmail: string }) {
+  const meetingDate = requireIsoDate(input.meetingDate, "meetingDate");
+  const expectedConfirmation = clearMemberAttendanceConfirmation(input.memberId, meetingDate);
+  if (input.confirmation !== expectedConfirmation) {
+    throw Object.assign(new Error(`Type ${expectedConfirmation} to clear attendance source data for member ${input.memberId} on ${meetingDate}`), { status: 400 });
+  }
+
+  const reason = input.reason.trim();
+  if (reason.length < 10) {
+    throw Object.assign(new Error("A debugging note of at least 10 characters is required to clear attendance source data"), { status: 400 });
+  }
+
+  const [member, meeting] = await Promise.all([
+    env.DB.prepare("SELECT first_name, last_name FROM students WHERE student_id = ?").bind(input.memberId).first<{ first_name: string; last_name: string }>(),
+    env.DB.prepare("SELECT id, title FROM scheduled_meetings WHERE meeting_date = ?").bind(meetingDate).first<{ id: string; title: string }>()
+  ]);
+  if (!member) throw Object.assign(new Error("Member not found"), { status: 404 });
+  if (!meeting) throw Object.assign(new Error(`Scheduled meeting not found for ${meetingDate}`), { status: 404 });
+
+  const bounds = broadUtcBoundsForLocalDate(meetingDate);
+  const [scanRows, manualRows] = await Promise.all([
+    env.DB.prepare("SELECT id, occurred_at FROM scan_events WHERE student_id = ? AND occurred_at >= ? AND occurred_at < ?")
+      .bind(input.memberId, bounds.start, bounds.end)
+      .all<{ id: string; occurred_at: string }>(),
+    env.DB.prepare("SELECT id, occurred_at FROM manual_events WHERE student_id = ? AND occurred_at >= ? AND occurred_at < ?")
+      .bind(input.memberId, bounds.start, bounds.end)
+      .all<{ id: string; occurred_at: string }>()
+  ]);
+
+  const scanIds = scanRows.results
+    .filter((row) => meetingDateForTimestamp(row.occurred_at, env.TIME_ZONE) === meetingDate)
+    .map((row) => row.id);
+  const manualIds = manualRows.results
+    .filter((row) => meetingDateForTimestamp(row.occurred_at, env.TIME_ZONE) === meetingDate)
+    .map((row) => row.id);
+
+  const deleteStatements = [
+    ...scanIds.map((id) => env.DB.prepare("DELETE FROM scan_events WHERE id = ?").bind(id)),
+    ...manualIds.map((id) => env.DB.prepare("DELETE FROM manual_events WHERE id = ?").bind(id))
+  ];
+  if (deleteStatements.length > 0) await env.DB.batch(deleteStatements);
+  await rebuildAttendanceSessions(env);
+
+  return {
+    memberId: input.memberId,
+    firstName: member.first_name,
+    lastName: member.last_name,
+    meetingDate,
+    meetingTitle: meeting.title,
+    reason,
+    adminEmail: input.adminEmail,
+    deletedScanEvents: scanIds.length,
+    deletedManualEvents: manualIds.length,
+    deletedAttendanceExclusions: 0,
+    confirmation: expectedConfirmation,
+    preservedAuditHistory: true,
+    preservedAttendanceExclusions: true
+  };
+}
+
 export async function clearAttendanceForDate(env: Env, input: { meetingDate?: unknown; confirmation?: unknown }) {
   const meetingDate = requireIsoDate(input.meetingDate, "meetingDate");
   const expectedConfirmation = `CLEAR ${meetingDate}`;
@@ -175,6 +235,10 @@ export async function clearAttendanceForDate(env: Env, input: { meetingDate?: un
     deletedAttendanceExclusions: exclusionRows.results.length,
     confirmation: expectedConfirmation
   };
+}
+
+function clearMemberAttendanceConfirmation(memberId: string, meetingDate: string): string {
+  return `CLEAR ${memberId} ${meetingDate}`;
 }
 
 export async function rebuildAttendanceSessions(env: Env): Promise<void> {
