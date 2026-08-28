@@ -5,10 +5,10 @@
 Current production API:
 
 - Worker URL: `https://frc-attendance-api.frc-attendance.workers.dev`
-- Latest deployed Worker version: `144479f8-3b4e-4760-a5d4-2f32e377e4e5`
+- Latest deployed Worker version: `efb7312a-6363-4e30-bf85-bee5aad2d127`
 - D1 database: `frc-attendance`
 - D1 database ID: `c02c0ca8-033b-435f-ae21-2d8f3b203b22`
-- Applied remote migrations: `0001_initial.sql` through `0015_student_attendance_required_from.sql`
+- Applied remote migrations: `0001_initial.sql` through `0016_correct_attendance_required_from_timezone.sql`
 - Workers account subdomain: `frc-attendance.workers.dev`
 - Registered bench kiosk: `bench-01`
 
@@ -16,7 +16,7 @@ Current production dashboard:
 
 - Cloudflare Pages project: `frc-attendance-dashboard`
 - Pages URL: `https://frc-attendance-dashboard.pages.dev`
-- Latest verified deployment: `https://a824f583.frc-attendance-dashboard.pages.dev`
+- Latest verified deployment: `https://d07c23b5.frc-attendance-dashboard.pages.dev`
 - API base URL baked into the uploaded Vite build: `https://frc-attendance-api.frc-attendance.workers.dev`
 - Google OAuth client ID baked into the uploaded Vite build: `180849199739-v04bktp7rfmimgjpvohmq7pinrrpr337.apps.googleusercontent.com`
 
@@ -357,9 +357,9 @@ Production D1 migrations through `0014_discord_scheduled_event_mappings.sql` are
 
 ## Member Attendance Requirement Start Dates
 
-Migration `0015_student_attendance_required_from.sql` adds `students.attendance_required_from_date`. Existing members are backfilled from the durable `roster_synced_at` date when available, with a current-date fallback only for malformed legacy rows. New roster sync inserts set the date from the project-local sync date and preserve it on later imports, deactivation, and reactivation.
+Migration `0015_student_attendance_required_from.sql` adds `students.attendance_required_from_date`. Follow-up migration `0016_correct_attendance_required_from_timezone.sql` corrects only values that `0015` derived from a UTC roster-sync date, using the America/New_York local date while preserving intentionally different values. New roster sync inserts set the date from the project-local sync date and preserve it on later imports, deactivation, and reactivation.
 
-Worker version `144479f8-3b4e-4760-a5d4-2f32e377e4e5` and dashboard deployment `https://a824f583.frc-attendance-dashboard.pages.dev` use this date to treat required meetings before a member's start date as not required/excused. These meetings do not lower roster attendance percentages, appear as ordinary absences, trigger missed-meeting email or Discord notifications, or count in required-meeting totals. Source scan events, manual corrections, attendance sessions, fingerprint rows, and notification audit rows are not rewritten by this feature.
+Worker version `efb7312a-6363-4e30-bf85-bee5aad2d127` and dashboard deployment `https://d07c23b5.frc-attendance-dashboard.pages.dev` use this date to treat required meetings before a member's start date as not required/excused. These meetings do not lower roster attendance percentages, appear as ordinary absences, trigger missed-meeting email or Discord notifications, or count in required-meeting totals. Source scan events, manual corrections, attendance sessions, fingerprint rows, and notification audit rows are not rewritten by this feature.
 
 ## Discord Scheduled Event Sync
 
