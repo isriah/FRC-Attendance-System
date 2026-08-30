@@ -75,14 +75,12 @@ export class DisplayStateServer {
       }
 
       if (request.method === "GET" && request.url === "/kiosk/wifi-networks") {
-        if (!this.canAccessNetworkSettings(request)) return this.respondNetworkAccessDenied(response);
-        void this.respondJson(response, () => this.network.listWifi());
+        void this.listWifi(request, response);
         return;
       }
 
       if (request.method === "POST" && request.url === "/kiosk/wifi-connect") {
-        if (!this.canAccessNetworkSettings(request)) return this.respondNetworkAccessDenied(response);
-        void this.connectWifi(request, response);
+        void this.connectWifiWithAuthorization(request, response);
         return;
       }
 
@@ -186,6 +184,16 @@ export class DisplayStateServer {
     }
   }
 
+  private async listWifi(request: import("node:http").IncomingMessage, response: import("node:http").ServerResponse): Promise<void> {
+    if (!await this.canAccessNetworkSettings(request)) return this.respondNetworkAccessDenied(response);
+    await this.respondJson(response, () => this.network.listWifi());
+  }
+
+  private async connectWifiWithAuthorization(request: import("node:http").IncomingMessage, response: import("node:http").ServerResponse): Promise<void> {
+    if (!await this.canAccessNetworkSettings(request)) return this.respondNetworkAccessDenied(response);
+    await this.connectWifi(request, response);
+  }
+
   private async connectWifi(request: import("node:http").IncomingMessage, response: import("node:http").ServerResponse): Promise<void> {
     let raw = "";
     request.setEncoding("utf8");
@@ -264,8 +272,10 @@ export class DisplayStateServer {
     return token;
   }
 
-  private canAccessNetworkSettings(request: import("node:http").IncomingMessage): boolean {
-    if (request.headers["x-frc-network-offline-bootstrap"] === "1") return true;
+  private async canAccessNetworkSettings(request: import("node:http").IncomingMessage): Promise<boolean> {
+    if (request.headers["x-frc-network-offline-bootstrap"] === "1") {
+      return !(await this.network.status()).connected;
+    }
     const token = request.headers["x-frc-network-session"];
     if (typeof token !== "string" || !this.networkSession || this.networkSession.expiresAt <= Date.now()) return false;
     const supplied = Buffer.from(token);

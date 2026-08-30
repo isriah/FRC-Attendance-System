@@ -228,6 +228,7 @@ describe("display state acknowledgements", () => {
     try {
       const baseUrl = `http://127.0.0.1:${port}`;
       expect((await fetch(`${baseUrl}/kiosk/wifi-networks`)).status).toBe(403);
+      expect((await fetch(`${baseUrl}/kiosk/wifi-networks`, { headers: { "x-frc-network-offline-bootstrap": "1" } })).status).toBe(403);
 
       const preflight = await fetch(`${baseUrl}/kiosk/wifi-networks`, {
         method: "OPTIONS",
@@ -301,6 +302,28 @@ describe("display state acknowledgements", () => {
       expect(expired.status).toBe(403);
     } finally {
       now.mockRestore();
+      server.stop();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("allows PIN-free Wi-Fi recovery only while the kiosk is offline", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "frc-network-offline-bootstrap-"));
+    const port = 18991;
+    const server = new DisplayStateServer({
+      status: async () => ({ connected: false }),
+      listWifi: async () => [{ ssid: "Recovery WiFi", secured: true, active: false }],
+      connectWifi: async () => undefined
+    }, join(directory, "network-pin.json"));
+    server.start(port);
+
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/kiosk/wifi-networks`, {
+        headers: { "x-frc-network-offline-bootstrap": "1" }
+      });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual([{ ssid: "Recovery WiFi", secured: true, active: false }]);
+    } finally {
       server.stop();
       await rm(directory, { recursive: true, force: true });
     }
