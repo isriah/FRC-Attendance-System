@@ -26,11 +26,16 @@ entry explicitly replaces one.
   classrooms, and other teams.
 - Support self-hosting on each organization's own Cloudflare account with
   Raspberry Pi kiosks as the first installation path.
+- First release supports **single-kiosk deployments only**. Advanced
+  multi-kiosk operation and any biometric/template synchronization are deferred.
+- Fingerprints are the primary first-release sign-in method. Non-biometric
+  sign-in methods are deferred.
 - Use organization-neutral product terms: **organization**, **member**,
   **administrator**, **kiosk**, and **attendance event**.
-- Keep email, Discord, Google OAuth, captive-portal authentication, and
-  fingerprint hardware optional. Basic offline attendance must not require any
-  of them.
+- Keep email, Discord, Google OAuth, and captive-portal authentication optional.
+- First-release theming is limited to customized headers plus primary and
+  secondary colors for themed mode, and global light/dark modes. Broad
+  terminology overrides and expansive theming are deferred.
 - Publish documentation in distinct operations and technical tracks.
 
 ## Product Principles
@@ -58,22 +63,26 @@ kiosks. Configuration must be explicit, documented, and safe when omitted.
 Organization branding will support:
 
 - organization name and short name;
-- logo or wordmark;
-- kiosk header and helper copy;
-- primary and accent colors with contrast protection;
-- dashboard theme modes; and
-- later terminology overrides.
+- customized headers;
+- primary and secondary colors for themed mode, with contrast protection; and
+- global light and dark modes.
 
 The kiosk will cache applicable branding for offline use.
+
+First release supports one kiosk per deployment. It will not implement
+multi-kiosk coordination, fingerprint/template export or synchronization, or
+cloud persistence of biometric templates. Sensor templates and their slot
+mappings remain local to that kiosk.
 
 ### Suggestions to validate later
 
 - Keep core organization settings in a small, versioned configuration model,
   with kiosk-safe cached values separated from administrator-only settings.
 - Provide configuration validation during setup, including color contrast checks
-  and image-size/type limits for logos.
-- Treat terminology overrides as a later capability so the first public release
-  can keep support and documentation comprehensible.
+  for configured themed colors.
+- Treat terminology overrides and additional brand/layout customization as later
+  capabilities so the first public release can keep support and documentation
+  comprehensible.
 
 ## Setup Experience
 
@@ -89,7 +98,8 @@ The initial guided setup should cover:
 6. Confirming health and a test attendance flow.
 
 External integrations are optional setup steps, not prerequisites for basic
-offline attendance.
+offline attendance. The first-release attendance flow is fingerprint sign-in on
+the single paired kiosk.
 
 ### Suggestions to validate later
 
@@ -109,9 +119,9 @@ Public documentation will have two tracks:
   database schema and migrations, API contracts, kiosk protocols, extension
   points, testing, release process, and contribution guidance.
 
-Both tracks should make the optional nature of integrations and fingerprint
-hardware clear. Documentation should use organization-neutral terminology from
-the outset.
+Both tracks should make the optional nature of integrations clear, document the
+single-kiosk fingerprint-first scope, and use organization-neutral terminology
+from the outset.
 
 ## Snapshot Release Checklist
 
@@ -132,8 +142,8 @@ Before creating the future standalone snapshot:
 - [ ] Complete a dependency and license audit before confirming Apache-2.0.
 - [ ] Test a fresh Cloudflare deployment and a fresh Raspberry Pi kiosk
   installation using only the sanitized snapshot and public instructions.
-- [ ] Verify basic offline attendance without email, Discord, Google OAuth,
-  captive-portal authentication, or fingerprint hardware.
+- [ ] Verify basic offline fingerprint attendance without email, Discord, Google
+  OAuth, or captive-portal authentication.
 - [ ] Review the release candidate for privacy, security, accessibility, and
   contributor-readiness before publication.
 
@@ -148,6 +158,10 @@ These are unresolved; they are not commitments.
 - Where should public documentation be hosted, and which domain should it use?
 - What should the Cloudflare bootstrap or one-click deployment experience be?
 - Which fingerprint hardware, if any, will be officially supported?
+- Which non-biometric sign-in method should be considered after the first
+  release?
+- What multi-kiosk deployment and template-sync model, if any, can meet the
+  future product's privacy and security requirements?
 - How should optional integrations be packaged, configured, and maintained?
 - Is there a supported migration path from the current system, or only a
   documented clean-start path?
@@ -173,6 +187,9 @@ These are suggestions, not approved implementation work.
 | --- | --- | --- |
 | 2026-08-30 | Confirmed | Future community edition will start from a standalone sanitized snapshot with fresh Git history, never as a branch, worktree, or linked fork. |
 | 2026-08-30 | Confirmed | The edition will be open source; Apache-2.0 is recommended pending a dependency/license audit. |
-| 2026-08-30 | Confirmed | The first supported path is organization-owned Cloudflare self-hosting with Raspberry Pi kiosks; integrations and fingerprint hardware stay optional. |
+| 2026-08-30 | Confirmed | The first supported path is organization-owned Cloudflare self-hosting with a Raspberry Pi kiosk; integrations stay optional and fingerprint sign-in is the first-release default. |
 | 2026-08-30 | Confirmed | The current production installation and its resources remain out of scope and unaffected. |
 | 2026-08-30 | Suggested | Validate the detailed configuration, setup, packaging, governance, and migration choices listed above before implementation. |
+| 2026-08-30 | Confirmed | First release is single-kiosk only. Advanced multi-kiosk operation and biometric/template synchronization are explicitly deferred. |
+| 2026-08-30 | Confirmed | Fingerprints are the primary first-release sign-in method; non-biometric sign-in is explicitly deferred. |
+| 2026-08-30 | Confirmed | First-release theming is customized headers, primary/secondary themed colors, and global light/dark modes only. Broad terminology overrides and expansive theming are explicitly deferred. |
