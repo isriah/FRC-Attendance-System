@@ -470,7 +470,7 @@ Current bench Pi production API validation:
   ```
 
 - Offline queue replay was validated by stopping `frc-kiosk-service`, inserting one pending local fingerprint scan for member `100001`, restarting the service, and confirming the local event `remote-replay-1de1a877-fa2c-482f-b388-335758e663de` was marked synced locally and inserted into remote D1 as an accepted `scan_events` row.
-- The dashboard Kiosks tab can queue per-kiosk restart commands. Kiosk services poll `GET /kiosk/commands` with their kiosk token and execute only allowlisted local actions: restart display (`frc-kiosk-ui`), restart kiosk services (`frc-bench-api`, `frc-kiosk-ui`, `frc-dashboard-ui`, then `frc-kiosk-service`), or schedule a system reboot with `sudo -n /usr/bin/systemctl reboot`. Reboot commands require the narrow sudoers rule installed by `sudo bash apps/kiosk/scripts/install-reboot-sudoers.sh`.
+- The dashboard Kiosks tab can queue per-kiosk restart commands. Kiosk services poll `GET /kiosk/commands` with their kiosk token and execute only allowlisted local actions: restart display (`frc-kiosk-ui`), restart kiosk services (`frc-bench-api`, `frc-kiosk-ui`, `frc-dashboard-ui`, then `frc-kiosk-service`), or schedule a system reboot with `sudo -n /usr/bin/systemctl reboot`. Reboot commands require the narrow sudoers rule installed by `sudo bash apps/kiosk/scripts/install-reboot-sudoers.sh`. The dashboard's **Reset network PIN** command is restricted to dashboard users with the `admin` role. It carries no PIN and only clears the kiosk-local verifier after the kiosk receives the authenticated command; the next manual network-settings attempt requires an on-kiosk PIN setup.
 
 ## Pi User Services
 

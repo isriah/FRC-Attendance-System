@@ -8,7 +8,7 @@ import { approveAttendanceContest, listAttendanceContests, reviewAttendanceConte
 import { refreshDiscordKioskStatusMessage } from "./discordKioskStatus";
 import { syncDiscordScheduledEvents, type DiscordScheduledEventSyncInput } from "./discordScheduledEvents";
 import { errorResponse, json, noContent, optionsResponse, readJson } from "./http";
-import { claimPendingKioskCommands, completeKioskCommand, createKioskCommand, listRecentKioskCommands, requireKioskCommandAction } from "./kioskCommands";
+import { claimPendingKioskCommands, completeKioskCommand, createKioskCommand, listRecentKioskCommands, requireKioskCommandAction, requireKioskCommandPermission } from "./kioskCommands";
 import { bulkDeleteScheduledMeetings, convertUnscheduledAttendanceToMeeting, createScheduledMeeting, deleteScheduledMeeting, listScheduledMeetings, updateScheduledMeeting, type BulkScheduledMeetingDeleteInput, type ScheduledMeetingInput } from "./meetings";
 import { sendDiscordMissingMemberNotifications, sendDiscordTestNotification, sendMeetingAbsenceNotifications, sendMemberAttendanceReportNotification, type DiscordMissingMemberNotificationInput, type DiscordTestNotificationInput, type MeetingAbsenceNotificationInput, type MemberAttendanceReportNotificationInput } from "./notifications";
 import { buildAttendanceSessionReport, buildMeetingAbsenceReport, buildMeetingSummaryReport, buildMemberAttendanceReport, buildPresenceReport, buildRosterAttendanceSummary, reportDateRangeFromSearchParams } from "./reports";
@@ -218,12 +218,14 @@ export default {
       if (request.method === "POST" && adminKioskCommand) {
         const admin = await requireAdmin(request, env);
         const body = await readJson<{ action: unknown }>(request);
+        const action = requireKioskCommandAction(body.action);
+        requireKioskCommandPermission(action, admin.role);
         const kioskIdParam = adminKioskCommand[1];
         if (!kioskIdParam) throw Object.assign(new Error("Kiosk id is required"), { status: 400 });
         const kioskId = decodeURIComponent(kioskIdParam);
         return json(await createKioskCommand(env, {
           kioskId,
-          action: requireKioskCommandAction(body.action),
+          action,
           requestedBy: admin.email
         }));
       }

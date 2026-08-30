@@ -870,7 +870,7 @@ async function fetchProductionRoster(): Promise<{ members: RosterMemberInput[]; 
 }
 
 function createKioskCommand(kioskId: string, action: KioskCommandAction): KioskCommand {
-  if (!["restart_display", "restart_services", "reboot_system"].includes(action)) throw httpError(400, "Unsupported kiosk command action");
+  if (!["restart_display", "restart_services", "reboot_system", "reset_network_settings_pin"].includes(action)) throw httpError(400, "Unsupported kiosk command action");
   const kiosk = db.prepare("SELECT kiosk_id FROM kiosks WHERE kiosk_id = ? AND active = 1").get(kioskId) as { kiosk_id: string } | undefined;
   if (!kiosk) throw httpError(404, "Kiosk not found or inactive");
 

@@ -127,7 +127,7 @@ export interface KioskHealthReport {
   lastSyncError?: string;
 }
 
-export type KioskCommandAction = "restart_display" | "restart_services" | "reboot_system";
+export type KioskCommandAction = "restart_display" | "restart_services" | "reboot_system" | "reset_network_settings_pin";
 
 export type KioskCommandStatus = "pending" | "running" | "completed" | "failed";
 

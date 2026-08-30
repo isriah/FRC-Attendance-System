@@ -210,6 +210,16 @@ Do not put Wi-Fi passwords in service files or the repository. The local setup
 endpoint is loopback-only and passes a submitted password directly to
 NetworkManager without logging or storing it in kiosk code.
 
+The first manual long-press opens a private on-kiosk flow to choose and confirm
+a 6-to-12 digit network-settings PIN. Later manual long-presses require that
+PIN before showing the Wi-Fi screen. The Pi stores only a salted scrypt verifier
+next to its kiosk SQLite cache (mode `0600`), never the PIN itself. Offline boot
+setup remains available without a PIN so an unconnected kiosk can be recovered.
+An authenticated dashboard administrator (not a mentor/operator) can queue
+**Reset network PIN** from the Kiosks view. That one-time command only clears
+the local verifier when the kiosk polls it; the replacement PIN is chosen on
+the kiosk and is never sent through the dashboard or API.
+
 ## 10. Minimal Roster Import
 
 For v1, the roster only needs:

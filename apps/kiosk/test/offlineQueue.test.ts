@@ -186,6 +186,7 @@ function testConfig(): KioskConfig {
     apiBaseUrl: "https://api.example.test",
     kioskToken: "test-token",
     databasePath: ":memory:",
+    networkPinPath: "./test-network-pin.json",
     pythonPath: "python3",
     fingerprintBridgePath: "./fingerprint_bridge.py",
     commandPollSeconds: 10,

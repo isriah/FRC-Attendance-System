@@ -1,10 +1,12 @@
 import { spawn } from "node:child_process";
 import type { KioskCommand, KioskCommandAction } from "@frc-attendance/shared";
 import type { KioskConfig } from "./config";
+import { resetNetworkPin } from "./networkPin";
 
 export function commandLabel(action: KioskCommandAction): string {
   if (action === "restart_display") return "Restart browser display";
   if (action === "restart_services") return "Restart kiosk services";
+  if (action === "reset_network_settings_pin") return "Reset network settings PIN";
   return "Reboot system";
 }
 
@@ -24,6 +26,11 @@ export async function executeKioskCommand(command: KioskCommand, config: KioskCo
     await runCommand("sudo", ["-n", "-l", "/usr/bin/systemctl", "reboot"]);
     scheduleDetached("sudo", ["-n", "/usr/bin/systemctl", "reboot"], config.systemRebootDelayMs);
     return "Scheduled system reboot";
+  }
+
+  if (command.action === "reset_network_settings_pin") {
+    await resetNetworkPin(config.networkPinPath);
+    return "Network settings PIN reset";
   }
 
   throw new Error(`Unsupported kiosk command action: ${command.action}`);

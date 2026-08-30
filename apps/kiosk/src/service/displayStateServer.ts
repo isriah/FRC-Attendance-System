@@ -2,6 +2,7 @@ import { createServer, type Server } from "node:http";
 import type { KioskScanAcknowledgement, KioskSyncResult } from "@frc-attendance/shared";
 import { baseDisplayState, type KioskDisplayState, type KioskStateId } from "../kioskStates";
 import { createNetworkManager, type NetworkManager } from "./networkManager";
+import { configureNetworkPin, hasNetworkPin, verifyNetworkPin } from "./networkPin";
 
 export type { DisplayStatus, KioskDisplayState, KioskStateId } from "../kioskStates";
 
@@ -19,7 +20,14 @@ export class DisplayStateServer {
 
   private server?: Server;
 
-  constructor(private readonly network: NetworkManager = createNetworkManager()) {}
+  private failedPinAttempts = 0;
+
+  private pinRetryAvailableAt = 0;
+
+  constructor(
+    private readonly network: NetworkManager = createNetworkManager(),
+    private readonly networkPinPath = "./kiosk-cache.sqlite.network-pin.json"
+  ) {}
 
   current(): KioskDisplayState & { health: KioskDisplayHealth } {
     return { ...this.state, health: this.health };
@@ -45,6 +53,21 @@ export class DisplayStateServer {
 
       if (request.method === "GET" && request.url === "/kiosk/network-status") {
         void this.respondJson(response, () => this.network.status());
+        return;
+      }
+
+      if (request.method === "GET" && request.url === "/kiosk/network-pin-status") {
+        void this.respondJson(response, async () => ({ configured: await hasNetworkPin(this.networkPinPath) }));
+        return;
+      }
+
+      if (request.method === "POST" && request.url === "/kiosk/network-pin/configure") {
+        void this.configureNetworkPin(request, response);
+        return;
+      }
+
+      if (request.method === "POST" && request.url === "/kiosk/network-pin/verify") {
+        void this.verifyNetworkPin(request, response);
         return;
       }
 
@@ -179,6 +202,57 @@ export class DisplayStateServer {
       response.writeHead(400, { "content-type": "application/json; charset=utf-8", ...corsHeaders() });
       response.end(JSON.stringify({ error: error instanceof Error ? error.message : "Could not join the Wi-Fi network" }));
     }
+  }
+
+  private async configureNetworkPin(request: import("node:http").IncomingMessage, response: import("node:http").ServerResponse): Promise<void> {
+    try {
+      const input = await this.readPinRequest(request);
+      if (await hasNetworkPin(this.networkPinPath)) throw new Error("A network settings PIN is already configured.");
+      await configureNetworkPin(this.networkPinPath, input.pin, input.confirmation);
+      if (!await verifyNetworkPin(this.networkPinPath, input.pin)) throw new Error("The new PIN could not be verified. Try again.");
+      response.writeHead(204, corsHeaders());
+      response.end();
+    } catch (error) {
+      this.respondPinError(response, error);
+    }
+  }
+
+  private async verifyNetworkPin(request: import("node:http").IncomingMessage, response: import("node:http").ServerResponse): Promise<void> {
+    try {
+      const input = await this.readPinRequest(request);
+      if (!await hasNetworkPin(this.networkPinPath)) throw new Error("Set a network settings PIN first.");
+      if (Date.now() < this.pinRetryAvailableAt) throw new Error("Try the network settings PIN again in a moment.");
+      if (!await verifyNetworkPin(this.networkPinPath, input.pin)) {
+        this.failedPinAttempts += 1;
+        if (this.failedPinAttempts >= 5) {
+          this.failedPinAttempts = 0;
+          this.pinRetryAvailableAt = Date.now() + 30_000;
+          throw new Error("Too many incorrect PIN attempts. Try again in 30 seconds.");
+        }
+        throw new Error("That PIN is incorrect. Try again.");
+      }
+      this.failedPinAttempts = 0;
+      this.pinRetryAvailableAt = 0;
+      response.writeHead(204, corsHeaders());
+      response.end();
+    } catch (error) {
+      this.respondPinError(response, error);
+    }
+  }
+
+  private async readPinRequest(request: import("node:http").IncomingMessage): Promise<{ pin?: unknown; confirmation?: unknown }> {
+    let raw = "";
+    request.setEncoding("utf8");
+    for await (const chunk of request) {
+      raw += chunk;
+      if (raw.length > 1_024) throw new Error("PIN request is too large");
+    }
+    return JSON.parse(raw) as { pin?: unknown; confirmation?: unknown };
+  }
+
+  private respondPinError(response: import("node:http").ServerResponse, error: unknown): void {
+    response.writeHead(400, { "content-type": "application/json; charset=utf-8", ...corsHeaders() });
+    response.end(JSON.stringify({ error: error instanceof Error ? error.message : "The network PIN could not be verified." }));
   }
 }
 

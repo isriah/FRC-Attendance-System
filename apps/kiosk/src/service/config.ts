@@ -3,6 +3,7 @@ export interface KioskConfig {
   apiBaseUrl: string;
   kioskToken: string;
   databasePath: string;
+  networkPinPath: string;
   pythonPath: string;
   fingerprintBridgePath: string;
   commandPollSeconds: number;
@@ -17,6 +18,7 @@ export function loadConfig(env = process.env): KioskConfig {
     apiBaseUrl: required(env.API_BASE_URL, "API_BASE_URL").replace(/\/$/, ""),
     kioskToken: required(env.KIOSK_TOKEN, "KIOSK_TOKEN"),
     databasePath: env.KIOSK_DB_PATH ?? "./kiosk-cache.sqlite",
+    networkPinPath: env.KIOSK_NETWORK_PIN_PATH ?? `${env.KIOSK_DB_PATH ?? "./kiosk-cache.sqlite"}.network-pin.json`,
     pythonPath: env.PYTHON_PATH ?? "python3",
     fingerprintBridgePath: env.FINGERPRINT_BRIDGE_PATH ?? "./fingerprint_bridge.py",
     commandPollSeconds: numberEnv(env.KIOSK_COMMAND_POLL_SECONDS, 10),

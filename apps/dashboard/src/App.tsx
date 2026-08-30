@@ -2826,13 +2826,16 @@ function DiscordTestResultPanel({ result }: { result: DiscordTestNotificationRes
 function Kiosks({ session }: { session: DashboardSession }) {
   const { data, error, reload } = useApi<{ kiosks: KioskRow[] }>("/admin/kiosks", session);
   const { data: commands, error: commandError, reload: reloadCommands } = useApi<{ commands: KioskCommandRow[] }>("/admin/kiosk-commands?limit=75", session);
+  const { data: adminUsers } = useApi<{ adminUsers: AdminUserRow[] }>("/admin/admin-users", session);
   const [commandMessages, setCommandMessages] = useState<Record<string, { kind: "success" | "error"; text: string }>>({});
   const [runningCommand, setRunningCommand] = useState<string>();
   const [expandedCommandHistory, setExpandedCommandHistory] = useState<Record<string, boolean>>({});
   const commandsByKiosk = groupCommandsByKiosk(commands?.commands ?? []);
+  const canResetNetworkPin = adminUsers?.adminUsers.some((adminUser) => adminUser.email === session.email.toLowerCase() && adminUser.active && adminUser.role === "admin") ?? false;
 
   async function sendCommand(kiosk: KioskRow, action: KioskCommandAction) {
     if (action === "reboot_system" && !window.confirm(`Reboot ${kiosk.kiosk_id}? The kiosk will go offline briefly.`)) return;
+    if (action === "reset_network_settings_pin" && !window.confirm(`Reset the network settings PIN for ${kiosk.kiosk_id}? The kiosk will require a new on-kiosk PIN the next time network settings are opened.`)) return;
 
     const commandKey = `${kiosk.kiosk_id}:${action}`;
     setRunningCommand(commandKey);
@@ -2897,6 +2900,11 @@ function Kiosks({ session }: { session: DashboardSession }) {
                           </button>
                         );
                       })}
+                      {canResetNetworkPin && (() => {
+                        const action: KioskCommandAction = "reset_network_settings_pin";
+                        const commandKey = `${kiosk.kiosk_id}:${action}`;
+                        return <button className="danger-button" disabled={runningCommand === commandKey || !kiosk.active} onClick={() => sendCommand(kiosk, action)}>{runningCommand === commandKey ? "Queuing..." : commandLabel(action)}</button>;
+                      })()}
                     </div>
                     {(() => {
                       const commandMessage = commandMessages[kiosk.kiosk_id];
@@ -3964,6 +3972,7 @@ function friendlyDashboardError(error: unknown) {
 function commandLabel(action: KioskCommandAction) {
   if (action === "restart_display") return "Restart display";
   if (action === "restart_services") return "Restart services";
+  if (action === "reset_network_settings_pin") return "Reset network PIN";
   return "Reboot system";
 }
 

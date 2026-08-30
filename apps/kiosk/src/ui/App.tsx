@@ -53,6 +53,11 @@ function KioskApp() {
   const [password, setPassword] = useState("");
   const [settingsError, setSettingsError] = useState("");
   const [isConnecting, setIsConnecting] = useState(false);
+  const [networkPinFlow, setNetworkPinFlow] = useState<"setup" | "verify">();
+  const [networkPin, setNetworkPin] = useState("");
+  const [networkPinConfirmation, setNetworkPinConfirmation] = useState("");
+  const [networkPinError, setNetworkPinError] = useState("");
+  const [networkPinSubmitting, setNetworkPinSubmitting] = useState(false);
 
   const openNetworkSettings = useCallback(async () => {
     setSettingsOpen(true);
@@ -62,6 +67,19 @@ function KioskApp() {
       setWifiNetworks(await fetchWifiNetworks());
     } catch (error) {
       setSettingsError(errorMessage(error));
+    }
+  }, []);
+
+  const requestNetworkSettings = useCallback(async () => {
+    setNetworkPinError("");
+    setNetworkPin("");
+    setNetworkPinConfirmation("");
+    try {
+      const { configured } = await fetchNetworkPinStatus();
+      setNetworkPinFlow(configured ? "verify" : "setup");
+    } catch (error) {
+      setNetworkPinError(errorMessage(error));
+      setNetworkPinFlow("verify");
     }
   }, []);
 
@@ -161,9 +179,33 @@ function KioskApp() {
     }
   }
 
+  async function submitNetworkPin() {
+    setNetworkPinError("");
+    setNetworkPinSubmitting(true);
+    try {
+      const endpoint = networkPinFlow === "setup" ? "/kiosk/network-pin/configure" : "/kiosk/network-pin/verify";
+      const response = await fetch(`${networkServiceBaseUrl()}${endpoint}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(networkPinFlow === "setup" ? { pin: networkPin, confirmation: networkPinConfirmation } : { pin: networkPin })
+      });
+      if (!response.ok) throw new Error(await responseError(response));
+      setNetworkPinFlow(undefined);
+      setNetworkPin("");
+      setNetworkPinConfirmation("");
+      await openNetworkSettings();
+    } catch (error) {
+      setNetworkPin("");
+      setNetworkPinConfirmation("");
+      setNetworkPinError(errorMessage(error));
+    } finally {
+      setNetworkPinSubmitting(false);
+    }
+  }
+
   return (
     <main className={`kiosk-shell kiosk-shell-${state.status}`}>
-      <NetworkStatusIcon status={networkStatus} onOpenSettings={openNetworkSettings} />
+      <NetworkStatusIcon status={networkStatus} onOpenSettings={requestNetworkSettings} />
       <header className="kiosk-brand">
         <span>{kioskBrand.title}</span>
         <strong>{kioskBrand.subtitle}</strong>
@@ -193,8 +235,52 @@ function KioskApp() {
           onClose={() => { if (!networkSetupRequired) setSettingsOpen(false); }}
         />
       )}
+      {networkPinFlow && <NetworkPinPrompt
+        mode={networkPinFlow}
+        pin={networkPin}
+        confirmation={networkPinConfirmation}
+        error={networkPinError}
+        submitting={networkPinSubmitting}
+        onPinChange={setNetworkPin}
+        onConfirmationChange={setNetworkPinConfirmation}
+        onSubmit={() => void submitNetworkPin()}
+        onCancel={() => { if (!networkPinSubmitting) { setNetworkPinFlow(undefined); setNetworkPinError(""); } }}
+      />}
     </main>
   );
+}
+
+function NetworkPinPrompt({ mode, pin, confirmation, error, submitting, onPinChange, onConfirmationChange, onSubmit, onCancel }: {
+  mode: "setup" | "verify";
+  pin: string;
+  confirmation: string;
+  error: string;
+  submitting: boolean;
+  onPinChange: (value: string) => void;
+  onConfirmationChange: (value: string) => void;
+  onSubmit: () => void;
+  onCancel: () => void;
+}) {
+  const setup = mode === "setup";
+  return <section className="network-pin-prompt" role="dialog" aria-modal="true" aria-labelledby="network-pin-title">
+    <div className="network-pin-card">
+      <h2 id="network-pin-title">{setup ? "Set network settings PIN" : "Enter network settings PIN"}</h2>
+      <p>{setup ? "Choose a private 6 to 12 digit PIN. It stays only on this kiosk." : "Enter the PIN to open network settings."}</p>
+      <PinEntry label={setup ? "New PIN" : "PIN"} value={pin} onChange={onPinChange} />
+      {setup && <PinEntry label="Confirm PIN" value={confirmation} onChange={onConfirmationChange} />}
+      {error && <p className="network-error" role="alert">{error}</p>}
+      <footer><button type="button" className="secondary-button" disabled={submitting} onClick={onCancel}>Cancel</button><button type="button" className="primary-button" disabled={submitting} onClick={onSubmit}>{submitting ? "Checking…" : setup ? "Save PIN" : "Open settings"}</button></footer>
+    </div>
+  </section>;
+}
+
+function PinEntry({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+  const addDigit = (digit: string) => onChange(value.length < 12 ? `${value}${digit}` : value);
+  return <section className="network-pin-entry" aria-label={label}>
+    <label>{label}</label>
+    <output aria-live="polite">{value ? "•".repeat(value.length) : "Enter digits"}</output>
+    <div className="network-pin-keypad">{"123456789".split("").map((digit) => <button type="button" key={digit} onClick={() => addDigit(digit)}>{digit}</button>)}<button type="button" onClick={() => onChange("")}>Clear</button><button type="button" onClick={() => addDigit("0")}>0</button><button type="button" onClick={() => onChange(value.slice(0, -1))}>⌫</button></div>
+  </section>;
 }
 
 function NetworkStatusIcon({ status, onOpenSettings }: { status: NetworkStatus; onOpenSettings: () => void }) {
@@ -353,6 +439,12 @@ async function fetchWifiNetworks(): Promise<WirelessNetwork[]> {
   const response = await fetch(`${networkServiceBaseUrl()}/kiosk/wifi-networks`, { cache: "no-store" });
   if (!response.ok) throw new Error(await responseError(response));
   return response.json() as Promise<WirelessNetwork[]>;
+}
+
+async function fetchNetworkPinStatus(): Promise<{ configured: boolean }> {
+  const response = await fetch(`${networkServiceBaseUrl()}/kiosk/network-pin-status`, { cache: "no-store" });
+  if (!response.ok) throw new Error(await responseError(response));
+  return response.json() as Promise<{ configured: boolean }>;
 }
 
 async function waitForNetworkConnection(): Promise<LocalNetworkStatus> {

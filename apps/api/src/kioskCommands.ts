@@ -1,12 +1,18 @@
 import type { KioskCommand, KioskCommandAction, KioskCommandStatus } from "@frc-attendance/shared";
 import type { Env } from "./env";
 
-const allowedActions: KioskCommandAction[] = ["restart_display", "restart_services", "reboot_system"];
+const allowedActions: KioskCommandAction[] = ["restart_display", "restart_services", "reboot_system", "reset_network_settings_pin"];
 const terminalStatuses: KioskCommandStatus[] = ["completed", "failed"];
 
 export function requireKioskCommandAction(value: unknown): KioskCommandAction {
   if (typeof value === "string" && allowedActions.includes(value as KioskCommandAction)) return value as KioskCommandAction;
   throw Object.assign(new Error("Unsupported kiosk command action"), { status: 400 });
+}
+
+export function requireKioskCommandPermission(action: KioskCommandAction, role: "mentor" | "admin"): void {
+  if (action === "reset_network_settings_pin" && role !== "admin") {
+    throw Object.assign(new Error("Only administrators can reset a kiosk network settings PIN"), { status: 403 });
+  }
 }
 
 export async function createKioskCommand(env: Env, input: { kioskId: string; action: KioskCommandAction; requestedBy?: string }): Promise<KioskCommand> {

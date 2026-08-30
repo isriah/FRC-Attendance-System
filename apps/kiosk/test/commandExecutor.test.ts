@@ -6,5 +6,6 @@ describe("kiosk command labels", () => {
     expect(commandLabel("restart_display")).toBe("Restart browser display");
     expect(commandLabel("restart_services")).toBe("Restart kiosk services");
     expect(commandLabel("reboot_system")).toBe("Reboot system");
+    expect(commandLabel("reset_network_settings_pin")).toBe("Reset network settings PIN");
   });
 });

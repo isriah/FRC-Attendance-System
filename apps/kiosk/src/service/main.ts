@@ -10,7 +10,7 @@ const config = loadConfig();
 const queue = new OfflineQueue(config.databasePath);
 const sync = new SyncClient(config, queue);
 const bridge = new FingerprintBridge();
-const display = new DisplayStateServer();
+const display = new DisplayStateServer(undefined, config.networkPinPath);
 const health = {
   readerOnline: null as boolean | null,
   lastSyncAt: undefined as string | undefined,
