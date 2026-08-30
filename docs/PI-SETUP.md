@@ -163,7 +163,54 @@ systemctl --user daemon-reload
 systemctl --user restart frc-kiosk-ui
 ```
 
-## 9. Minimal Roster Import
+## 9. Touch Network Setup and Offline Boot
+
+The kiosk remains in Chromium full-screen mode during normal attendance use. Its
+connection icon in the upper-left is green for a working local network, yellow
+when scans are queued, and red when no connection is available. To prevent
+accidental student use, hold that icon for three seconds to open Network
+settings.
+
+At boot, if neither wired Ethernet nor Wi-Fi is connected, the kiosk opens the
+same touch-friendly Wi-Fi setup screen automatically instead of leaving the
+operator trapped at an offline attendance screen. Choose an SSID, enter its
+password with the built-in on-screen keyboard, and tap `Connect`; attendance
+returns automatically after NetworkManager confirms the connection. The screen
+can also be used to refresh the visible Wi-Fi list. It does not expose the
+desktop, terminal, saved passwords, or arbitrary system settings.
+
+This flow uses Raspberry Pi OS Desktop's NetworkManager command-line client.
+Current Raspberry Pi OS Desktop images include it. If `nmcli` is missing, an
+administrator must install and enable NetworkManager once:
+
+```bash
+sudo apt install -y network-manager
+sudo systemctl enable --now NetworkManager
+```
+
+The kiosk account needs the standard active desktop session that Raspberry Pi
+OS grants to create its own Wi-Fi connections. The kiosk service intentionally
+runs without an interactive terminal, so install the repository's narrow
+NetworkManager Polkit rule once; it grants only Wi-Fi scan/connect actions to
+the kiosk account and does not grant desktop or sudo access:
+
+```bash
+cd ~/FRC-Attendance-System
+sudo bash apps/kiosk/scripts/install-network-setup-polkit.sh
+```
+
+Validate before deployment:
+
+```bash
+nmcli general permissions
+nmcli device status
+```
+
+Do not put Wi-Fi passwords in service files or the repository. The local setup
+endpoint is loopback-only and passes a submitted password directly to
+NetworkManager without logging or storing it in kiosk code.
+
+## 10. Minimal Roster Import
 
 For v1, the roster only needs:
 
@@ -174,7 +221,7 @@ memberId,firstName,lastName
 
 Open the dashboard at `http://<pi-hostname-or-ip>:5174`, go to the roster tab, and paste CSV with those three columns. The central API stores `memberId` as `student_id` for attendance-event compatibility.
 
-## 10. Bench Fingerprint Mapping
+## 11. Bench Fingerprint Mapping
 
 Fingerprint templates stay on the sensor. The kiosk SQLite DB stores only the mapping from sensor template slot to Member ID. Existing local columns are still named `student_id` for compatibility.
 
@@ -229,7 +276,7 @@ After changing enrollment mappings, restart the service:
 systemctl --user restart frc-kiosk-service
 ```
 
-## 11. Update Existing Kiosk
+## 12. Update Existing Kiosk
 
 From the Windows workstation, connect as:
 

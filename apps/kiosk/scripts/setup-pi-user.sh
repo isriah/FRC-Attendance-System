@@ -39,6 +39,11 @@ Run this once with sudo so user services start before SSH/desktop login:
 
   sudo loginctl enable-linger "$USER"
 
+Run this once with sudo to let the protected touch Wi-Fi screen use
+NetworkManager without a hidden password prompt:
+
+  sudo bash apps/kiosk/scripts/install-network-setup-polkit.sh
+
 Also confirm Raspberry Pi UART is enabled and serial console is disabled:
 
   sudo raspi-config

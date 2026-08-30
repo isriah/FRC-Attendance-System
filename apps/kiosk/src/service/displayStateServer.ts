@@ -1,6 +1,7 @@
 import { createServer, type Server } from "node:http";
 import type { KioskScanAcknowledgement, KioskSyncResult } from "@frc-attendance/shared";
 import { baseDisplayState, type KioskDisplayState, type KioskStateId } from "../kioskStates";
+import { createNetworkManager, type NetworkManager } from "./networkManager";
 
 export type { DisplayStatus, KioskDisplayState, KioskStateId } from "../kioskStates";
 
@@ -17,6 +18,8 @@ export class DisplayStateServer {
   private health: KioskDisplayHealth = { pendingScanCount: 0 };
 
   private server?: Server;
+
+  constructor(private readonly network: NetworkManager = createNetworkManager()) {}
 
   current(): KioskDisplayState & { health: KioskDisplayHealth } {
     return { ...this.state, health: this.health };
@@ -40,6 +43,21 @@ export class DisplayStateServer {
         return;
       }
 
+      if (request.method === "GET" && request.url === "/kiosk/network-status") {
+        void this.respondJson(response, () => this.network.status());
+        return;
+      }
+
+      if (request.method === "GET" && request.url === "/kiosk/wifi-networks") {
+        void this.respondJson(response, () => this.network.listWifi());
+        return;
+      }
+
+      if (request.method === "POST" && request.url === "/kiosk/wifi-connect") {
+        void this.connectWifi(request, response);
+        return;
+      }
+
       response.writeHead(404, {
         "content-type": "application/json; charset=utf-8",
         ...corsHeaders()
@@ -47,7 +65,7 @@ export class DisplayStateServer {
       response.end(JSON.stringify({ error: "Not found" }));
     });
 
-    this.server.listen(port, "0.0.0.0", () => {
+    this.server.listen(port, "127.0.0.1", () => {
       console.log(`Kiosk display state server listening on http://localhost:${port}`);
     });
   }
@@ -128,6 +146,40 @@ export class DisplayStateServer {
   private set(state: Omit<KioskDisplayState, "updatedAt">): void {
     this.state = withTimestamp(state);
   }
+
+  private async respondJson(response: import("node:http").ServerResponse, action: () => Promise<unknown>): Promise<void> {
+    try {
+      const body = await action();
+      response.writeHead(200, { "content-type": "application/json; charset=utf-8", ...corsHeaders() });
+      response.end(JSON.stringify(body));
+    } catch (error) {
+      response.writeHead(503, { "content-type": "application/json; charset=utf-8", ...corsHeaders() });
+      response.end(JSON.stringify({ error: error instanceof Error ? error.message : "Network setup is unavailable" }));
+    }
+  }
+
+  private async connectWifi(request: import("node:http").IncomingMessage, response: import("node:http").ServerResponse): Promise<void> {
+    let raw = "";
+    request.setEncoding("utf8");
+    for await (const chunk of request) {
+      raw += chunk;
+      if (raw.length > 8_192) {
+        response.writeHead(413, { "content-type": "application/json; charset=utf-8", ...corsHeaders() });
+        response.end(JSON.stringify({ error: "Network request is too large" }));
+        return;
+      }
+    }
+    try {
+      const input = JSON.parse(raw) as { ssid?: unknown; password?: unknown };
+      if (typeof input.ssid !== "string" || typeof input.password !== "string") throw new Error("Choose a network and enter its password if required.");
+      await this.network.connectWifi(input.ssid, input.password);
+      response.writeHead(204, corsHeaders());
+      response.end();
+    } catch (error) {
+      response.writeHead(400, { "content-type": "application/json; charset=utf-8", ...corsHeaders() });
+      response.end(JSON.stringify({ error: error instanceof Error ? error.message : "Could not join the Wi-Fi network" }));
+    }
+  }
 }
 
 export function displayStateForAcknowledgement(acknowledgement: KioskScanAcknowledgement): Omit<KioskDisplayState, "updatedAt"> {
@@ -172,7 +224,7 @@ function withTimestamp(state: Omit<KioskDisplayState, "updatedAt">): KioskDispla
 function corsHeaders() {
   return {
     "access-control-allow-origin": "*",
-    "access-control-allow-methods": "GET,OPTIONS",
+    "access-control-allow-methods": "GET,POST,OPTIONS",
     "access-control-allow-headers": "content-type"
   };
 }
