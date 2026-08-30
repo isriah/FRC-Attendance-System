@@ -426,6 +426,11 @@ textarea {
   text-align: center;
 }
 
+.meeting-table th:nth-child(2),
+.meeting-table td:nth-child(2) {
+  white-space: nowrap;
+}
+
 .bulk-actions,
 .bulk-edit-form {
   display: flex;
