@@ -142,6 +142,27 @@ one-time-modal pattern. After completion, do not repeatedly present onboarding;
 instead keep a non-intrusive **Setup/Help** entry for reviewing it, success
 checks, and recovery guidance.
 
+### Confirmed integrations setup requirement
+
+Optional integrations are exposed through an authenticated in-dashboard
+**Integrations/Setup** area, never through AI or chat instructions. It must be
+self-serve for non-technical administrators. The area covers Google OAuth,
+local-administrator authentication configuration, an email provider, Discord,
+and captive-portal authentication where supported.
+
+For each integration, provide plain-language purpose and setup guidance,
+annotated screenshots, and copyable non-secret values such as callback URLs.
+Show configuration state, non-secret health/status, and the last successful
+test or action. Provide safe test controls, credential rotation/removal, and a
+clear optional or disabled state.
+
+Secret values must never be displayed after they are saved. Detailed
+implementation must use a secure installation-specific secret/configuration
+design—for example, encrypted-at-rest integration values using a
+deployment-provided key—rather than requiring the dashboard to hold broad
+Cloudflare account API credentials. Concrete secret storage and recovery design
+requires security review before implementation.
+
 ### Suggestions to validate later
 
 - Deliver the first guided CLI deployment path with task-oriented, plain-language
@@ -246,6 +267,10 @@ Before creating the future standalone snapshot:
   resumable onboarding for the core checklist; optional integrations are safely
   skippable, completion is verified/derived or auditable, normal navigation is
   never blocked, and completed onboarding remains available through Setup/Help.
+- [ ] Confirm authenticated Integrations/Setup is self-serve and covers each
+  supported optional integration with non-secret status, last-success data,
+  safe tests, rotation/removal, disabled state, annotated setup guidance, and
+  copyable non-secret values; saved secrets are never displayed.
 - [ ] Review the release candidate for privacy, security, accessibility, and
   contributor-readiness before publication.
 
@@ -259,6 +284,8 @@ These are unresolved; they are not commitments.
   cache-refresh behavior should be used?
 - What session, reset, recovery, and authentication-security design should the
   implementation use for local administrator credentials?
+- What installation-specific secret storage, encryption-key provisioning, and
+  recovery design passes security review for integrations?
 - What should the later optional one-click Cloudflare deployment experience be?
 - Which fingerprint hardware, if any, will be officially supported?
 - Which non-biometric sign-in method should be considered after the first
@@ -305,3 +332,4 @@ These are suggestions, not approved implementation work.
 | 2026-08-30 | Confirmed | Biometric consent, retention, deletion, and legal/privacy policy are each deploying organization's responsibility; documentation explains that responsibility only. |
 | 2026-08-30 | Confirmed | No support SLA is promised. Users may contact RoboLancers and assistance may be available without a response-time or coverage commitment. |
 | 2026-08-30 | Confirmed | The future standalone repository name is LancerLogin and the default public documentation target is robolancers.github.io/LancerLogin/. |
+| 2026-08-30 | Confirmed | Optional integrations are configured through authenticated in-dashboard Integrations/Setup, not AI/chat instructions, with self-serve guidance, non-secret status, tests, rotation/removal, and clear disabled state. Saved secrets are never displayed; secret storage and recovery require security review before implementation. |
