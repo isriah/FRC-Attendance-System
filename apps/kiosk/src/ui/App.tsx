@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type PointerEvent } from "react";
 import { createRoot } from "react-dom/client";
 import { baseDisplayState, type DisplayStatus } from "../kioskStates";
 import { characterForKey, keyboardRows, type KeyboardKey, type KeyboardLayout } from "./touchKeyboard";
@@ -53,6 +53,17 @@ function KioskApp() {
   const [password, setPassword] = useState("");
   const [settingsError, setSettingsError] = useState("");
   const [isConnecting, setIsConnecting] = useState(false);
+
+  const openNetworkSettings = useCallback(async () => {
+    setSettingsOpen(true);
+    setSettingsError("");
+    setPassword("");
+    try {
+      setWifiNetworks(await fetchWifiNetworks());
+    } catch (error) {
+      setSettingsError(errorMessage(error));
+    }
+  }, []);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -127,17 +138,6 @@ function KioskApp() {
   const networkStatus = networkStatusFor(state.health, lastRefreshAt, localNetwork);
   const networkSetupRequired = localNetwork?.connected === false;
 
-  async function openNetworkSettings() {
-    setSettingsOpen(true);
-    setSettingsError("");
-    setPassword("");
-    try {
-      setWifiNetworks(await fetchWifiNetworks());
-    } catch (error) {
-      setSettingsError(errorMessage(error));
-    }
-  }
-
   async function connectWifi() {
     if (!selectedNetwork) return;
     setSettingsError("");
@@ -163,7 +163,7 @@ function KioskApp() {
 
   return (
     <main className={`kiosk-shell kiosk-shell-${state.status}`}>
-      <NetworkStatusIcon status={networkStatus} onOpenSettings={() => void openNetworkSettings()} />
+      <NetworkStatusIcon status={networkStatus} onOpenSettings={openNetworkSettings} />
       <header className="kiosk-brand">
         <span>{kioskBrand.title}</span>
         <strong>{kioskBrand.subtitle}</strong>
@@ -199,24 +199,41 @@ function KioskApp() {
 
 function NetworkStatusIcon({ status, onOpenSettings }: { status: NetworkStatus; onOpenSettings: () => void }) {
   const [holding, setHolding] = useState(false);
+  const holdTimer = useRef<number>();
+
   useEffect(() => {
-    if (!holding) return;
-    const timer = window.setTimeout(() => {
+    return () => window.clearTimeout(holdTimer.current);
+  }, []);
+
+  const cancelHold = () => {
+    window.clearTimeout(holdTimer.current);
+    holdTimer.current = undefined;
+    setHolding(false);
+  };
+
+  const startHold = (event: PointerEvent<HTMLButtonElement>) => {
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    cancelHold();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setHolding(true);
+    holdTimer.current = window.setTimeout(() => {
+      holdTimer.current = undefined;
       setHolding(false);
-      onOpenSettings();
+      void onOpenSettings();
     }, 3_000);
-    return () => window.clearTimeout(timer);
-  }, [holding, onOpenSettings]);
+  };
+
   return (
     <button
       type="button"
       className={`network-status network-status-${status.kind} ${holding ? "network-status-holding" : ""}`}
       aria-label={`${status.label}. Hold for three seconds to open network settings.`}
       title={`${status.label}. Hold for settings.`}
-      onPointerDown={() => setHolding(true)}
-      onPointerUp={() => setHolding(false)}
-      onPointerCancel={() => setHolding(false)}
-      onPointerLeave={() => setHolding(false)}
+      onPointerDown={startHold}
+      onPointerUp={cancelHold}
+      onPointerCancel={cancelHold}
+      onLostPointerCapture={cancelHold}
+      onContextMenu={(event) => event.preventDefault()}
     >
       <svg viewBox="0 0 32 32" aria-hidden="true" focusable="false">
         <path d="M5.5 13.5C11.3 8.8 20.7 8.8 26.5 13.5" />
@@ -224,6 +241,7 @@ function NetworkStatusIcon({ status, onOpenSettings }: { status: NetworkStatus; 
         <path d="M15.1 23.2C15.6 22.8 16.4 22.8 16.9 23.2" />
       </svg>
       <span className="network-status-dot" />
+      {holding && <span className="network-status-hold-feedback" aria-live="polite">Keep holding…</span>}
     </button>
   );
 }
