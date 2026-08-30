@@ -233,13 +233,13 @@ interface NetworkStatus {
 }
 
 function networkStatusFor(health: KioskDisplayHealth | undefined, lastRefreshAt: number | undefined, localNetwork: LocalNetworkStatus | undefined): NetworkStatus {
-  if (localNetwork?.connected) return { kind: "online", label: `${localNetwork.type === "ethernet" ? "Wired" : "Wi-Fi"} network connected${localNetwork.connection ? `: ${localNetwork.connection}` : ""}` };
   if (localNetwork?.connected === false) return { kind: "offline", label: "No wired or Wi-Fi network connection" };
-  if (!lastRefreshAt || !health) return { kind: "unknown", label: "Network status pending" };
-  if (health.readerOnline === false) return { kind: "offline", label: "Fingerprint reader offline" };
-  if (health.lastSyncError) return { kind: "offline", label: "Remote sync offline" };
-  if (health.pendingScanCount > 0) return { kind: "queued", label: `${health.pendingScanCount} scan${health.pendingScanCount === 1 ? "" : "s"} queued` };
-  return { kind: "online", label: "Remote sync online" };
+  const localLabel = localNetwork?.connected ? `${localNetwork.type === "ethernet" ? "Wired" : "Wi-Fi"} network connected${localNetwork.connection ? `: ${localNetwork.connection}` : ""}` : undefined;
+  if (!lastRefreshAt || !health) return { kind: localLabel ? "online" : "unknown", label: localLabel ?? "Network status pending" };
+  if (health.readerOnline === false) return { kind: "offline", label: `${localLabel ? `${localLabel}; ` : ""}fingerprint reader offline` };
+  if (health.lastSyncError) return { kind: "offline", label: `${localLabel ? `${localLabel}; ` : ""}remote attendance sync offline` };
+  if (health.pendingScanCount > 0) return { kind: "queued", label: `${localLabel ? `${localLabel}; ` : ""}${health.pendingScanCount} scan${health.pendingScanCount === 1 ? "" : "s"} queued` };
+  return { kind: "online", label: localLabel ?? "Remote sync online" };
 }
 
 function NetworkSettings({ required, status, networks, selected, password, error, isConnecting, onSelect, onPasswordChange, onRefresh, onConnect, onClose }: {
