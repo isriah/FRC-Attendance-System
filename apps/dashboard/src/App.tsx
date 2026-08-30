@@ -4,9 +4,10 @@ import { apiBaseUrl, apiDelete, apiGet, apiPost, apiPut, type DashboardSession }
 import { buildClearMemberAttendanceSourceDataPayload, clearMemberAttendanceConfirmation } from "./attendanceDebugAction";
 import { fingerLabelOptions, fingerprintEnrollmentName, fingerprintOwnerNavigation, nextAvailableFingerprintSlot, normalizeFingerLabel, type FingerprintEnrollment } from "./fingerprintEnrollment";
 import { formatDateTime, formatTime, localTimeInputValue } from "./timeFormat";
+import { publicDocsUrl } from "./publicDocs";
 import "./styles.css";
 
-type Tab = "overview" | "roster" | "admins" | "meetings" | "contests" | "kiosks" | "events" | "reports" | "export";
+type Tab = "overview" | "roster" | "admins" | "meetings" | "contests" | "kiosks" | "events" | "reports" | "export" | "docs";
 type RosterViewTab = "active" | "deactivated" | "import";
 type MeetingViewTab = "calendar" | "all" | "form";
 type ThemeMode = "themed" | "light" | "dark";
@@ -261,6 +262,7 @@ const defaultMeetingStartTime = "15:00";
 const defaultMeetingEndTime = "17:30";
 const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
 const googleAuthEnabled = Boolean(googleClientId);
+const docsUrl = publicDocsUrl(import.meta.env.VITE_PUBLIC_DOCS_URL);
 const fingerprintEnrollmentAvailable = !apiBaseUrl.includes("workers.dev");
 const productionRosterPullAvailable = fingerprintEnrollmentAvailable;
 const weekdayOptions = [
@@ -302,7 +304,7 @@ function App() {
     <main className="dashboard">
       <aside>
         <h1>Attendance Admin</h1>
-        {(["overview", "roster", "admins", "meetings", "contests", "kiosks", "events", "reports", "export"] as Tab[]).map((item) => (
+        {(["overview", "roster", "admins", "meetings", "contests", "kiosks", "events", "reports", "export", "docs"] as Tab[]).map((item) => (
           <button key={item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}>
             {item}
           </button>
@@ -327,9 +329,33 @@ function App() {
         {tab === "events" && <Events session={session} onOpenMember={openRosterMember} />}
         {tab === "reports" && <Reports session={session} onOpenMember={openRosterMember} />}
         {tab === "export" && <LegacyExport session={session} />}
+        {tab === "docs" && <PublicDocs />}
       </section>
     </main>
   );
+}
+
+function PublicDocs() {
+  const [frameState, setFrameState] = useState<"loading" | "ready" | "error">("loading");
+
+  return <section className="docs-reader" aria-labelledby="docs-reader-title">
+    <div className="docs-reader-heading">
+      <div>
+        <h2 id="docs-reader-title">Operations Guide</h2>
+        <p>Public, task-focused guidance for mentors and kiosk operators.</p>
+      </div>
+      <a className="docs-reader-open" href={docsUrl} target="_blank" rel="noreferrer">Open in new tab</a>
+    </div>
+    {frameState === "loading" ? <p className="notice info docs-reader-status">Loading the public guide…</p> : null}
+    {frameState === "error" ? <div className="notice error docs-reader-status">The embedded guide could not load. <a href={docsUrl} target="_blank" rel="noreferrer">Open it in a new tab</a>.</div> : null}
+    <iframe
+      className="docs-reader-frame"
+      title="FRC Attendance System public operations guide"
+      src={docsUrl}
+      onLoad={() => setFrameState("ready")}
+      onError={() => setFrameState("error")}
+    />
+  </section>;
 }
 
 function AttendanceContests({ session, onOpenReports, onOpenMember }: { session: DashboardSession; onOpenReports: () => void; onOpenMember: (memberId: string) => void }) {

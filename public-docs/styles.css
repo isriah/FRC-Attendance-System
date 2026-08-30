@@ -1,0 +1,30 @@
+:root { color: #17202a; background: #f5f7f9; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height: 1.6; }
+* { box-sizing: border-box; }
+body { margin: 0; }
+a { color: #0e6371; text-underline-offset: 0.16em; }
+a:hover { color: #084b56; }
+.skip-link { background: #17202a; color: #fff; left: 1rem; padding: .65rem .9rem; position: absolute; top: -4rem; z-index: 5; }
+.skip-link:focus { top: 1rem; }
+.site-header { align-items: center; background: #fff; border-bottom: 1px solid #d8dee6; display: flex; gap: 2rem; justify-content: space-between; padding: 1.2rem max(1.25rem, calc((100% - 1120px) / 2)); }
+.brand { color: #17202a; font-size: 1.15rem; font-weight: 800; text-decoration: none; }
+.site-header p { color: #52616f; font-size: .92rem; margin: .1rem 0 0; }
+nav { display: flex; flex-wrap: wrap; gap: 1rem; }
+nav a { font-size: .94rem; font-weight: 650; text-decoration: none; }
+main { display: grid; gap: 2.5rem; grid-template-columns: minmax(0, 760px) 260px; margin: 0 auto; max-width: 1120px; padding: 3.5rem 1.25rem; }
+article { min-width: 0; }
+h1, h2, h3 { color: #17202a; letter-spacing: -.02em; line-height: 1.2; scroll-margin-top: 1.5rem; }
+h1 { font-size: clamp(2.1rem, 5vw, 3.5rem); margin: 0 0 1.2rem; }
+h2 { border-top: 1px solid #d8dee6; font-size: 1.55rem; margin: 2.8rem 0 1rem; padding-top: 2.2rem; }
+h1 + p { color: #52616f; font-size: 1.12rem; }
+h3 { font-size: 1.08rem; margin: 1.8rem 0 .45rem; }
+p, li { max-width: 72ch; }
+ul { padding-left: 1.3rem; }
+li + li { margin-top: .45rem; }
+code { background: #e8f0f2; border-radius: .25rem; font-size: .9em; padding: .1rem .3rem; }
+.site-note { align-self: start; background: #fff; border: 1px solid #d8dee6; border-radius: .65rem; padding: 1.25rem; position: sticky; top: 1.25rem; }
+.site-note h2 { border: 0; font-size: 1.05rem; margin: 0 0 .65rem; padding: 0; }
+.site-note p { color: #52616f; font-size: .92rem; margin: .65rem 0; }
+.updates { background: #eaf5f3; border-left: 4px solid #1d7a8c; margin-top: 3rem; padding: 0 1.25rem 1.25rem; }
+.updates h2 { border: 0; padding-top: 1.35rem; }
+footer { border-top: 1px solid #d8dee6; color: #52616f; display: flex; flex-wrap: wrap; gap: 1rem; justify-content: space-between; margin-top: 1rem; padding: 1.5rem max(1.25rem, calc((100% - 1120px) / 2)); }
+@media (max-width: 800px) { .site-header { align-items: flex-start; flex-direction: column; gap: 1rem; } main { grid-template-columns: 1fr; padding-top: 2rem; } .site-note { position: static; } nav { gap: .75rem; } }

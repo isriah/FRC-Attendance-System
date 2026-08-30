@@ -129,6 +129,7 @@ For direct uploads, build with production Vite variables before deploying:
 ```powershell
 $env:VITE_API_BASE_URL='https://frc-attendance-api.frc-attendance.workers.dev'
 $env:VITE_GOOGLE_CLIENT_ID='180849199739-v04bktp7rfmimgjpvohmq7pinrrpr337.apps.googleusercontent.com'
+$env:VITE_PUBLIC_DOCS_URL='https://isriah.github.io/FRC-Attendance-System/'
 npm.cmd --workspace @frc-attendance/dashboard run build
 npx.cmd wrangler pages deploy apps/dashboard/dist --project-name frc-attendance-dashboard --branch main --commit-dirty=true
 ```
@@ -137,6 +138,7 @@ Production values:
 
 - `VITE_API_BASE_URL`: `https://frc-attendance-api.frc-attendance.workers.dev`.
 - `VITE_GOOGLE_CLIENT_ID`: `180849199739-v04bktp7rfmimgjpvohmq7pinrrpr337.apps.googleusercontent.com`.
+- `VITE_PUBLIC_DOCS_URL`: `https://isriah.github.io/FRC-Attendance-System/`. This is optional because the dashboard defaults to the verified GitHub Pages project URL; set it explicitly for production deploys so the deployed build documents its intended public guide.
 
 Verification completed on 2026-05-28:
 
