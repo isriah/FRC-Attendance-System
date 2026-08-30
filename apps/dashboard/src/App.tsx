@@ -5,14 +5,13 @@ import { buildClearMemberAttendanceSourceDataPayload, clearMemberAttendanceConfi
 import { fingerLabelOptions, fingerprintEnrollmentName, fingerprintOwnerNavigation, nextAvailableFingerprintSlot, normalizeFingerLabel, type FingerprintEnrollment } from "./fingerprintEnrollment";
 import { formatDateTime, formatTime, localTimeInputValue } from "./timeFormat";
 import { publicDocsUrl } from "./publicDocs";
+import { kioskCommandHistoryToggleLabel, type KioskCommandAction, type KioskCommandRow, type KioskCommandStatus, visibleKioskCommands } from "./kioskCommands";
 import "./styles.css";
 
 type Tab = "overview" | "roster" | "admins" | "meetings" | "contests" | "kiosks" | "events" | "reports" | "export" | "docs";
 type RosterViewTab = "active" | "deactivated" | "import";
 type MeetingViewTab = "calendar" | "all" | "form";
 type ThemeMode = "themed" | "light" | "dark";
-type KioskCommandAction = "restart_display" | "restart_services" | "reboot_system";
-type KioskCommandStatus = "pending" | "running" | "completed" | "failed";
 type KioskHealthStatus = "online" | "degraded" | "offline" | "unknown";
 
 interface MemberRow {
@@ -37,18 +36,6 @@ interface KioskRow {
   pending_scan_count?: number;
   last_sync_at?: string;
   last_sync_error?: string;
-}
-
-interface KioskCommandRow {
-  id: string;
-  kioskId: string;
-  action: KioskCommandAction;
-  status: KioskCommandStatus;
-  requestedBy?: string;
-  requestedAt: string;
-  claimedAt?: string;
-  completedAt?: string;
-  message?: string;
 }
 
 interface AdminUserRow {
@@ -2841,6 +2828,7 @@ function Kiosks({ session }: { session: DashboardSession }) {
   const { data: commands, error: commandError, reload: reloadCommands } = useApi<{ commands: KioskCommandRow[] }>("/admin/kiosk-commands?limit=75", session);
   const [commandMessages, setCommandMessages] = useState<Record<string, { kind: "success" | "error"; text: string }>>({});
   const [runningCommand, setRunningCommand] = useState<string>();
+  const [expandedCommandHistory, setExpandedCommandHistory] = useState<Record<string, boolean>>({});
   const commandsByKiosk = groupCommandsByKiosk(commands?.commands ?? []);
 
   async function sendCommand(kiosk: KioskRow, action: KioskCommandAction) {
@@ -2890,6 +2878,7 @@ function Kiosks({ session }: { session: DashboardSession }) {
           <tbody>
             {(data?.kiosks ?? []).map((kiosk) => {
               const recentCommands = commandsByKiosk[kiosk.kiosk_id] ?? [];
+              const commandHistoryExpanded = expandedCommandHistory[kiosk.kiosk_id] ?? false;
               return (
                 <tr key={kiosk.kiosk_id}>
                   <td>{kiosk.kiosk_id}</td>
@@ -2913,7 +2902,11 @@ function Kiosks({ session }: { session: DashboardSession }) {
                       const commandMessage = commandMessages[kiosk.kiosk_id];
                       return commandMessage ? <p className={`notice ${commandMessage.kind}`}>{commandMessage.text}</p> : null;
                     })()}
-                    <CommandTimeline commands={recentCommands.slice(0, 4)} />
+                    <CommandTimeline
+                      commands={recentCommands}
+                      expanded={commandHistoryExpanded}
+                      onExpandedChange={() => setExpandedCommandHistory((history) => ({ ...history, [kiosk.kiosk_id]: !commandHistoryExpanded }))}
+                    />
                   </td>
                 </tr>
               );
@@ -2942,11 +2935,15 @@ function KioskHealthSummary({ kiosk }: { kiosk: KioskRow }) {
   );
 }
 
-function CommandTimeline({ commands }: { commands: KioskCommandRow[] }) {
+function CommandTimeline({ commands, expanded, onExpandedChange }: { commands: KioskCommandRow[]; expanded: boolean; onExpandedChange: () => void }) {
   if (commands.length === 0) return <p className="empty-state">No recent commands.</p>;
+  const toggleLabel = kioskCommandHistoryToggleLabel(commands, expanded);
+  const visibleCommands = visibleKioskCommands(commands, expanded);
+  const historyId = `command-history-${commands[0]?.kioskId}`;
   return (
-    <div className="command-list">
-      {commands.map((command) => (
+    <div className="command-history">
+      <div id={historyId} className="command-list">
+      {visibleCommands.map((command) => (
         <article key={command.id} className="command-row">
           <div>
             <strong>{commandLabel(command.action)}</strong>
@@ -2956,6 +2953,8 @@ function CommandTimeline({ commands }: { commands: KioskCommandRow[] }) {
           {command.message ? <p>{command.message}</p> : null}
         </article>
       ))}
+      </div>
+      {toggleLabel ? <button type="button" className="command-history-toggle" aria-expanded={expanded} aria-controls={historyId} onClick={onExpandedChange}>{toggleLabel}</button> : null}
     </div>
   );
 }

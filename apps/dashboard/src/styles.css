@@ -1107,15 +1107,19 @@ pre {
   color: var(--danger-color);
 }
 
+.command-history {
+  margin-top: 8px;
+  min-width: 0;
+}
+
 .command-list {
   display: grid;
   gap: 8px;
-  margin-top: 8px;
 }
 
 .command-row {
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
   align-items: start;
   border: 1px solid var(--border-color);
@@ -1139,6 +1143,12 @@ pre {
 .command-row p {
   grid-column: 1 / -1;
   margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.command-history-toggle {
+  margin-top: 8px;
+  padding: 6px 9px;
 }
 
 .empty-state {
