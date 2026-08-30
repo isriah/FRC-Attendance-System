@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -229,6 +229,17 @@ describe("display state acknowledgements", () => {
       const baseUrl = `http://127.0.0.1:${port}`;
       expect((await fetch(`${baseUrl}/kiosk/wifi-networks`)).status).toBe(403);
 
+      const preflight = await fetch(`${baseUrl}/kiosk/wifi-networks`, {
+        method: "OPTIONS",
+        headers: {
+          "access-control-request-method": "GET",
+          "access-control-request-headers": "x-frc-network-session, x-frc-network-offline-bootstrap"
+        }
+      });
+      expect(preflight.status).toBe(204);
+      expect(preflight.headers.get("access-control-allow-headers")).toContain("x-frc-network-session");
+      expect(preflight.headers.get("access-control-allow-headers")).toContain("x-frc-network-offline-bootstrap");
+
       const setup = await fetch(`${baseUrl}/kiosk/network-pin/configure`, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -241,7 +252,55 @@ describe("display state acknowledgements", () => {
       const authorized = await fetch(`${baseUrl}/kiosk/wifi-networks`, { headers: { "x-frc-network-session": networkSession } });
       expect(authorized.status).toBe(200);
       expect(await authorized.json()).toEqual([{ ssid: "Team WiFi", secured: true, active: false }]);
+
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        const wrongPin = await fetch(`${baseUrl}/kiosk/network-pin/verify`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ pin: "654321" })
+        });
+        expect(wrongPin.status).toBe(400);
+        if (attempt === 4) expect(await wrongPin.text()).toContain("Too many incorrect PIN attempts");
+      }
+
+      const cooledDown = await fetch(`${baseUrl}/kiosk/network-pin/verify`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ pin: "123456" })
+      });
+      expect(cooledDown.status).toBe(400);
+      expect(await cooledDown.text()).toContain("Try the network settings PIN again in a moment");
     } finally {
+      server.stop();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("expires verified PIN sessions after five minutes", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "frc-network-session-expiry-"));
+    const port = 18990;
+    const server = new DisplayStateServer({
+      status: async () => ({ connected: true }),
+      listWifi: async () => [],
+      connectWifi: async () => undefined
+    }, join(directory, "network-pin.json"));
+    const now = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
+    server.start(port);
+
+    try {
+      const baseUrl = `http://127.0.0.1:${port}`;
+      const setup = await fetch(`${baseUrl}/kiosk/network-pin/configure`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ pin: "123456", confirmation: "123456" })
+      });
+      const { networkSession } = await setup.json() as { networkSession: string };
+      now.mockReturnValue(1_300_001);
+
+      const expired = await fetch(`${baseUrl}/kiosk/wifi-networks`, { headers: { "x-frc-network-session": networkSession } });
+      expect(expired.status).toBe(403);
+    } finally {
+      now.mockRestore();
       server.stop();
       await rm(directory, { recursive: true, force: true });
     }
