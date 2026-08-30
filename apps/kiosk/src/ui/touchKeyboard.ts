@@ -8,6 +8,7 @@ export interface KeyboardKey {
 }
 
 export const letterRows: KeyboardKey[][] = [
+  [..."1234567890"].map((value) => ({ value, className: "keyboard-key-number" })),
   [..."qwertyuiop"].map((value) => ({ value })),
   [..."asdfghjkl"].map((value) => ({ value })),
   [

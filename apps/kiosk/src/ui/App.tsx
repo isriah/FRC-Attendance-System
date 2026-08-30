@@ -283,7 +283,7 @@ function NetworkSettings({ required, status, networks, selected, password, error
           <div className="wifi-browser-heading"><h3>Available networks</h3><button type="button" className="refresh-button" onClick={onRefresh}>Refresh</button></div>
           <div className="wifi-list">
             {networks.length ? networks.map((network) => <button type="button" key={network.ssid} className={network.ssid === selected?.ssid ? "selected" : ""} onClick={() => onSelect(network)}>
-              <span>{network.ssid}</span><small>{network.active ? "Connected" : `${network.signal ?? "?"}%${network.secured ? " · secured" : ""}`}</small>
+              <span>{network.ssid}</span><small className="wifi-network-meta">{network.active ? "Connected" : <><span>{network.signal ?? "?"}%</span>{network.secured && <span className="wifi-network-lock" role="img" aria-label="Password protected">🔒</span>}</>}</small>
             </button>) : <p className="empty-network-list">No Wi-Fi networks found yet.</p>}
           </div>
         </section>
