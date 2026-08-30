@@ -124,6 +124,7 @@ npm --workspace <package> run <script>
 - Preserve offline queue behavior when changing API sync, cloud backend, kiosk service, or network error handling.
 - Preserve the fingerprint architecture: application code should work with match results, local template slots, and member mappings. Do not add backend storage for raw fingerprint scans or fingerprint templates.
 - Keep kiosk and dashboard styling within the lightweight primary/accent color system. Prefer existing CSS variables and state classes over hard-coded one-off colors.
+- Keep dashboard UI rhythm consistent: use the shared control heights and spacing tokens, align form actions to the control baseline, and use the shared heading/subtitle treatment. Do not introduce one-off control sizes, negative text margins, or ad-hoc panel gaps without a documented exception.
 - Do not hard-code production secrets, OAuth values, kiosk tokens, or environment-specific deployment config in source.
 - Do not overwrite local roster data, fingerprint mappings, or SQLite cache files unless the user explicitly asks.
 

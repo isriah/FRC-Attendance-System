@@ -19,6 +19,11 @@ body,
   --danger-color: color-mix(in srgb, var(--accent-color), #8b0000 58%);
   --danger-soft: color-mix(in srgb, var(--danger-color), #ffffff 74%);
   --danger-bg: color-mix(in srgb, var(--danger-color), #ffffff 92%);
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
   color-scheme: light;
   width: 100%;
   min-height: 100%;
@@ -76,7 +81,8 @@ button {
   border-radius: 6px;
   background: var(--surface-bg);
   color: var(--text-color);
-  padding: 10px 14px;
+  min-height: 40px;
+  padding: 9px 14px;
   cursor: pointer;
 }
 
@@ -118,9 +124,25 @@ aside h1 {
   margin: 0 0 16px;
 }
 
+h2,
 h3 {
-  font-size: 18px;
-  margin: 18px 0 10px;
+  line-height: 1.25;
+  margin: 0;
+}
+
+h2 {
+  font-size: 20px;
+  letter-spacing: -0.01em;
+}
+
+h3 {
+  font-size: 17px;
+}
+
+h4 {
+  font-size: 15px;
+  line-height: 1.3;
+  margin: 0;
 }
 
 .content {
@@ -179,12 +201,19 @@ h3 {
   width: 100%;
 }
 
-header,
-.toolbar {
+header {
   display: flex;
   gap: 12px;
   align-items: center;
   margin-bottom: 20px;
+}
+
+.toolbar {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  margin: 0;
+  min-width: 0;
 }
 
 header {
@@ -220,6 +249,15 @@ section,
   min-width: 0;
 }
 
+section {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.content {
+  display: block;
+}
+
 section + section {
   margin-top: 18px;
 }
@@ -227,7 +265,11 @@ section + section {
 .grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 16px;
+  gap: var(--space-4);
+}
+
+.grid:not(.compact-grid) {
+  margin-bottom: var(--space-4);
 }
 
 .compact-grid {
@@ -254,6 +296,12 @@ textarea {
   color: var(--text-color);
   box-sizing: border-box;
   min-width: 0;
+}
+
+input,
+select {
+  min-height: 40px;
+  line-height: 1.2;
 }
 
 textarea {
@@ -290,14 +338,24 @@ textarea {
 
 .field-label {
   display: grid;
-  gap: 4px;
+  gap: 6px;
   color: var(--muted-color);
   font-size: 12px;
   font-weight: 600;
+  line-height: 1.2;
 }
 
 .field-label input {
   width: 100%;
+}
+
+.toolbar .field-label {
+  flex: 0 0 auto;
+  width: fit-content;
+}
+
+.toolbar .field-label select {
+  width: auto;
 }
 
 .wide-field input {
@@ -404,11 +462,13 @@ textarea {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 14px;
+  margin: 0;
 }
 
-.section-heading h2 {
-  margin: 0;
+.section-heading > div:first-child {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
 }
 
 .meeting-table-wrap {
@@ -668,6 +728,8 @@ textarea {
 .meeting-details {
   border: 1px solid var(--border-color);
   border-radius: 8px;
+  display: grid;
+  gap: var(--space-4);
   padding: 14px;
   margin-bottom: 16px;
   min-width: 0;
@@ -684,10 +746,6 @@ textarea {
   gap: 8px;
   justify-content: flex-end;
   min-width: 0;
-}
-
-.meeting-details h3 {
-  margin-top: 0;
 }
 
 .meeting-detail-grid {
@@ -927,7 +985,8 @@ textarea {
 .report-context {
   color: var(--muted-color);
   font-size: 14px;
-  margin: -8px 0 16px;
+  line-height: 1.45;
+  margin: 0;
 }
 
 .slot-suggestion {
@@ -1010,6 +1069,7 @@ pre {
 }
 
 .kiosk-actions button {
+  min-height: 34px;
   padding: 8px 10px;
   white-space: nowrap;
 }
@@ -1062,8 +1122,8 @@ pre {
 }
 
 .meeting-contests {
-  margin-top: 1rem;
-  padding-top: 1rem;
+  margin: 0;
+  padding-top: var(--space-4);
   border-top: 1px solid var(--border-color);
 }
 
@@ -1074,7 +1134,7 @@ pre {
 }
 
 .contest-row p {
-  margin: 10px 0;
+  margin: 0;
 }
 
 .contest-summary {
@@ -1165,6 +1225,7 @@ pre {
 }
 
 .compact-table button {
+  min-height: 34px;
   padding: 7px 9px;
 }
 
@@ -1175,6 +1236,7 @@ pre {
 }
 
 .table-actions button {
+  min-height: 34px;
   padding: 7px 9px;
 }
 
