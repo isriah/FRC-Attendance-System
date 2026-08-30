@@ -532,8 +532,10 @@ describe("report builders", () => {
       "2026-01-02T20:00:00.000Z",
       "2026-01-02T23:00:00.000Z"
     );
+    insertSession(env, "100001", "2026-01-02", "2026-01-02T20:05:00.000Z", null, "open");
 
     const report = await buildMeetingAbsenceReport(env, "2026-01-02", new Date("2026-01-02T22:30:00.000Z"));
+    const presence = await buildPresenceReport(env, "2026-01-02");
 
     expect(report).toMatchObject({
       meetingDate: "2026-01-02",
@@ -542,6 +544,7 @@ describe("report builders", () => {
       absentCount: 0,
       rows: []
     });
+    expect(presence.rows.find((row) => row.memberId === "100001")).toMatchObject({ status: "signed_in" });
   });
 
   it("excludes optional scheduled meetings from roster attendance percentages", async () => {
