@@ -123,6 +123,23 @@ Both tracks should make the optional nature of integrations clear, document the
 single-kiosk fingerprint-first scope, and use organization-neutral terminology
 from the outset.
 
+### Confirmed documentation accessibility standard
+
+The community release must be deployable by non-technical school or club staff.
+At first use, operations documentation must define unfamiliar concepts in
+concise plain language, including Cloudflare, Worker, D1 database, web
+dashboard, kiosk, pairing, and secrets.
+
+Operations instructions must be task-oriented and include prerequisites,
+screenshots or visual cues where they materially help, an expected-success
+check after each major step, and safe troubleshooting and recovery paths. An
+easy glossary must be available for terms a new administrator may encounter.
+
+Avoid unexplained acronyms, assumed command-line knowledge, verbose AI-style
+exposition, and duplicating technical internals in the operations guide. Keep
+deeper architecture and implementation reference material in the separate
+technical track.
+
 ## Snapshot Release Checklist
 
 Before creating the future standalone snapshot:
@@ -144,6 +161,11 @@ Before creating the future standalone snapshot:
   installation using only the sanitized snapshot and public instructions.
 - [ ] Verify basic offline fingerprint attendance without email, Discord, Google
   OAuth, or captive-portal authentication.
+- [ ] Confirm release documentation meets the accessibility standard: a
+  non-technical school or club administrator can complete deployment with
+  plain-language definitions at first use, task-oriented prerequisites and
+  success checks, useful visual cues, safe recovery guidance, and a glossary;
+  detailed technical internals remain in the technical documentation.
 - [ ] Review the release candidate for privacy, security, accessibility, and
   contributor-readiness before publication.
 
@@ -193,3 +215,4 @@ These are suggestions, not approved implementation work.
 | 2026-08-30 | Confirmed | First release is single-kiosk only. Advanced multi-kiosk operation and biometric/template synchronization are explicitly deferred. |
 | 2026-08-30 | Confirmed | Fingerprints are the primary first-release sign-in method; non-biometric sign-in is explicitly deferred. |
 | 2026-08-30 | Confirmed | First-release theming is customized headers, primary/secondary themed colors, and global light/dark modes only. Broad terminology overrides and expansive theming are explicitly deferred. |
+| 2026-08-30 | Confirmed | Release operations documentation must enable non-technical school or club staff to deploy safely through plain language, task-oriented steps, success checks, recovery guidance, visual cues where useful, and a glossary; deeper technical reference stays separate. |
