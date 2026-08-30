@@ -36,6 +36,8 @@ entry explicitly replaces one.
 - First-release theming is limited to customized headers plus primary and
   secondary colors for themed mode, and global light/dark modes. Broad
   terminology overrides and expansive theming are deferred.
+- Provide guided, persistent, resumable onboarding after first administrator
+  login; its detailed wizard UX and data model are future design work.
 - Publish documentation in distinct operations and technical tracks.
 
 ## Product Principles
@@ -101,12 +103,43 @@ External integrations are optional setup steps, not prerequisites for basic
 offline attendance. The first-release attendance flow is fingerprint sign-in on
 the single paired kiosk.
 
+### Confirmed dashboard onboarding requirement
+
+After first administrator login, the dashboard must guide setup with a durable
+checklist. It must be resumable over minutes or multiple days/sessions, retain
+progress across administrators, and guide a non-technical user from the public
+operations guide through deployment to opening the dashboard.
+
+The recommended core checklist is:
+
+1. Set organization, header, and theme branding.
+2. Add or import the initial members.
+3. Prepare and pair one kiosk.
+4. Enroll and test a fingerprint.
+5. Create a test attendance event.
+6. Verify a complete test attendance cycle.
+
+Email, Discord, and captive-portal integrations must appear separately as
+optional, safely skippable steps. Use verified or derived completion where
+possible; otherwise persist an explicit administrator completion record with a
+timestamp and audit metadata.
+
+Until core onboarding is complete, show a concise resume-next-step surface. It
+must not block normal dashboard navigation, require one sitting, or use a
+one-time-modal pattern. After completion, do not repeatedly present onboarding;
+instead keep a non-intrusive **Setup/Help** entry for reviewing it, success
+checks, and recovery guidance.
+
 ### Suggestions to validate later
 
-- Offer a command-line guided installer first, with a browser-based setup
-  assistant only if it reduces rather than obscures Cloudflare account setup.
+- Choose a guided installer that does not assume command-line knowledge; use a
+  browser-based assistant when it reduces rather than obscures Cloudflare
+  account setup.
 - Make setup resumable and clearly distinguish required steps from optional
   integrations and hardware features.
+- Design the detailed onboarding wizard interaction, completion data model,
+  verification signals, and audit retention; this is future design work, not
+  current implementation work.
 
 ## Documentation Plan
 
@@ -166,6 +199,10 @@ Before creating the future standalone snapshot:
   plain-language definitions at first use, task-oriented prerequisites and
   success checks, useful visual cues, safe recovery guidance, and a glossary;
   detailed technical internals remain in the technical documentation.
+- [ ] Confirm the first-login dashboard provides persistent, cross-admin,
+  resumable onboarding for the core checklist; optional integrations are safely
+  skippable, completion is verified/derived or auditable, normal navigation is
+  never blocked, and completed onboarding remains available through Setup/Help.
 - [ ] Review the release candidate for privacy, security, accessibility, and
   contributor-readiness before publication.
 
@@ -216,3 +253,4 @@ These are suggestions, not approved implementation work.
 | 2026-08-30 | Confirmed | Fingerprints are the primary first-release sign-in method; non-biometric sign-in is explicitly deferred. |
 | 2026-08-30 | Confirmed | First-release theming is customized headers, primary/secondary themed colors, and global light/dark modes only. Broad terminology overrides and expansive theming are explicitly deferred. |
 | 2026-08-30 | Confirmed | Release operations documentation must enable non-technical school or club staff to deploy safely through plain language, task-oriented steps, success checks, recovery guidance, visual cues where useful, and a glossary; deeper technical reference stays separate. |
+| 2026-08-30 | Confirmed | First-login dashboard onboarding is persistent and resumable across administrators and sessions, with a concise non-blocking next step until the core checklist completes; detailed wizard UX and completion data-model design remain future work. |
