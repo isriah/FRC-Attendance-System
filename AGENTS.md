@@ -35,6 +35,12 @@ At session start, agents should:
   - `docs/OPERATIONS.md` for Cloudflare, API deployment, dashboard deployment, bench API, auth, roster sync, or kiosk provisioning.
   - `docs/PI-SETUP.md` for Raspberry Pi services, display/browser autostart, UART, fingerprint hardware, or service restarts.
 - Prefer inspecting files, commit history, and deployed/local state directly over carrying forward a long chat transcript.
+- For every new Codex worktree, run the child-worktree preflight before editing or running any workspace script:
+  1. Check `git status --short --branch`, then refresh/inspect `origin/main`.
+  2. Create and switch to a dedicated `codex/<focused-task>` branch from current `origin/main` immediately. Do not implement from a detached HEAD.
+  3. Run root `npm.cmd ci` before invoking `npm`, Vite, Vitest, TypeScript, or build scripts. Do not work around a missing root install with a partial app-local install or copied `node_modules`.
+  4. Before committing, reconcile the branch with current `origin/main` and resolve conflicts deliberately. Implementation tasks push only their own `codex/` branch; a review/merge task is the only task permitted to fast-forward `main` and push it.
+- If the preflight cannot complete, report the exact blocker before code changes rather than continuing with a partial dependency tree or detached worktree.
 - Keep each session focused on one discrete unit of work. If the next task is unrelated, start a fresh session with the short kickoff above.
 - When a director session is coordinating delegated child sessions, it should automatically review, merge, verify, push, deploy, update the Pi, smoke-test, document, and archive completed child work unless a real blocker appears: failed verification, destructive production data mutation, secrets/config uncertainty, or an unresolved product decision.
 - When creating a Codex child task, a director should use `gpt-5.6-terra` with medium reasoning effort by default. Use a different model or effort only when the user explicitly requests it.
