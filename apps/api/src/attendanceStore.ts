@@ -104,7 +104,7 @@ export async function removeMemberFromMeeting(env: Env, input: { memberId: strin
   if (!member) throw Object.assign(new Error("Member not found"), { status: 404 });
 
   const sessions = await env.DB.prepare(
-    "SELECT source_event_ids FROM attendance_sessions WHERE student_id = ? AND meeting_date = ?"
+    "SELECT source_event_ids FROM attendance_sessions WHERE student_id = ? AND meeting_date = ? AND check_out_at IS NOT NULL"
   ).bind(input.memberId, meetingDate).all<{ source_event_ids: string }>();
   if (sessions.results.length === 0) throw Object.assign(new Error("Member is not present for this meeting"), { status: 409 });
 
@@ -139,7 +139,7 @@ export async function excuseMemberFromMeeting(env: Env, input: { memberId: strin
   const [member, meeting, present, existing] = await Promise.all([
     env.DB.prepare("SELECT first_name, last_name FROM students WHERE student_id = ?").bind(input.memberId).first<{ first_name: string; last_name: string }>(),
     env.DB.prepare("SELECT title FROM scheduled_meetings WHERE meeting_date = ?").bind(meetingDate).first<{ title: string }>(),
-    env.DB.prepare("SELECT id FROM attendance_sessions WHERE student_id = ? AND meeting_date = ?").bind(input.memberId, meetingDate).first<{ id: string }>(),
+    env.DB.prepare("SELECT id FROM attendance_sessions WHERE student_id = ? AND meeting_date = ? AND check_out_at IS NOT NULL").bind(input.memberId, meetingDate).first<{ id: string }>(),
     env.DB.prepare("SELECT id FROM attendance_excuses WHERE student_id = ? AND meeting_date = ? AND removed_at IS NULL").bind(input.memberId, meetingDate).first<{ id: string }>()
   ]);
   if (!member) throw Object.assign(new Error("Member not found"), { status: 404 });

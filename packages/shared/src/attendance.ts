@@ -2,6 +2,11 @@ import type { AttendanceSession, ManualEvent, ScanEvent } from "./types";
 
 export const DEFAULT_DUPLICATE_WINDOW_MS = 90_000;
 
+/** A closed scan pair, or an audited mentor confirmation, earns attendance credit. */
+export function hasAttendanceCredit(session: Pick<AttendanceSession, "status">): boolean {
+  return session.status === "closed";
+}
+
 export function meetingDateForTimestamp(isoTimestamp: string, timeZone = "America/New_York"): string {
   const date = new Date(isoTimestamp);
   if (Number.isNaN(date.getTime())) throw new Error(`Invalid timestamp: ${isoTimestamp}`);
@@ -108,6 +113,10 @@ export function deriveAttendanceSessions(
     const last = lastByMemberDate.get(key);
     if (last) {
       last.sourceEventIds.push(event.id);
+      if (last.status === "open") {
+        last.checkOutAt = event.occurredAt;
+        last.status = "closed";
+      }
       continue;
     }
     const session: AttendanceSession = {
@@ -115,7 +124,8 @@ export function deriveAttendanceSessions(
       memberId: event.memberId,
       meetingDate,
       checkInAt: event.occurredAt,
-      status: "open",
+      checkOutAt: event.occurredAt,
+      status: "closed",
       sourceEventIds: [event.id]
     };
     sessions.push(session);

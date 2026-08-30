@@ -382,7 +382,7 @@ export async function contestAttendanceAbsence(
   const attendance = await env.DB.prepare(`
     SELECT id
     FROM attendance_sessions
-    WHERE student_id = ? AND meeting_date = ?
+    WHERE student_id = ? AND meeting_date = ? AND check_out_at IS NOT NULL
     LIMIT 1
   `).bind(member.student_id, parsed.meetingDate).first<{ id: string }>();
   if (attendance) return { status: "already_present" };
@@ -461,7 +461,7 @@ export async function approveAttendanceContest(
   }
 
   const currentSession = await env.DB.prepare(
-    "SELECT id FROM attendance_sessions WHERE student_id = ? AND meeting_date = ? LIMIT 1"
+    "SELECT id FROM attendance_sessions WHERE student_id = ? AND meeting_date = ? AND check_out_at IS NOT NULL LIMIT 1"
   ).bind(existing.memberId, existing.meetingDate).first<{ id: string }>();
   if (currentSession) {
     throw Object.assign(new Error("Attendance already shows this member present; mark the contest reviewed without an attendance change"), { status: 409 });
@@ -496,6 +496,7 @@ export async function approveAttendanceContest(
           FROM attendance_sessions
           WHERE student_id = attendance_contests.student_id
             AND meeting_date = attendance_contests.meeting_date
+            AND check_out_at IS NOT NULL
         )
     `).bind(manualEventId, occurredAt, correctionReason, admin.email, contestId),
     env.DB.prepare(`
@@ -531,7 +532,7 @@ export async function approveAttendanceContest(
   if (!manualEvent) {
     const latestContest = await getAttendanceContest(env, contestId);
     const latestSession = await env.DB.prepare(
-      "SELECT id FROM attendance_sessions WHERE student_id = ? AND meeting_date = ? LIMIT 1"
+      "SELECT id FROM attendance_sessions WHERE student_id = ? AND meeting_date = ? AND check_out_at IS NOT NULL LIMIT 1"
     ).bind(existing.memberId, existing.meetingDate).first<{ id: string }>();
     const message = latestContest?.status !== "pending"
       ? "Attendance contest was reviewed by another admin before approval completed"

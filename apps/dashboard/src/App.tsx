@@ -1663,7 +1663,8 @@ function Meetings({ session, onOpenMember }: { session: DashboardSession; onOpen
     selectedMeeting ? `/admin/attendance-contests?meetingDate=${encodeURIComponent(selectedMeeting.meetingDate)}` : undefined,
     session
   );
-  const presentRows = (selectedPresence?.rows ?? []).filter((row) => row.status === "signed_in" || row.status === "signed_out");
+  const presentRows = (selectedPresence?.rows ?? []).filter((row) => row.status === "signed_out");
+  const openRows = (selectedPresence?.rows ?? []).filter((row) => row.status === "signed_in");
   const existingMeetingDates = new Set(meetings.map((meeting) => meeting.meetingDate));
   const recurringPreview = formState.repeats ? previewRecurringMeetings(formState, existingMeetingDates) : undefined;
 
@@ -2192,6 +2193,7 @@ function Meetings({ session, onOpenMember }: { session: DashboardSession; onOpen
               presence={selectedPresence}
               absences={selectedAbsences}
               presentRows={presentRows}
+              openRows={openRows}
               presenceError={selectedPresenceError}
               absencesError={selectedAbsencesError}
                 saving={saving}
@@ -2470,6 +2472,7 @@ function MeetingDetails({
   presence,
   absences,
   presentRows,
+  openRows,
   presenceError,
   absencesError,
   saving,
@@ -2499,6 +2502,7 @@ function MeetingDetails({
   presence?: PresenceReport;
   absences?: MeetingAbsenceReport;
   presentRows: Array<Record<string, unknown>>;
+  openRows: Array<Record<string, unknown>>;
   presenceError?: string;
   absencesError?: string;
   saving: boolean;
@@ -2534,12 +2538,16 @@ function MeetingDetails({
     checkInAt: typeof row.checkInAt === "string" ? formatTime(row.checkInAt) : row.checkInAt,
     checkOutAt: typeof row.checkOutAt === "string" ? formatTime(row.checkOutAt) : row.checkOutAt
   }));
+  const meetingOpenRows = openRows.map((row) => ({
+    ...row,
+    checkInAt: typeof row.checkInAt === "string" ? formatTime(row.checkInAt) : row.checkInAt
+  }));
   const absentRows = absences?.rows ?? [];
   const notRequiredRows = absences?.notRequiredRows ?? [];
   const presentStateText = presence
     ? meetingPresentRows.length === 0
-      ? "No members have checked in for this meeting yet."
-      : `${pluralize(meetingPresentRows.length, "member")} checked in for this meeting.`
+      ? "No members have earned attendance credit for this meeting yet."
+      : `${pluralize(meetingPresentRows.length, "member")} earned attendance credit for this meeting.`
     : "Loading present members...";
   const absentStateText = attendanceOnly
     ? "Convert this attendance-only date into a scheduled meeting to track required or optional attendance."
@@ -2583,7 +2591,7 @@ function MeetingDetails({
         {attendanceOnly
           ? "Attendance exists for this date, but no scheduled meeting label has been created yet."
           : required
-          ? "Required meetings count active members only on or after each member's attendance start date."
+          ? "A completed check-in/check-out pair earns attendance credit. Open check-ins remain signed in until checkout; after the meeting ends they are absent until resolved."
           : "Optional meetings show who attended, but do not create missed-meeting counts."}
       </p>
       <div className="grid compact-grid">
@@ -2630,6 +2638,16 @@ function MeetingDetails({
             onClearMemberAttendanceData={onClearMemberAttendanceData}
             actionsDisabled={saving}
           />
+          {meetingOpenRows.length > 0 ? (
+            <>
+              <div className="meeting-detail-subheading">
+                <h3>Currently Signed In</h3>
+                <span>{meetingOpenRows.length}</span>
+              </div>
+              <p className="empty-state">These members have checked in but have not checked out, so they do not have attendance credit yet.</p>
+              <DataTable rows={meetingOpenRows} columns={["memberId", "firstName", "lastName", "checkInAt"]} density="compact" onOpenMember={onOpenMember} />
+            </>
+          ) : null}
         </div>
         <div>
           <div className="meeting-detail-subheading">

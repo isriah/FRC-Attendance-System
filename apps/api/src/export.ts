@@ -4,12 +4,12 @@ import { buildMeetingAbsenceReport, buildMeetingSummaryReport, buildRosterAttend
 export async function buildLegacySheetExport(env: Env, range: ReportDateRange = {}) {
   const sessions = await env.DB.prepare(
     `
-      SELECT student_id, meeting_date, check_in_at, check_out_at
+      SELECT student_id, meeting_date, check_in_at, check_out_at, status
       FROM attendance_sessions
       ${whereDateRange("meeting_date", range)}
       ORDER BY student_id, meeting_date
     `
-  ).bind(...dateRangeParams(range)).all<{ student_id: string; meeting_date: string; check_in_at: string; check_out_at: string | null }>();
+  ).bind(...dateRangeParams(range)).all<{ student_id: string; meeting_date: string; check_in_at: string; check_out_at: string | null; status: "open" | "closed" }>();
   const meetings = await env.DB.prepare(
     `
       SELECT meeting_date, title, required, starts_at, ends_at
@@ -38,7 +38,7 @@ export async function buildLegacySheetExport(env: Env, range: ReportDateRange = 
       formatLegacyDate(session.meeting_date),
       formatLegacyTime(session.check_out_at as string)
     ]);
-  const sessionCountsByDate = sessions.results.reduce<Map<string, number>>((counts, session) => {
+  const sessionCountsByDate = sessions.results.filter((session) => session.status !== "open").reduce<Map<string, number>>((counts, session) => {
     counts.set(session.meeting_date, (counts.get(session.meeting_date) ?? 0) + 1);
     return counts;
   }, new Map());

@@ -21,8 +21,8 @@ describe("kiosk sync acknowledgements", () => {
     const env = createTestEnv();
     await env.DB.prepare("INSERT INTO scheduled_meetings (id, meeting_date, title, required, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)")
       .bind("meeting-1", "2026-01-09", "Build", 1, "2026-01-01", "2026-01-01").run();
-    await env.DB.prepare("INSERT INTO attendance_sessions (id, student_id, meeting_date, check_in_at, status, source_event_ids, rebuilt_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
-      .bind("session-1", "100001", "2026-01-09", "2026-01-09T20:00:00.000Z", "open", "[]", "2026-01-09T20:00:00.000Z").run();
+    await env.DB.prepare("INSERT INTO attendance_sessions (id, student_id, meeting_date, check_in_at, check_out_at, status, source_event_ids, rebuilt_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+      .bind("session-1", "100001", "2026-01-09", "2026-01-09T20:00:00.000Z", "2026-01-09T22:00:00.000Z", "closed", "[]", "2026-01-09T20:00:00.000Z").run();
     await expect(excuseMemberFromMeeting(env, { memberId: "100001", meetingDate: "2026-01-09", adminEmail: "mentor@example.org" })).rejects.toMatchObject({ status: 409 });
   });
   it("returns welcome and goodbye acknowledgements for remote kiosk scans", async () => {
@@ -42,9 +42,9 @@ describe("kiosk sync acknowledgements", () => {
       displayName: "Bench Student",
       action: "check_in",
       kioskMessage: "Welcome, Bench Student",
-      kioskDetail: "Checked in at 3:00 PM. Attendance 100% (1/1)",
+      kioskDetail: "Checked in at 3:00 PM. Attendance 0% (0/1)",
       message: "Welcome, Bench Student",
-      attendanceSummary: "Attendance 100% (1/1)"
+      attendanceSummary: "Attendance 0% (0/1)"
     });
 
     const second = await syncKioskEvents(env, "bench-01", [{
@@ -128,7 +128,7 @@ describe("kiosk sync acknowledgements", () => {
       status: "accepted",
       kioskMessage: "Welcome, Bench Student",
       kioskDetail: "Checked in at 3:00 PM.",
-      attendanceSummary: "Attendance 100% (1/1)"
+      attendanceSummary: "Attendance 0% (0/1)"
     });
   });
 
@@ -759,6 +759,12 @@ describe("kiosk sync acknowledgements", () => {
       occurredAt: "2026-01-02T20:00:00.000Z",
       source: "fingerprint"
     }]);
+    await syncKioskEvents(env, "bench-01", [{
+      localEventId: "original-checkout",
+      memberId: "100001",
+      occurredAt: "2026-01-02T22:00:00.000Z",
+      source: "fingerprint"
+    }]);
     await removeMemberFromMeeting(env, {
       memberId: "100001",
       meetingDate: "2026-01-02",
@@ -768,7 +774,7 @@ describe("kiosk sync acknowledgements", () => {
 
     await rebuildAttendanceSessions(env);
 
-    expect(await env.DB.prepare("SELECT COUNT(*) AS count FROM scan_events").first<{ count: number }>()).toEqual({ count: 1 });
+    expect(await env.DB.prepare("SELECT COUNT(*) AS count FROM scan_events").first<{ count: number }>()).toEqual({ count: 2 });
     expect(await env.DB.prepare("SELECT COUNT(*) AS count FROM attendance_sessions").first<{ count: number }>()).toEqual({ count: 0 });
     await expect(removeMemberFromMeeting(env, {
       memberId: "100001",

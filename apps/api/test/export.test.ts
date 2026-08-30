@@ -29,22 +29,23 @@ describe("legacy export", () => {
     expect(result.ranges.AttendanceLogIn).toHaveLength(1);
     expect(result.ranges.MeetingSummary).toEqual([
       ["1/3/2026", "Optional Demo", "optional", "", "", "scheduled", 0, "", 0, "zero scans"],
-      ["1/2/2026", "Build Night", "required", "", "", "scheduled", 1, 1, 1, ""]
+      ["1/2/2026", "Build Night", "required", "", "", "scheduled", 0, 2, 1, ""]
     ]);
     expect(result.ranges.MeetingAbsences).toEqual([
-      ["1/2/2026", "Build Night", "100002", "Drive", "Captain"]
+      ["1/2/2026", "Build Night", "100002", "Drive", "Captain"],
+      ["1/2/2026", "Build Night", "100001", "Bench", "Student"]
     ]);
     expect(result.ranges.RosterAttendance).toEqual([
       ["100002", "Drive", "Captain", 1, 0, 1, 0, "", ""],
-      ["100001", "Bench", "Student", 1, 1, 0, 1, "1/2/2026", "open check-in"]
+      ["100001", "Bench", "Student", 1, 0, 1, 0, "1/2/2026", "open check-in"]
     ]);
     expect(result.ranges.ScheduledMeetings).toEqual([
-      ["1/2/2026", "Build Night", "required", "", "", 1],
+      ["1/2/2026", "Build Night", "required", "", "", 0],
       ["1/3/2026", "Optional Demo", "optional", "", "", 0]
     ]);
     expect(result.ranges.MemberAttendanceSummary).toEqual([
       ["100002", "Drive", "Captain", 1, 0, 1, 0, "", ""],
-      ["100001", "Bench", "Student", 1, 1, 0, 1, "1/2/2026", "open check-in"]
+      ["100001", "Bench", "Student", 1, 0, 1, 0, "1/2/2026", "open check-in"]
     ]);
   });
 
@@ -60,10 +61,10 @@ describe("legacy export", () => {
 
     expect(result.ranges.AttendanceLogIn).toEqual([["100001", "1/9/2026", "3:00 PM"]]);
     expect(result.ranges.MeetingSummary).toEqual([
-      ["1/9/2026", "Week 2", "required", "", "", "scheduled", 1, 0, 1, ""]
+      ["1/9/2026", "Week 2", "required", "", "", "scheduled", 0, 1, 1, ""]
     ]);
     expect(result.ranges.RosterAttendance).toEqual([
-      ["100001", "Bench", "Student", 1, 1, 0, 1, "1/9/2026", "open check-in"]
+      ["100001", "Bench", "Student", 1, 0, 1, 0, "1/9/2026", "open check-in"]
     ]);
   });
 
@@ -79,10 +80,12 @@ describe("legacy export", () => {
     const result = await buildLegacySheetExport(env);
 
     expect(result.ranges.MeetingAbsences).toEqual([
-      ["1/9/2026", "Join Day", "100002", "New", "Member"]
+      ["1/9/2026", "Join Day", "100001", "Before", "Member"],
+      ["1/9/2026", "Join Day", "100002", "New", "Member"],
+      ["1/2/2026", "Before Join", "100001", "Before", "Member"]
     ]);
     expect(result.ranges.RosterAttendance).toEqual([
-      ["100001", "Before", "Member", 2, 2, 0, 1, "1/9/2026", "open check-in"],
+      ["100001", "Before", "Member", 2, 0, 2, 0, "1/9/2026", "open check-in"],
       ["100002", "New", "Member", 1, 0, 1, 0, "", ""]
     ]);
   });

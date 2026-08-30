@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deriveAttendanceSessions, isDuplicateScan, meetingDateForTimestamp } from "../src/attendance";
+import { deriveAttendanceSessions, hasAttendanceCredit, isDuplicateScan, meetingDateForTimestamp } from "../src/attendance";
 import type { ScanEvent } from "../src/types";
 
 const scan = (id: string, memberId: string, occurredAt: string): ScanEvent => ({
@@ -70,6 +70,15 @@ describe("attendance rules", () => {
     const sessions = deriveAttendanceSessions([scan("in", "123", "2026-01-01T20:00:00.000Z")]);
     expect(sessions[0]?.status).toBe("open");
     expect(sessions[0]?.checkOutAt).toBeUndefined();
+    expect(hasAttendanceCredit(sessions[0]!)).toBe(false);
+  });
+
+  it("earns credit once a later checkout closes an open session", () => {
+    const sessions = deriveAttendanceSessions([
+      scan("in", "123", "2026-01-01T20:00:00.000Z"),
+      scan("out", "123", "2026-01-01T22:00:00.000Z")
+    ]);
+    expect(hasAttendanceCredit(sessions[0]!)).toBe(true);
   });
 
   it("records a confirm-present correction without duplicating an existing session", () => {
@@ -102,7 +111,7 @@ describe("attendance rules", () => {
     expect(sessions).toEqual([expect.objectContaining({
       memberId: "123",
       meetingDate: "2026-01-01",
-      status: "open",
+      status: "closed",
       sourceEventIds: ["contest-approval"]
     })]);
   });

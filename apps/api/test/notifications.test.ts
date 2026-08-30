@@ -785,8 +785,8 @@ function insertSession(env: Env, memberId: string, meetingDate: string) {
     memberId,
     meetingDate,
     `${meetingDate}T20:00:00.000Z`,
-    null,
-    "open",
+    `${meetingDate}T22:00:00.000Z`,
+    "closed",
     "[]",
     "2026-01-10T00:00:00.000Z"
   ).run();

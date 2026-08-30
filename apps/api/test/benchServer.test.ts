@@ -51,6 +51,11 @@ describe("bench API report parity", () => {
           memberId: "100001",
           occurredAt: "2026-01-05T20:00:00.000Z",
           source: "fingerprint"
+        }, {
+          localEventId: "unscheduled-jan-05-checkout",
+          memberId: "100001",
+          occurredAt: "2026-01-05T22:00:00.000Z",
+          source: "fingerprint"
         }]
       })
     });

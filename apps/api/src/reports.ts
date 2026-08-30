@@ -221,9 +221,9 @@ export async function buildMeetingSummaryReport(env: Env, range: ReportDateRange
     env.DB.prepare(`
       SELECT
         attendance_sessions.meeting_date,
-        COUNT(DISTINCT attendance_sessions.student_id) AS present_count,
-        COUNT(DISTINCT CASE WHEN students.active = 1 THEN attendance_sessions.student_id END) AS active_present_count,
-        COUNT(DISTINCT CASE WHEN students.active = 1 AND (students.attendance_required_from_date IS NULL OR students.attendance_required_from_date <= attendance_sessions.meeting_date) THEN attendance_sessions.student_id END) AS required_present_count,
+        COUNT(DISTINCT CASE WHEN attendance_sessions.check_out_at IS NOT NULL THEN attendance_sessions.student_id END) AS present_count,
+        COUNT(DISTINCT CASE WHEN attendance_sessions.check_out_at IS NOT NULL AND students.active = 1 THEN attendance_sessions.student_id END) AS active_present_count,
+        COUNT(DISTINCT CASE WHEN attendance_sessions.check_out_at IS NOT NULL AND students.active = 1 AND (students.attendance_required_from_date IS NULL OR students.attendance_required_from_date <= attendance_sessions.meeting_date) THEN attendance_sessions.student_id END) AS required_present_count,
         SUM(CASE WHEN attendance_sessions.status = 'open' THEN 1 ELSE 0 END) AS open_check_ins
       FROM attendance_sessions
       LEFT JOIN students ON students.student_id = attendance_sessions.student_id
@@ -339,7 +339,7 @@ export async function buildMeetingAbsenceReport(env: Env, meetingDate: string, n
   const presentStudents = await env.DB.prepare(`
     SELECT DISTINCT student_id
     FROM attendance_sessions
-    WHERE meeting_date = ?
+    WHERE meeting_date = ? AND check_out_at IS NOT NULL
   `).bind(date).all<{ student_id: string }>();
   const presentIds = new Set(presentStudents.results.map((row) => row.student_id));
   const excuses = await listActiveExcusesForMeeting(env, date);
@@ -438,7 +438,7 @@ export async function buildMemberAttendanceReport(env: Env, memberId: string, ra
   const visibleSessions = sessions.results.filter((session) => range.includeUnscheduled || scheduledDates.has(session.meeting_date));
   const allDates = [...new Set(meetingDates.map((row) => row.meeting_date))];
   const allDateSet = new Set(allDates);
-  const presentDates = [...new Set(visibleSessions.map((session) => session.meeting_date))].filter((date) => allDateSet.has(date));
+  const presentDates = [...new Set(visibleSessions.filter((session) => session.status !== "open").map((session) => session.meeting_date))].filter((date) => allDateSet.has(date));
   const presentDateSet = new Set(presentDates);
   const absentDates = allDates.filter((date) => !presentDateSet.has(date));
   const activeExcuses = await listActiveExcusesForMember(env, memberId, range);
@@ -477,7 +477,7 @@ async function buildMemberScheduledMeetings(env: Env, memberId: string, now: Dat
   try {
     const [meetings, sessions] = await Promise.all([
       env.DB.prepare("SELECT meeting_date, title, required, starts_at, ends_at FROM scheduled_meetings ORDER BY meeting_date DESC").all<{ meeting_date: string; title: string; required: number; starts_at: string | null; ends_at: string | null }>(),
-      env.DB.prepare("SELECT meeting_date FROM attendance_sessions WHERE student_id = ?").bind(memberId).all<{ meeting_date: string }>()
+      env.DB.prepare("SELECT meeting_date FROM attendance_sessions WHERE student_id = ? AND check_out_at IS NOT NULL").bind(memberId).all<{ meeting_date: string }>()
     ]);
     const presentDates = new Set(sessions.results.map((row) => row.meeting_date));
     return meetings.results.map((meeting) => {

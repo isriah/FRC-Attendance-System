@@ -705,9 +705,9 @@ function insertMeeting(env: Env, meetingDate: string, endsAt: string) {
 
 function insertSession(env: Env, memberId: string, meetingDate: string) {
   return env.DB.prepare(`
-    INSERT INTO attendance_sessions (id, student_id, meeting_date, check_in_at, status, source_event_ids, rebuilt_at)
-    VALUES (?, ?, ?, ?, 'open', '[]', ?)
-  `).bind(`session-${memberId}-${meetingDate}`, memberId, meetingDate, `${meetingDate}T20:00:00.000Z`, new Date().toISOString()).run();
+    INSERT INTO attendance_sessions (id, student_id, meeting_date, check_in_at, check_out_at, status, source_event_ids, rebuilt_at)
+    VALUES (?, ?, ?, ?, ?, 'closed', '[]', ?)
+  `).bind(`session-${memberId}-${meetingDate}`, memberId, meetingDate, `${meetingDate}T20:00:00.000Z`, `${meetingDate}T22:00:00.000Z`, new Date().toISOString()).run();
 }
 
 function insertDelivery(env: Env, memberId: string, discordUserId: string, providerMessageId: string) {

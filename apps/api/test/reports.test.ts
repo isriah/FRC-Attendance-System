@@ -96,7 +96,7 @@ describe("report builders", () => {
     insertStudent(env, "100001", "Bench", "Student");
     insertMeeting(env, "2026-01-02");
     insertMeeting(env, "2026-01-09");
-    insertSession(env, "100001", "2026-01-02", "2026-01-02T20:00:00.000Z", null, "open");
+    insertSession(env, "100001", "2026-01-02", "2026-01-02T20:00:00.000Z", "2026-01-02T22:00:00.000Z", "closed");
 
     const report = await buildMemberAttendanceReport(env, "100001");
 
@@ -107,7 +107,7 @@ describe("report builders", () => {
       attendanceRate: 0.5,
       presentDates: ["2026-01-02"],
       absentDates: ["2026-01-09"],
-      openSessionDates: ["2026-01-02"]
+      openSessionDates: []
     });
   });
 
@@ -123,11 +123,11 @@ describe("report builders", () => {
 
     expect(report).toMatchObject({
       totalMeetings: 1,
-      presentMeetings: 1,
-      missedMeetings: 0,
-      attendanceRate: 1,
-      presentDates: ["2026-01-02"],
-      absentDates: [],
+      presentMeetings: 0,
+      missedMeetings: 1,
+      attendanceRate: 0,
+      presentDates: [],
+      absentDates: ["2026-01-02"],
       openSessionDates: ["2026-01-02"]
     });
   });
@@ -343,8 +343,8 @@ describe("report builders", () => {
         scheduled: true,
         hasAttendance: true,
         zeroScan: false,
-        presentCount: 1,
-        activePresentCount: 1,
+        presentCount: 0,
+        activePresentCount: 0,
         absentCount: 0,
         openCheckIns: 1
       },
@@ -357,9 +357,9 @@ describe("report builders", () => {
         scheduled: true,
         hasAttendance: true,
         zeroScan: false,
-        presentCount: 2,
-        activePresentCount: 2,
-        absentCount: 1,
+        presentCount: 1,
+        activePresentCount: 1,
+        absentCount: 2,
         openCheckIns: 1
       }
     ]);
@@ -379,9 +379,9 @@ describe("report builders", () => {
     expect(rows[0]).toMatchObject({
       meetingDate: "2026-01-02",
       required: true,
-      presentCount: 2,
-      activePresentCount: 1,
-      absentCount: 1,
+      presentCount: 0,
+      activePresentCount: 0,
+      absentCount: 2,
       openCheckIns: 2
     });
   });
@@ -433,9 +433,9 @@ describe("report builders", () => {
         scheduled: false,
         hasAttendance: true,
         zeroScan: false,
-        presentCount: 2,
-        activePresentCount: 1,
-        absentCount: 1,
+        presentCount: 0,
+        activePresentCount: 0,
+        absentCount: 2,
         openCheckIns: 2
       }
     ]);
@@ -456,7 +456,7 @@ describe("report builders", () => {
     insertStudent(env, "100002", "Drive", "Captain");
     insertStudent(env, "100003", "Inactive", "Member", 0);
     insertMeeting(env, "2026-01-02", 1, "Required Build");
-    insertSession(env, "100001", "2026-01-02", "2026-01-02T20:00:00.000Z", null, "open");
+    insertSession(env, "100001", "2026-01-02", "2026-01-02T20:00:00.000Z", "2026-01-02T22:00:00.000Z", "closed");
 
     const report = await buildMeetingAbsenceReport(env, "2026-01-02");
 
@@ -487,7 +487,7 @@ describe("report builders", () => {
       "2026-01-02T20:00:00.000Z",
       "2026-01-02T23:00:00.000Z"
     );
-    insertSession(env, "100004", "2026-01-02", "2026-01-02T20:05:00.000Z", null, "open");
+    insertSession(env, "100004", "2026-01-02", "2026-01-02T20:05:00.000Z", "2026-01-02T22:00:00.000Z", "closed");
 
     const report = await buildMeetingAbsenceReport(env, "2026-01-02");
 
@@ -576,8 +576,8 @@ describe("report builders", () => {
     insertStudent(env, "100002", "New", "Member", 1, "2026-01-09");
     insertMeeting(env, "2026-01-02", 1, "Before Join");
     insertMeeting(env, "2026-01-09", 1, "Join Day");
-    insertSession(env, "100001", "2026-01-02", "2026-01-02T20:00:00.000Z", null, "open");
-    insertSession(env, "100001", "2026-01-09", "2026-01-09T20:00:00.000Z", null, "open");
+    insertSession(env, "100001", "2026-01-02", "2026-01-02T20:00:00.000Z", "2026-01-02T22:00:00.000Z", "closed");
+    insertSession(env, "100001", "2026-01-09", "2026-01-09T20:00:00.000Z", "2026-01-09T22:00:00.000Z", "closed");
 
     const absence = await buildMeetingAbsenceReport(env, "2026-01-02");
     const newMemberReport = await buildMemberAttendanceReport(env, "100002");
@@ -622,8 +622,8 @@ describe("report builders", () => {
     insertStudent(env, "100002", "Present", "Member");
     insertMeeting(env, "2026-01-02", 1, "Required Build");
     insertMeeting(env, "2026-01-09", 1, "Required Strategy");
-    insertSession(env, "100001", "2026-01-02", "2026-01-02T20:00:00.000Z", null, "open");
-    insertSession(env, "100002", "2026-01-02", "2026-01-02T20:00:00.000Z", null, "open");
+    insertSession(env, "100001", "2026-01-02", "2026-01-02T20:00:00.000Z", "2026-01-02T22:00:00.000Z", "closed");
+    insertSession(env, "100002", "2026-01-02", "2026-01-02T20:00:00.000Z", "2026-01-02T22:00:00.000Z", "closed");
     await env.DB.prepare("INSERT INTO attendance_excuses (id, student_id, meeting_date, reason, created_by_email, created_at) VALUES (?, ?, ?, ?, ?, ?)")
       .bind("excuse-1", "100001", "2026-01-09", "Family commitment", "mentor@example.org", "2026-01-01T00:00:00.000Z").run();
 
@@ -647,7 +647,7 @@ describe("report builders", () => {
     insertMeeting(env, "2026-01-16", 1, "Week 3");
     insertSession(env, "100001", "2026-01-02", "2026-01-02T20:00:00.000Z", null, "open");
     insertSession(env, "100001", "2026-01-09", "2026-01-09T20:00:00.000Z", "2026-01-09T22:00:00.000Z", "closed");
-    insertSession(env, "100002", "2026-01-16", "2026-01-16T20:00:00.000Z", null, "open");
+    insertSession(env, "100002", "2026-01-16", "2026-01-16T20:00:00.000Z", "2026-01-16T22:00:00.000Z", "closed");
 
     const memberReport = await buildMemberAttendanceReport(env, "100001", { startDate: "2026-01-09", endDate: "2026-01-16" });
     const rosterSummary = await buildRosterAttendanceSummary(env, { startDate: "2026-01-09", endDate: "2026-01-16" });
@@ -674,8 +674,8 @@ describe("report builders", () => {
         missedMeetings: 1,
         attendanceRate: 0.5,
         lastSeenAt: "2026-01-16T20:00:00.000Z",
-        openSessionDates: ["2026-01-16"],
-        openSessionWarning: true,
+        openSessionDates: [],
+        openSessionWarning: false,
         attendanceRequiredFromDate: null
       },
       {
@@ -719,14 +719,14 @@ describe("report builders", () => {
     insertMeeting(env, "2026-01-16", 0, "Optional Demo");
     insertSession(env, "100001", "2026-01-02", "2026-01-02T20:00:00.000Z", null, "open");
     insertSession(env, "100001", "2026-01-09", "2026-01-09T20:05:00.000Z", "2026-01-09T22:15:00.000Z", "closed");
-    insertSession(env, "100002", "2026-01-16", "2026-01-16T20:10:00.000Z", null, "open");
+    insertSession(env, "100002", "2026-01-16", "2026-01-16T20:10:00.000Z", "2026-01-16T22:00:00.000Z", "closed");
 
     const exportData = await buildLegacySheetExport(env, { startDate: "2026-01-09", endDate: "2026-01-16" });
 
     expect(exportData.generatedAt).toEqual(expect.any(String));
     expect(exportData.ranges).toEqual({
       MeetingSummary: [
-        ["1/16/2026", "Optional Demo", "optional", "", "", "scheduled", 1, "", 1, ""],
+        ["1/16/2026", "Optional Demo", "optional", "", "", "scheduled", 1, "", 0, ""],
         ["1/9/2026", "Required Build", "required", "3:00 PM", "6:00 PM", "scheduled", 1, 1, 0, ""]
       ],
       MeetingAbsences: [
@@ -741,7 +741,8 @@ describe("report builders", () => {
         ["100002", "1/16/2026", "3:10 PM"]
       ],
       AttendanceLogOut: [
-        ["100001", "1/9/2026", "5:15 PM"]
+        ["100001", "1/9/2026", "5:15 PM"],
+        ["100002", "1/16/2026", "5:00 PM"]
       ],
       ScheduledMeetings: [
         ["1/9/2026", "Required Build", "required", "3:00 PM", "6:00 PM", 1],

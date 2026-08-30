@@ -296,8 +296,8 @@ describe("scheduled meeting admin API", () => {
     expect(absenceReport.status).toBe(200);
     expect(await absenceReport.json()).toMatchObject({
       meetingDate: "2026-01-05",
-      absentCount: 1,
-      rows: [{ memberId: "100001", firstName: "Test", lastName: "Member" }]
+      absentCount: 2,
+      rows: expect.arrayContaining([{ memberId: "100001", firstName: "Test", lastName: "Member" }, { memberId: "100002", firstName: "Other", lastName: "Member" }])
     });
   });
 });
@@ -448,8 +448,8 @@ function insertSession(env: Env, memberId: string, meetingDate: string) {
     memberId,
     meetingDate,
     `${meetingDate}T20:00:00.000Z`,
-    null,
-    "open",
+    `${meetingDate}T22:00:00.000Z`,
+    "closed",
     "[]",
     "2026-01-10T00:00:00.000Z"
   ).run();

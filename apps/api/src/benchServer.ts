@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { DEFAULT_DUPLICATE_WINDOW_MS, deriveAttendanceSessions, isDuplicateScan, meetingDateForTimestamp, requireIsoDate, requireIsoTimestamp, type AttendanceSession, type KioskCommand, type KioskCommandAction, type KioskCommandStatus, type KioskHealthReport, type KioskScanAcknowledgement, type KioskSyncRequest, type ScanEvent, type ScheduledMeeting } from "@frc-attendance/shared";
+import { DEFAULT_DUPLICATE_WINDOW_MS, deriveAttendanceSessions, hasAttendanceCredit, isDuplicateScan, meetingDateForTimestamp, requireIsoDate, requireIsoTimestamp, type AttendanceSession, type KioskCommand, type KioskCommandAction, type KioskCommandStatus, type KioskHealthReport, type KioskScanAcknowledgement, type KioskSyncRequest, type ScanEvent, type ScheduledMeeting } from "@frc-attendance/shared";
 import { sha256Hex } from "./auth";
 import { normalizeRosterMembers, type RosterMemberInput } from "./roster";
 
@@ -1356,7 +1356,7 @@ function buildMemberAttendanceReport(memberId: string, range: BenchReportDateRan
   const allDates = benchReportMeetingDates(range, now);
   const allDateSet = new Set(allDates);
   const studentSessions = sessions.filter((session) => session.memberId === memberId);
-  const presentDates = [...new Set(studentSessions.map((session) => session.meetingDate))].filter((date) => allDateSet.has(date));
+  const presentDates = [...new Set(studentSessions.filter(hasAttendanceCredit).map((session) => session.meetingDate))].filter((date) => allDateSet.has(date));
   const presentDateSet = new Set(presentDates);
   const absentDates = allDates.filter((date) => !presentDateSet.has(date));
   const lastSeenAt = studentSessions.reduce<string | undefined>((latest, session) => {
@@ -1451,11 +1451,11 @@ function buildBenchMeetingSummaryReport(range: BenchReportDateRange = {}, limit 
       presentStudents: new Set<string>(),
       activePresentStudents: new Set<string>()
     };
-    if (!group.presentStudents.has(session.memberId)) {
+    if (hasAttendanceCredit(session) && !group.presentStudents.has(session.memberId)) {
       group.presentStudents.add(session.memberId);
       group.presentCount += 1;
     }
-    if (activememberIds.has(session.memberId) && !group.activePresentStudents.has(session.memberId)) {
+    if (hasAttendanceCredit(session) && activememberIds.has(session.memberId) && !group.activePresentStudents.has(session.memberId)) {
       group.activePresentStudents.add(session.memberId);
       group.activePresentCount += 1;
     }
@@ -1499,7 +1499,7 @@ function buildBenchMeetingAbsenceReport(meetingDate: string) {
     starts_at: string | null;
     ends_at: string | null;
   } | undefined;
-  const presentIds = new Set(deriveBenchSessions().filter((session) => session.meetingDate === date).map((session) => session.memberId));
+  const presentIds = new Set(deriveBenchSessions().filter((session) => session.meetingDate === date && hasAttendanceCredit(session)).map((session) => session.memberId));
   const required = meeting ? Boolean(meeting.required) : !benchHasScheduledMeetings() && presentIds.size > 0;
   const countAbsences = required && (!meeting || isBenchMeetingComplete(meeting));
   const students = db.prepare("SELECT student_id, first_name, last_name FROM students WHERE active = 1 ORDER BY last_name, first_name").all() as Array<{
@@ -1555,7 +1555,7 @@ function buildBenchLegacySheetExport(range: BenchReportDateRange = {}) {
   const meetingSummary = buildBenchMeetingSummaryReport(range);
   const rosterAttendance = buildBenchRosterAttendanceSummary(range);
   const requiredMeetingAbsences = meetingSummary.filter((meeting) => meeting.required).map((meeting) => buildBenchMeetingAbsenceReport(meeting.meetingDate));
-  const sessionCountsByDate = sessions.reduce<Map<string, number>>((counts, session) => {
+  const sessionCountsByDate = sessions.filter(hasAttendanceCredit).reduce<Map<string, number>>((counts, session) => {
     counts.set(session.meetingDate, (counts.get(session.meetingDate) ?? 0) + 1);
     return counts;
   }, new Map());
