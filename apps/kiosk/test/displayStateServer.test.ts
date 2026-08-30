@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { baseDisplayState } from "../src/kioskStates";
 import { DisplayStateServer, displayStateForAcknowledgement } from "../src/service/displayStateServer";
 
@@ -209,6 +212,38 @@ describe("display state acknowledgements", () => {
       });
     } finally {
       server.stop();
+    }
+  });
+
+  it("requires a short-lived verified PIN session for manual Wi-Fi endpoints", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "frc-network-session-"));
+    const port = 18989;
+    const server = new DisplayStateServer({
+      status: async () => ({ connected: true }),
+      listWifi: async () => [{ ssid: "Team WiFi", secured: true, active: false }],
+      connectWifi: async () => undefined
+    }, join(directory, "network-pin.json"));
+    server.start(port);
+
+    try {
+      const baseUrl = `http://127.0.0.1:${port}`;
+      expect((await fetch(`${baseUrl}/kiosk/wifi-networks`)).status).toBe(403);
+
+      const setup = await fetch(`${baseUrl}/kiosk/network-pin/configure`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ pin: "123456", confirmation: "123456" })
+      });
+      expect(setup.status).toBe(200);
+      const { networkSession } = await setup.json() as { networkSession: string };
+      expect(networkSession).toEqual(expect.any(String));
+
+      const authorized = await fetch(`${baseUrl}/kiosk/wifi-networks`, { headers: { "x-frc-network-session": networkSession } });
+      expect(authorized.status).toBe(200);
+      expect(await authorized.json()).toEqual([{ ssid: "Team WiFi", secured: true, active: false }]);
+    } finally {
+      server.stop();
+      await rm(directory, { recursive: true, force: true });
     }
   });
 });

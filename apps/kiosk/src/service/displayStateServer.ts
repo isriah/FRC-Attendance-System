@@ -1,3 +1,4 @@
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import type { KioskScanAcknowledgement, KioskSyncResult } from "@frc-attendance/shared";
 import { baseDisplayState, type KioskDisplayState, type KioskStateId } from "../kioskStates";
@@ -23,6 +24,8 @@ export class DisplayStateServer {
   private failedPinAttempts = 0;
 
   private pinRetryAvailableAt = 0;
+
+  private networkSession?: { token: string; expiresAt: number };
 
   constructor(
     private readonly network: NetworkManager = createNetworkManager(),
@@ -72,11 +75,13 @@ export class DisplayStateServer {
       }
 
       if (request.method === "GET" && request.url === "/kiosk/wifi-networks") {
+        if (!this.canAccessNetworkSettings(request)) return this.respondNetworkAccessDenied(response);
         void this.respondJson(response, () => this.network.listWifi());
         return;
       }
 
       if (request.method === "POST" && request.url === "/kiosk/wifi-connect") {
+        if (!this.canAccessNetworkSettings(request)) return this.respondNetworkAccessDenied(response);
         void this.connectWifi(request, response);
         return;
       }
@@ -210,8 +215,7 @@ export class DisplayStateServer {
       if (await hasNetworkPin(this.networkPinPath)) throw new Error("A network settings PIN is already configured.");
       await configureNetworkPin(this.networkPinPath, input.pin, input.confirmation);
       if (!await verifyNetworkPin(this.networkPinPath, input.pin)) throw new Error("The new PIN could not be verified. Try again.");
-      response.writeHead(204, corsHeaders());
-      response.end();
+      this.respondJson(response, () => Promise.resolve({ networkSession: this.createNetworkSession() }));
     } catch (error) {
       this.respondPinError(response, error);
     }
@@ -233,8 +237,7 @@ export class DisplayStateServer {
       }
       this.failedPinAttempts = 0;
       this.pinRetryAvailableAt = 0;
-      response.writeHead(204, corsHeaders());
-      response.end();
+      this.respondJson(response, () => Promise.resolve({ networkSession: this.createNetworkSession() }));
     } catch (error) {
       this.respondPinError(response, error);
     }
@@ -253,6 +256,26 @@ export class DisplayStateServer {
   private respondPinError(response: import("node:http").ServerResponse, error: unknown): void {
     response.writeHead(400, { "content-type": "application/json; charset=utf-8", ...corsHeaders() });
     response.end(JSON.stringify({ error: error instanceof Error ? error.message : "The network PIN could not be verified." }));
+  }
+
+  private createNetworkSession(): string {
+    const token = randomBytes(24).toString("base64url");
+    this.networkSession = { token, expiresAt: Date.now() + 5 * 60_000 };
+    return token;
+  }
+
+  private canAccessNetworkSettings(request: import("node:http").IncomingMessage): boolean {
+    if (request.headers["x-frc-network-offline-bootstrap"] === "1") return true;
+    const token = request.headers["x-frc-network-session"];
+    if (typeof token !== "string" || !this.networkSession || this.networkSession.expiresAt <= Date.now()) return false;
+    const supplied = Buffer.from(token);
+    const expected = Buffer.from(this.networkSession.token);
+    return supplied.length === expected.length && timingSafeEqual(supplied, expected);
+  }
+
+  private respondNetworkAccessDenied(response: import("node:http").ServerResponse): void {
+    response.writeHead(403, { "content-type": "application/json; charset=utf-8", ...corsHeaders() });
+    response.end(JSON.stringify({ error: "Enter the network settings PIN first." }));
   }
 }
 

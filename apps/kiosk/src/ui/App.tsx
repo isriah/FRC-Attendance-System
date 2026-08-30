@@ -58,17 +58,18 @@ function KioskApp() {
   const [networkPinConfirmation, setNetworkPinConfirmation] = useState("");
   const [networkPinError, setNetworkPinError] = useState("");
   const [networkPinSubmitting, setNetworkPinSubmitting] = useState(false);
+  const [networkSession, setNetworkSession] = useState<string>();
 
-  const openNetworkSettings = useCallback(async () => {
+  const openNetworkSettings = useCallback(async (session?: string) => {
     setSettingsOpen(true);
     setSettingsError("");
     setPassword("");
     try {
-      setWifiNetworks(await fetchWifiNetworks());
+      setWifiNetworks(await fetchWifiNetworks(session, localNetwork?.connected === false));
     } catch (error) {
       setSettingsError(errorMessage(error));
     }
-  }, []);
+  }, [localNetwork?.connected]);
 
   const requestNetworkSettings = useCallback(async () => {
     setNetworkPinError("");
@@ -111,8 +112,8 @@ function KioskApp() {
 
   useEffect(() => {
     if (localNetwork?.connected !== false || settingsOpen) return;
-    void openNetworkSettings();
-  }, [localNetwork?.connected, settingsOpen]);
+    void openNetworkSettings(networkSession);
+  }, [localNetwork?.connected, networkSession, settingsOpen]);
 
   useEffect(() => {
     let lastSeenUpdate = "";
@@ -163,7 +164,7 @@ function KioskApp() {
     try {
       const response = await fetch(`${networkServiceBaseUrl()}/kiosk/wifi-connect`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: networkHeaders(networkSession, networkSetupRequired, { "content-type": "application/json" }),
         body: JSON.stringify({ ssid: selectedNetwork.ssid, password })
       });
       if (!response.ok) throw new Error(await responseError(response));
@@ -186,14 +187,17 @@ function KioskApp() {
       const endpoint = networkPinFlow === "setup" ? "/kiosk/network-pin/configure" : "/kiosk/network-pin/verify";
       const response = await fetch(`${networkServiceBaseUrl()}${endpoint}`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: networkHeaders(networkSession, networkSetupRequired, { "content-type": "application/json" }),
         body: JSON.stringify(networkPinFlow === "setup" ? { pin: networkPin, confirmation: networkPinConfirmation } : { pin: networkPin })
       });
       if (!response.ok) throw new Error(await responseError(response));
+      const { networkSession: nextNetworkSession } = await response.json() as { networkSession?: string };
+      if (!nextNetworkSession) throw new Error("Network settings could not be unlocked. Try again.");
+      setNetworkSession(nextNetworkSession);
       setNetworkPinFlow(undefined);
       setNetworkPin("");
       setNetworkPinConfirmation("");
-      await openNetworkSettings();
+      await openNetworkSettings(nextNetworkSession);
     } catch (error) {
       setNetworkPin("");
       setNetworkPinConfirmation("");
@@ -230,7 +234,7 @@ function KioskApp() {
           isConnecting={isConnecting}
           onSelect={(network) => { setSelectedNetwork(network); setPassword(""); setSettingsError(""); }}
           onPasswordChange={setPassword}
-          onRefresh={() => void openNetworkSettings()}
+          onRefresh={() => void openNetworkSettings(networkSession)}
           onConnect={() => void connectWifi()}
           onClose={() => { if (!networkSetupRequired) setSettingsOpen(false); }}
         />
@@ -435,10 +439,19 @@ async function fetchNetworkStatus(): Promise<LocalNetworkStatus> {
   return response.json() as Promise<LocalNetworkStatus>;
 }
 
-async function fetchWifiNetworks(): Promise<WirelessNetwork[]> {
-  const response = await fetch(`${networkServiceBaseUrl()}/kiosk/wifi-networks`, { cache: "no-store" });
+async function fetchWifiNetworks(networkSession?: string, offlineBootstrap = false): Promise<WirelessNetwork[]> {
+  const response = await fetch(`${networkServiceBaseUrl()}/kiosk/wifi-networks`, {
+    cache: "no-store",
+    headers: networkHeaders(networkSession, offlineBootstrap)
+  });
   if (!response.ok) throw new Error(await responseError(response));
   return response.json() as Promise<WirelessNetwork[]>;
+}
+
+function networkHeaders(networkSession?: string, offlineBootstrap = false, headers: Record<string, string> = {}): Record<string, string> {
+  if (networkSession) return { ...headers, "x-frc-network-session": networkSession };
+  if (offlineBootstrap) return { ...headers, "x-frc-network-offline-bootstrap": "1" };
+  return headers;
 }
 
 async function fetchNetworkPinStatus(): Promise<{ configured: boolean }> {
