@@ -338,7 +338,14 @@ function App() {
 function PublicDocs() {
   const [frameState, setFrameState] = useState<"loading" | "ready" | "error">("loading");
 
-  return <section className="docs-reader" aria-labelledby="docs-reader-title">
+  useEffect(() => {
+    const fallbackTimer = window.setTimeout(() => {
+      setFrameState((current) => current === "loading" ? "error" : current);
+    }, 12_000);
+    return () => window.clearTimeout(fallbackTimer);
+  }, []);
+
+  return <section className="docs-reader" aria-labelledby="docs-reader-title" aria-busy={frameState === "loading"}>
     <div className="docs-reader-heading">
       <div>
         <h2 id="docs-reader-title">Operations Guide</h2>
