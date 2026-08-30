@@ -20,9 +20,10 @@ entry explicitly replaces one.
 
 - Start later from a **standalone sanitized snapshot** with a fresh Git history.
   Do not use a branch, worktree, or linked fork of this repository.
-- Make the future edition open source. Apache-2.0 is the recommended license,
-  pending a dependency and license audit.
+- License direction is Apache-2.0, pending a dependency and license audit.
 - The provisional product name is **LancerLogin**.
+- The future standalone repository name is **LancerLogin**. The default public
+  documentation target is `robolancers.github.io/LancerLogin/`.
 - Serve organizations beyond FRC, including bands, drama groups, clubs,
   classrooms, and other teams.
 - Support self-hosting on each organization's own Cloudflare account with
@@ -34,6 +35,10 @@ entry explicitly replaces one.
 - Use organization-neutral product terms: **organization**, **member**,
   **administrator**, **kiosk**, and **attendance event**.
 - Keep email, Discord, Google OAuth, and captive-portal authentication optional.
+- Bootstrap administration supports the organization's choice of Google OAuth,
+  a local username/password administrator, or both.
+- The first Cloudflare deployment path is a guided CLI flow; an optional
+  one-click deployment path may follow later.
 - First-release theming is limited to customized headers plus primary and
   secondary colors for themed mode, and global light/dark modes. Broad
   terminology overrides and expansive theming are deferred.
@@ -94,7 +99,8 @@ mappings remain local to that kiosk.
 The initial guided setup should cover:
 
 1. Deploying required resources to the organization's Cloudflare account.
-2. Creating a bootstrap administrator.
+2. Creating a bootstrap administrator with Google OAuth, local
+   username/password credentials, or both.
 3. Configuring organization branding.
 4. Pairing each kiosk through a short-lived pairing code or QR code.
 5. Installing kiosk software on a Raspberry Pi.
@@ -103,6 +109,11 @@ The initial guided setup should cover:
 External integrations are optional setup steps, not prerequisites for basic
 offline attendance. The first-release attendance flow is fingerprint sign-in on
 the single paired kiosk.
+
+Local administrator credentials must use a modern salted password hash, never
+plaintext. The operations guide must provide secure reset and recovery guidance.
+Detailed session and authentication-security design is reserved for future
+implementation work.
 
 ### Confirmed dashboard onboarding requirement
 
@@ -133,9 +144,9 @@ checks, and recovery guidance.
 
 ### Suggestions to validate later
 
-- Choose a guided installer that does not assume command-line knowledge; use a
-  browser-based assistant when it reduces rather than obscures Cloudflare
-  account setup.
+- Deliver the first guided CLI deployment path with task-oriented, plain-language
+  instructions that do not assume command-line knowledge; later evaluate an
+  optional one-click deployment path.
 - Make setup resumable and clearly distinguish required steps from optional
   integrations and hardware features.
 - Design the detailed onboarding wizard interaction, completion data model,
@@ -156,6 +167,17 @@ Public documentation will have two tracks:
 Both tracks should make the optional nature of integrations clear, document the
 single-kiosk fingerprint-first scope, and use organization-neutral terminology
 from the outset.
+
+### Privacy and support boundaries
+
+Biometric consent, retention, deletion, and legal/privacy policy are the
+deploying organization's responsibility. Documentation explains that
+responsibility and points to the implementation's controls; it does not provide
+organization-specific legal or policy determinations.
+
+No support service-level agreement is promised. Users may contact RoboLancers,
+and assistance may be available, but neither the documentation nor the release
+promises response times or support coverage.
 
 ### Confirmed documentation accessibility standard
 
@@ -205,6 +227,10 @@ Before creating the future standalone snapshot:
 - [ ] Complete a dependency and license audit before confirming Apache-2.0.
 - [ ] Test a fresh Cloudflare deployment and a fresh Raspberry Pi kiosk
   installation using only the sanitized snapshot and public instructions.
+- [ ] Verify guided CLI bootstrap supports Google OAuth, local
+  username/password administration, or both; local credentials use a modern
+  salted hash and recovery guidance is available without documenting plaintext
+  credentials.
 - [ ] Verify basic offline fingerprint attendance without email, Discord, Google
   OAuth, or captive-portal authentication.
 - [ ] Confirm release documentation meets the accessibility standard: a
@@ -229,11 +255,11 @@ These are unresolved; they are not commitments.
 
 - Does **LancerLogin** remain the product name after availability, trademark,
   and community-fit review?
-- Does the dependency and license audit confirm Apache-2.0?
 - What exact branding configuration model, storage location, validation, and
   cache-refresh behavior should be used?
-- Where should public documentation be hosted, and which domain should it use?
-- What should the Cloudflare bootstrap or one-click deployment experience be?
+- What session, reset, recovery, and authentication-security design should the
+  implementation use for local administrator credentials?
+- What should the later optional one-click Cloudflare deployment experience be?
 - Which fingerprint hardware, if any, will be officially supported?
 - Which non-biometric sign-in method should be considered after the first
   release?
@@ -256,14 +282,14 @@ These are suggestions, not approved implementation work.
    model before publishing public materials.
 4. Design and test the empty-database bootstrap plus a clean Cloudflare/Pi
    installation path in an isolated future snapshot.
-5. Perform the dependency/license audit, then make the final license decision.
+5. Perform the dependency/license audit before finalizing Apache-2.0.
 
 ## Decision Log
 
 | Date | Status | Decision or note |
 | --- | --- | --- |
 | 2026-08-30 | Confirmed | Future community edition will start from a standalone sanitized snapshot with fresh Git history, never as a branch, worktree, or linked fork. |
-| 2026-08-30 | Confirmed | The edition will be open source; Apache-2.0 is recommended pending a dependency/license audit. |
+| 2026-08-30 | Confirmed | The edition will be open source under the Apache-2.0 direction, pending a dependency/license audit. |
 | 2026-08-30 | Confirmed | The first supported path is organization-owned Cloudflare self-hosting with a Raspberry Pi kiosk; integrations stay optional and fingerprint sign-in is the first-release default. |
 | 2026-08-30 | Confirmed | The current production installation and its resources remain out of scope and unaffected. |
 | 2026-08-30 | Suggested | Validate the detailed configuration, setup, packaging, governance, and migration choices listed above before implementation. |
@@ -274,3 +300,8 @@ These are suggestions, not approved implementation work.
 | 2026-08-30 | Confirmed | First-login dashboard onboarding is persistent and resumable across administrators and sessions, with a concise non-blocking next step until the core checklist completes; detailed wizard UX and completion data-model design remain future work. |
 | 2026-08-30 | Confirmed | The provisional community-release product name is LancerLogin. |
 | 2026-08-30 | Confirmed | Public operations and technical documentation is screenshot-led: each user action has a current annotated screenshot with redacted/example data, concise alt text/caption, and maintained source assets; this includes LancerLogin and Cloudflare/Google OAuth setup. |
+| 2026-08-30 | Confirmed | Bootstrap administration supports Google OAuth, local username/password credentials, or both. Local passwords use a modern salted hash, never plaintext; reset/recovery guidance is documented while detailed session/security design remains implementation work. |
+| 2026-08-30 | Confirmed | The first Cloudflare path is guided CLI deployment; an optional one-click deployment may be added later. |
+| 2026-08-30 | Confirmed | Biometric consent, retention, deletion, and legal/privacy policy are each deploying organization's responsibility; documentation explains that responsibility only. |
+| 2026-08-30 | Confirmed | No support SLA is promised. Users may contact RoboLancers and assistance may be available without a response-time or coverage commitment. |
+| 2026-08-30 | Confirmed | The future standalone repository name is LancerLogin and the default public documentation target is robolancers.github.io/LancerLogin/. |
