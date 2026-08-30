@@ -22,6 +22,7 @@ entry explicitly replaces one.
   Do not use a branch, worktree, or linked fork of this repository.
 - Make the future edition open source. Apache-2.0 is the recommended license,
   pending a dependency and license audit.
+- The provisional product name is **LancerLogin**.
 - Serve organizations beyond FRC, including bands, drama groups, clubs,
   classrooms, and other teams.
 - Support self-hosting on each organization's own Cloudflare account with
@@ -164,14 +165,26 @@ concise plain language, including Cloudflare, Worker, D1 database, web
 dashboard, kiosk, pairing, and secrets.
 
 Operations instructions must be task-oriented and include prerequisites,
-screenshots or visual cues where they materially help, an expected-success
-check after each major step, and safe troubleshooting and recovery paths. An
-easy glossary must be available for terms a new administrator may encounter.
+an expected-success check after each major step, and safe troubleshooting and
+recovery paths. An easy glossary must be available for terms a new
+administrator may encounter.
 
 Avoid unexplained acronyms, assumed command-line knowledge, verbose AI-style
 exposition, and duplicating technical internals in the operations guide. Keep
 deeper architecture and implementation reference material in the separate
 technical track.
+
+### Confirmed screenshot-led documentation standard
+
+Public operations and technical documentation must be screenshot-led. Wherever
+a user needs to act, include an annotated screenshot with arrows or callouts
+identifying the exact control. This applies to LancerLogin dashboard and kiosk
+screens as well as third-party Cloudflare and Google OAuth setup.
+
+Screenshots must use redacted or example data only, match the current UI and
+third-party version, and include concise alt text and captions. Regenerate them
+when the related UI changes. Maintain screenshots as source assets rather than
+pasting them ad hoc into documentation.
 
 ## Snapshot Release Checklist
 
@@ -199,6 +212,10 @@ Before creating the future standalone snapshot:
   plain-language definitions at first use, task-oriented prerequisites and
   success checks, useful visual cues, safe recovery guidance, and a glossary;
   detailed technical internals remain in the technical documentation.
+- [ ] Confirm operations and technical documentation is screenshot-led: every
+  user action has a current annotated control-level screenshot with concise alt
+  text/caption, redacted or example data, and maintained source assets,
+  including LancerLogin and Cloudflare/Google OAuth setup screens.
 - [ ] Confirm the first-login dashboard provides persistent, cross-admin,
   resumable onboarding for the core checklist; optional integrations are safely
   skippable, completion is verified/derived or auditable, normal navigation is
@@ -210,7 +227,8 @@ Before creating the future standalone snapshot:
 
 These are unresolved; they are not commitments.
 
-- What is the product name?
+- Does **LancerLogin** remain the product name after availability, trademark,
+  and community-fit review?
 - Does the dependency and license audit confirm Apache-2.0?
 - What exact branding configuration model, storage location, validation, and
   cache-refresh behavior should be used?
@@ -234,8 +252,8 @@ These are suggestions, not approved implementation work.
 1. Establish and tag a stable current-system release checkpoint.
 2. Run a scoped repository inventory for names, IDs, URLs, configuration,
    data-bearing files, and third-party licenses to define sanitization work.
-3. Decide the product name and ownership/governance model before publishing
-   public materials.
+3. Validate the provisional LancerLogin name and decide the ownership/governance
+   model before publishing public materials.
 4. Design and test the empty-database bootstrap plus a clean Cloudflare/Pi
    installation path in an isolated future snapshot.
 5. Perform the dependency/license audit, then make the final license decision.
@@ -254,3 +272,5 @@ These are suggestions, not approved implementation work.
 | 2026-08-30 | Confirmed | First-release theming is customized headers, primary/secondary themed colors, and global light/dark modes only. Broad terminology overrides and expansive theming are explicitly deferred. |
 | 2026-08-30 | Confirmed | Release operations documentation must enable non-technical school or club staff to deploy safely through plain language, task-oriented steps, success checks, recovery guidance, visual cues where useful, and a glossary; deeper technical reference stays separate. |
 | 2026-08-30 | Confirmed | First-login dashboard onboarding is persistent and resumable across administrators and sessions, with a concise non-blocking next step until the core checklist completes; detailed wizard UX and completion data-model design remain future work. |
+| 2026-08-30 | Confirmed | The provisional community-release product name is LancerLogin. |
+| 2026-08-30 | Confirmed | Public operations and technical documentation is screenshot-led: each user action has a current annotated screenshot with redacted/example data, concise alt text/caption, and maintained source assets; this includes LancerLogin and Cloudflare/Google OAuth setup. |
