@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { baseDisplayState, type DisplayStatus } from "../kioskStates";
+import { characterForKey, keyboardRows, type KeyboardKey, type KeyboardLayout } from "./touchKeyboard";
 import "./styles.css";
 
 interface KioskDisplayState {
@@ -259,29 +260,41 @@ function NetworkSettings({ required, status, networks, selected, password, error
   return <section className="network-settings" aria-label="Network settings">
     <div className="network-settings-card">
       <header><h2>{required ? "Connect this kiosk" : "Network settings"}</h2><p>{status?.connected ? `Connected through ${status.connection ?? status.type ?? "the network"}.` : "Select the team Wi-Fi network to restore online sync."}</p></header>
-      <div className="wifi-list" aria-label="Available Wi-Fi networks">
-        {networks.length ? networks.map((network) => <button type="button" key={network.ssid} className={network.ssid === selected?.ssid ? "selected" : ""} onClick={() => onSelect(network)}>
-          <span>{network.ssid}</span><small>{network.active ? "Connected" : `${network.signal ?? "?"}%${network.secured ? " · secured" : ""}`}</small>
-        </button>) : <p className="empty-network-list">No Wi-Fi networks found yet.</p>}
+      <div className="network-settings-workspace">
+        <section className="wifi-browser" aria-label="Available Wi-Fi networks">
+          <div className="wifi-browser-heading"><h3>Available networks</h3><button type="button" className="refresh-button" onClick={onRefresh}>Refresh</button></div>
+          <div className="wifi-list">
+            {networks.length ? networks.map((network) => <button type="button" key={network.ssid} className={network.ssid === selected?.ssid ? "selected" : ""} onClick={() => onSelect(network)}>
+              <span>{network.ssid}</span><small>{network.active ? "Connected" : `${network.signal ?? "?"}%${network.secured ? " · secured" : ""}`}</small>
+            </button>) : <p className="empty-network-list">No Wi-Fi networks found yet.</p>}
+          </div>
+        </section>
+        <section className="wifi-selection" aria-live="polite">
+          <div className="wifi-selection-heading"><h3>{selected ? selected.ssid : "Choose a network"}</h3>{selected && <span>{selected.active ? "Connected" : selected.secured ? "Secured network" : "Open network"}</span>}</div>
+          {selected?.secured && <div className="wifi-password"><label htmlFor="wifi-password">Password</label><input id="wifi-password" type="password" inputMode="text" autoComplete="off" value={password} onChange={(event) => onPasswordChange(event.target.value)} readOnly /><TouchKeyboard value={password} onChange={onPasswordChange} /></div>}
+          {selected && !selected.secured && <p className="open-network-note">This network does not require a password.</p>}
+          {!selected && <p className="choose-network-note">Select a network from the list. This panel stays available while you browse.</p>}
+          {error && <p className="network-error" role="alert">{error}</p>}
+          <footer>{!required && <button type="button" className="secondary-button" onClick={onClose}>Back to attendance</button>}<button type="button" className="primary-button" disabled={!selected || isConnecting} onClick={onConnect}>{isConnecting ? "Connecting…" : "Connect"}</button></footer>
+        </section>
       </div>
-      {selected && <div className="wifi-password">
-        <label htmlFor="wifi-password">{selected.secured ? `Password for ${selected.ssid}` : `${selected.ssid} does not require a password`}</label>
-        {selected.secured && <><input id="wifi-password" type="password" inputMode="text" autoComplete="off" value={password} onChange={(event) => onPasswordChange(event.target.value)} readOnly />
-          <TouchKeyboard value={password} onChange={onPasswordChange} /></>}
-      </div>}
-      {error && <p className="network-error" role="alert">{error}</p>}
-      <footer><button type="button" className="secondary-button" onClick={onRefresh}>Refresh networks</button>{!required && <button type="button" className="secondary-button" onClick={onClose}>Back to attendance</button>}<button type="button" className="primary-button" disabled={!selected || isConnecting} onClick={onConnect}>{isConnecting ? "Connecting…" : "Connect"}</button></footer>
     </div>
   </section>;
 }
 
 function TouchKeyboard({ value, onChange }: { value: string; onChange: (value: string) => void }) {
   const [shift, setShift] = useState(false);
-  const rows = ["qwertyuiop", "asdfghjkl", "zxcvbnm", "1234567890!@#$%"];
-  const add = (character: string) => onChange(`${value}${shift ? character.toUpperCase() : character}`);
+  const [layout, setLayout] = useState<KeyboardLayout>("letters");
+  const activate = (key: KeyboardKey) => {
+    if (key.action === "shift") return setShift((current) => !current);
+    if (key.action === "backspace") return onChange(value.slice(0, -1));
+    if (key.action === "space") return onChange(`${value} `);
+    if (key.action === "layout") return setLayout((current) => current === "letters" ? "symbols" : "letters");
+    onChange(`${value}${characterForKey(key, shift)}`);
+    if (shift) setShift(false);
+  };
   return <div className="touch-keyboard" aria-label="On-screen password keyboard">
-    {rows.map((row) => <div key={row}>{[...row].map((character) => <button type="button" key={character} onClick={() => add(character)}>{shift ? character.toUpperCase() : character}</button>)}</div>)}
-    <div><button type="button" onClick={() => setShift(!shift)}>Shift</button><button type="button" onClick={() => add(" ")}>Space</button><button type="button" onClick={() => onChange(value.slice(0, -1))}>Delete</button></div>
+    {keyboardRows(layout).map((row, rowIndex) => <div key={`${layout}-${rowIndex}`}>{row.map((key, keyIndex) => <button type="button" key={`${key.value}-${key.action ?? "character"}-${keyIndex}`} className={`${key.className ?? ""} ${key.action === "shift" && shift ? "keyboard-key-active" : ""}`} aria-label={key.action === "backspace" ? "Backspace" : key.action === "shift" ? "Shift" : key.label} onClick={() => activate(key)}>{key.label ?? characterForKey(key, shift)}</button>)}</div>)}
   </div>;
 }
 

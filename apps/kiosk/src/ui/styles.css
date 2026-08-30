@@ -207,9 +207,10 @@ p {
 }
 
 .network-settings-card {
-  width: min(760px, 100%);
-  max-height: calc(100vh - 48px);
-  overflow: auto;
+  width: min(1120px, 100%);
+  height: min(760px, calc(100vh - 48px));
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   box-sizing: border-box;
   padding: 28px;
   border-radius: 22px;
@@ -223,6 +224,64 @@ p {
   font-size: 36px;
 }
 
+html:has(.network-settings),
+body:has(.network-settings) {
+  overflow: hidden;
+}
+
+.network-settings-card h3 {
+  margin: 0;
+  font-size: 23px;
+}
+
+.network-settings-workspace {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(280px, .72fr) minmax(0, 1.28fr);
+  gap: 20px;
+  margin-top: 18px;
+}
+
+.wifi-browser,
+.wifi-selection {
+  min-height: 0;
+  border: 2px solid var(--border-color);
+  border-radius: 16px;
+  background: #fff;
+}
+
+.wifi-browser {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.wifi-browser-heading,
+.wifi-selection-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 13px 14px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.wifi-selection-heading span {
+  color: color-mix(in srgb, var(--text-color), #fff 40%);
+  font-size: 16px;
+}
+
+.refresh-button {
+  min-height: 38px;
+  padding: 0 13px;
+  border: 1px solid var(--border-color);
+  border-radius: 9px;
+  background: #f5f7f9;
+  color: var(--text-color);
+  font: inherit;
+  font-size: 16px;
+}
+
 .network-settings-card header p,
 .wifi-password label,
 .empty-network-list {
@@ -231,8 +290,12 @@ p {
 
 .wifi-list {
   display: grid;
+  align-content: start;
   gap: 10px;
-  margin: 22px 0;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 12px;
 }
 
 .wifi-list button {
@@ -262,7 +325,7 @@ p {
 }
 
 .wifi-password {
-  margin: 20px 0;
+  margin: 0;
 }
 
 .wifi-password label {
@@ -287,35 +350,51 @@ p {
 .touch-keyboard {
   display: grid;
   justify-content: center;
-  gap: 7px;
-  margin-top: 12px;
+  gap: 6px;
+  margin-top: 9px;
 }
 
 .touch-keyboard > div {
   display: flex;
   justify-content: center;
-  gap: 6px;
+  gap: 5px;
 }
 
 .touch-keyboard button,
-.network-settings-card footer button {
-  min-width: 40px;
-  min-height: 43px;
+.wifi-selection footer button {
+  min-width: 42px;
+  min-height: 46px;
   border: 0;
   border-radius: 8px;
   background: #e4e8ec;
   color: var(--text-color);
   font: inherit;
-  font-size: 17px;
+  font-size: 18px;
+}
+
+.touch-keyboard button {
+  flex: 1 1 0;
+  max-width: 56px;
+}
+
+.touch-keyboard button.keyboard-key-wide,
+.touch-keyboard button.keyboard-key-mode {
+  flex-grow: 1.45;
+}
+
+.touch-keyboard button.keyboard-key-space {
+  flex-grow: 4.4;
+  max-width: none;
+}
+
+.touch-keyboard button.keyboard-key-active {
+  background: var(--primary-soft);
+  box-shadow: inset 0 -3px 0 var(--primary-color);
 }
 
 .touch-keyboard button:active,
 .wifi-list button:active {
   transform: scale(.97);
-}
-
-.touch-keyboard > div:last-child button {
-  min-width: 100px;
 }
 
 .network-error {
@@ -326,26 +405,150 @@ p {
   font-size: 18px;
 }
 
-.network-settings-card footer {
+.wifi-selection {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  padding: 0 14px 14px;
+}
+
+.wifi-selection-heading {
+  margin: 0 -14px;
+}
+
+.open-network-note,
+.choose-network-note {
+  align-self: start;
+  padding-top: 8px;
+  font-size: 20px;
+}
+
+.wifi-selection footer {
   display: flex;
   justify-content: flex-end;
   flex-wrap: wrap;
   gap: 12px;
-  margin-top: 24px;
+  align-self: end;
 }
 
-.network-settings-card footer .primary-button {
+.wifi-selection footer .primary-button {
   padding: 0 24px;
   background: var(--primary-color);
   color: var(--on-primary-color);
 }
 
-.network-settings-card footer .secondary-button {
+.wifi-selection footer .secondary-button {
   padding: 0 18px;
 }
 
-.network-settings-card button:disabled {
+.wifi-selection button:disabled {
   opacity: .55;
+}
+
+@media (max-width: 900px), (max-height: 620px) {
+  .network-settings {
+    padding: 0;
+  }
+
+  .network-settings-card {
+    width: 100%;
+    height: 100vh;
+    padding: 12px;
+    border-radius: 0;
+  }
+
+  .network-settings-card h2 {
+    font-size: 24px;
+  }
+
+  .network-settings-card header p {
+    font-size: 15px;
+  }
+
+  .network-settings-workspace {
+    grid-template-columns: 1fr;
+    grid-template-rows: 108px minmax(0, 1fr);
+    gap: 10px;
+    margin-top: 8px;
+  }
+
+  .wifi-browser-heading,
+  .wifi-selection-heading {
+    padding: 5px 10px;
+  }
+
+  .network-settings-card h3 {
+    font-size: 18px;
+  }
+
+  .wifi-list {
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(190px, 1fr);
+    grid-template-rows: 1fr;
+    overflow-x: auto;
+    overflow-y: hidden;
+    gap: 7px;
+    padding: 8px;
+  }
+
+  .wifi-list button {
+    min-height: 42px;
+    padding: 6px 10px;
+    font-size: 16px;
+  }
+
+  .wifi-list small {
+    font-size: 13px;
+  }
+
+  .wifi-selection {
+    gap: 3px;
+    padding: 0 10px 10px;
+  }
+
+  .wifi-selection-heading {
+    margin: 0 -10px;
+  }
+
+  .wifi-password label {
+    margin-bottom: 4px;
+    font-size: 16px;
+  }
+
+  .wifi-password input {
+    min-height: 36px;
+    font-size: 18px;
+  }
+
+  .touch-keyboard {
+    gap: 4px;
+    margin-top: 6px;
+  }
+
+  .touch-keyboard > div {
+    gap: 4px;
+  }
+
+  .touch-keyboard button,
+  .wifi-selection footer button {
+    min-height: 28px;
+    font-size: 15px;
+  }
+
+  .open-network-note,
+  .choose-network-note,
+  .network-error {
+    padding-top: 2px;
+    font-size: 15px;
+  }
+
+  .network-error {
+    padding: 7px;
+  }
+
+  .wifi-selection footer {
+    gap: 6px;
+  }
 }
 
 @keyframes success-pulse {
