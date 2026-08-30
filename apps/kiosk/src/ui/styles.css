@@ -248,22 +248,43 @@ p {
 
 .network-pin-card {
   width: min(520px, 100%);
+  max-height: calc(100vh - 48px);
   box-sizing: border-box;
   padding: 30px;
   border-radius: 22px;
   background: var(--page-bg);
   color: var(--text-color);
   box-shadow: 0 18px 60px rgb(0 0 0 / 35%);
+  overflow-y: auto;
 }
 
 .network-pin-card h2 { margin: 0; font-size: 34px; }
 .network-pin-card > p { margin-top: 10px; color: color-mix(in srgb, var(--text-color), var(--page-bg) 35%); }
 .network-pin-card footer { display: flex; justify-content: flex-end; gap: 12px; margin-top: 24px; }
+.network-pin-card footer button { min-height: 52px; padding: 0 22px; border: 0; border-radius: 12px; font: inherit; font-size: 20px; }
+.network-pin-card footer .secondary-button { background: #e4e8ec; color: var(--text-color); }
+.network-pin-card footer .primary-button { background: var(--primary-color); color: var(--on-primary-color); }
+.network-pin-card footer button:disabled { opacity: .55; }
 .network-pin-entry { margin-top: 22px; }
 .network-pin-entry label { display: block; color: color-mix(in srgb, var(--text-color), var(--page-bg) 35%); font-size: 19px; }
 .network-pin-entry output { display: block; min-height: 34px; padding: 10px 14px; margin-top: 8px; border: 2px solid var(--border-color); border-radius: 12px; background: #fff; color: var(--text-color); font-size: 25px; letter-spacing: 7px; }
 .network-pin-keypad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 10px; }
 .network-pin-keypad button { min-height: 60px; border: 0; border-radius: 12px; background: #e4e8ec; color: var(--text-color); font: inherit; font-size: 25px; }
+
+@media (max-height: 560px) {
+  .network-pin-prompt { padding: 8px; }
+  .network-pin-card { width: min(500px, 100%); max-height: calc(100vh - 16px); padding: 16px 20px; border-radius: 16px; }
+  .network-pin-card h2 { font-size: 25px; line-height: 1.12; }
+  .network-pin-card > p { margin-top: 6px; font-size: 16px; line-height: 1.25; }
+  .network-pin-entry { margin-top: 10px; }
+  .network-pin-entry label { font-size: 16px; }
+  .network-pin-entry output { min-height: 26px; padding: 6px 10px; margin-top: 4px; font-size: 20px; }
+  .network-pin-keypad { gap: 6px; margin-top: 6px; }
+  .network-pin-keypad button { min-height: 40px; font-size: 21px; }
+  .network-pin-card footer { gap: 8px; margin-top: 12px; }
+  .network-pin-card footer button { min-height: 42px; padding: 0 18px; font-size: 18px; }
+  .network-pin-card .network-error { margin-top: 8px; padding: 8px; font-size: 15px; }
+}
 
 .network-settings-card {
   width: min(1120px, 100%);
@@ -285,6 +306,11 @@ p {
 
 html:has(.network-settings),
 body:has(.network-settings) {
+  overflow: hidden;
+}
+
+html:has(.network-pin-prompt),
+body:has(.network-pin-prompt) {
   overflow: hidden;
 }
 

@@ -54,8 +54,9 @@ function KioskApp() {
   const [settingsError, setSettingsError] = useState("");
   const [isConnecting, setIsConnecting] = useState(false);
   const [networkPinFlow, setNetworkPinFlow] = useState<"setup" | "verify">();
+  const [networkPinSetupStep, setNetworkPinSetupStep] = useState<"enter" | "confirm">("enter");
   const [networkPin, setNetworkPin] = useState("");
-  const [networkPinConfirmation, setNetworkPinConfirmation] = useState("");
+  const [networkPinInitial, setNetworkPinInitial] = useState("");
   const [networkPinError, setNetworkPinError] = useState("");
   const [networkPinSubmitting, setNetworkPinSubmitting] = useState(false);
   const [networkSession, setNetworkSession] = useState<string>();
@@ -74,7 +75,8 @@ function KioskApp() {
   const requestNetworkSettings = useCallback(async () => {
     setNetworkPinError("");
     setNetworkPin("");
-    setNetworkPinConfirmation("");
+    setNetworkPinInitial("");
+    setNetworkPinSetupStep("enter");
     try {
       const { configured } = await fetchNetworkPinStatus();
       setNetworkPinFlow(configured ? "verify" : "setup");
@@ -188,7 +190,7 @@ function KioskApp() {
       const response = await fetch(`${networkServiceBaseUrl()}${endpoint}`, {
         method: "POST",
         headers: networkHeaders(networkSession, networkSetupRequired, { "content-type": "application/json" }),
-        body: JSON.stringify(networkPinFlow === "setup" ? { pin: networkPin, confirmation: networkPinConfirmation } : { pin: networkPin })
+        body: JSON.stringify(networkPinFlow === "setup" ? { pin: networkPinInitial, confirmation: networkPin } : { pin: networkPin })
       });
       if (!response.ok) throw new Error(await responseError(response));
       const { networkSession: nextNetworkSession } = await response.json() as { networkSession?: string };
@@ -196,15 +198,28 @@ function KioskApp() {
       setNetworkSession(nextNetworkSession);
       setNetworkPinFlow(undefined);
       setNetworkPin("");
-      setNetworkPinConfirmation("");
+      setNetworkPinInitial("");
+      setNetworkPinSetupStep("enter");
       await openNetworkSettings(nextNetworkSession);
     } catch (error) {
       setNetworkPin("");
-      setNetworkPinConfirmation("");
+      setNetworkPinInitial("");
+      setNetworkPinSetupStep("enter");
       setNetworkPinError(errorMessage(error));
     } finally {
       setNetworkPinSubmitting(false);
     }
+  }
+
+  function advanceNetworkPinSetup() {
+    if (networkPin.length < 6 || networkPin.length > 12) {
+      setNetworkPinError("Use a numeric PIN with 6 to 12 digits.");
+      return;
+    }
+    setNetworkPinInitial(networkPin);
+    setNetworkPin("");
+    setNetworkPinError("");
+    setNetworkPinSetupStep("confirm");
   }
 
   return (
@@ -241,39 +256,37 @@ function KioskApp() {
       )}
       {networkPinFlow && <NetworkPinPrompt
         mode={networkPinFlow}
+        setupStep={networkPinSetupStep}
         pin={networkPin}
-        confirmation={networkPinConfirmation}
         error={networkPinError}
         submitting={networkPinSubmitting}
         onPinChange={setNetworkPin}
-        onConfirmationChange={setNetworkPinConfirmation}
-        onSubmit={() => void submitNetworkPin()}
-        onCancel={() => { if (!networkPinSubmitting) { setNetworkPinFlow(undefined); setNetworkPinError(""); } }}
+        onSubmit={() => networkPinFlow === "setup" && networkPinSetupStep === "enter" ? advanceNetworkPinSetup() : void submitNetworkPin()}
+        onCancel={() => { if (!networkPinSubmitting) { setNetworkPinFlow(undefined); setNetworkPin(""); setNetworkPinInitial(""); setNetworkPinSetupStep("enter"); setNetworkPinError(""); } }}
       />}
     </main>
   );
 }
 
-function NetworkPinPrompt({ mode, pin, confirmation, error, submitting, onPinChange, onConfirmationChange, onSubmit, onCancel }: {
+function NetworkPinPrompt({ mode, setupStep, pin, error, submitting, onPinChange, onSubmit, onCancel }: {
   mode: "setup" | "verify";
+  setupStep: "enter" | "confirm";
   pin: string;
-  confirmation: string;
   error: string;
   submitting: boolean;
   onPinChange: (value: string) => void;
-  onConfirmationChange: (value: string) => void;
   onSubmit: () => void;
   onCancel: () => void;
 }) {
   const setup = mode === "setup";
+  const confirmingSetup = setup && setupStep === "confirm";
   return <section className="network-pin-prompt" role="dialog" aria-modal="true" aria-labelledby="network-pin-title">
     <div className="network-pin-card">
-      <h2 id="network-pin-title">{setup ? "Set network settings PIN" : "Enter network settings PIN"}</h2>
-      <p>{setup ? "Choose a private 6 to 12 digit PIN. It stays only on this kiosk." : "Enter the PIN to open network settings."}</p>
-      <PinEntry label={setup ? "New PIN" : "PIN"} value={pin} onChange={onPinChange} />
-      {setup && <PinEntry label="Confirm PIN" value={confirmation} onChange={onConfirmationChange} />}
+      <h2 id="network-pin-title">{setup ? confirmingSetup ? "Confirm network settings PIN" : "Set network settings PIN" : "Enter network settings PIN"}</h2>
+      <p>{setup ? confirmingSetup ? "Step 2 of 2: enter that PIN again to confirm it." : "Step 1 of 2: choose a private 6 to 12 digit PIN. It stays only on this kiosk." : "Enter the PIN to open network settings."}</p>
+      <PinEntry label={confirmingSetup ? "Confirm PIN" : setup ? "New PIN" : "PIN"} value={pin} onChange={onPinChange} />
       {error && <p className="network-error" role="alert">{error}</p>}
-      <footer><button type="button" className="secondary-button" disabled={submitting} onClick={onCancel}>Cancel</button><button type="button" className="primary-button" disabled={submitting} onClick={onSubmit}>{submitting ? "Checking…" : setup ? "Save PIN" : "Open settings"}</button></footer>
+      <footer><button type="button" className="secondary-button" disabled={submitting} onClick={onCancel}>Cancel</button><button type="button" className="primary-button" disabled={submitting} onClick={onSubmit}>{submitting ? "Checking…" : setup && !confirmingSetup ? "Confirm" : setup ? "Save PIN" : "Open settings"}</button></footer>
     </div>
   </section>;
 }
