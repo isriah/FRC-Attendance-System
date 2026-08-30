@@ -3091,12 +3091,12 @@ function Reports({ session, onOpenMember }: { session: DashboardSession; onOpenM
       <section>
         <h2>Meeting Attendance</h2>
         <div className="toolbar wrap">
-          <label>
-            From
+          <label className="field-label">
+            <span>From</span>
             <input value={reportStartDate} onChange={(event) => setReportStartDate(event.target.value)} type="date" />
           </label>
-          <label>
-            To
+          <label className="field-label">
+            <span>To</span>
             <input value={reportEndDate} onChange={(event) => setReportEndDate(event.target.value)} type="date" />
           </label>
           <button onClick={() => {
@@ -3336,12 +3336,12 @@ function LegacyExport({ session }: { session: DashboardSession }) {
     <section>
       <h2>Google Sheets Export</h2>
       <div className="toolbar wrap">
-        <label>
-          From
+        <label className="field-label">
+          <span>From</span>
           <input value={startDate} onChange={(event) => setStartDate(event.target.value)} type="date" />
         </label>
-        <label>
-          To
+        <label className="field-label">
+          <span>To</span>
           <input value={endDate} onChange={(event) => setEndDate(event.target.value)} type="date" />
         </label>
         <button onClick={reload}>Refresh Export</button>
